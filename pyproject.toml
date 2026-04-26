@@ -1,0 +1,29 @@
+[project]
+name = "investment-research-platform"
+version = "0.1.0"
+description = "Personal investment research platform - data pipeline and analysis"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=1.5.2",
+    "ipywidgets>=8.1.8",
+    "jupyter>=1.1.1",
+    "pandas>=3.0.2",
+    "plotly>=6.7.0",
+    "requests>=2.33.1",
+    "simfin>=1.0.1",
+    "yfinance>=1.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["irp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
