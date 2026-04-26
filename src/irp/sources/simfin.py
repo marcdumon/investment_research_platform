@@ -14,9 +14,11 @@ _LOADERS = {
     "income": simfin.load_income,
     "balance": simfin.load_balance,
     "cashflow": simfin.load_cashflow,
+    "industries": simfin.load_industries,
+    "companies": simfin.load_companies,
 }
 
-Statement = Literal["income", "balance", "cashflow"]
+Statement = Literal["income", "balance", "cashflow", "industries", "companies"]
 
 
 @contextmanager
@@ -63,18 +65,23 @@ class SimFinFundamentalsSource(BaseSource):
         simfin.set_api_key(self._api_key)
         simfin.set_data_dir(self._data_dir)
 
+        _reference = self.statement in ("industries", "companies")
         with _pandas_compat():
-            df = _LOADERS[self.statement](
-                variant=self.variant,
-                market=self.market,
-                start_date=start_date,
-                end_date=end_date,
-            )
+            if _reference:
+                df = _LOADERS[self.statement]()
+            else:
+                df = _LOADERS[self.statement](
+                    variant=self.variant,
+                    market=self.market,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
         df = df.reset_index()
         schema = {c: str(df[c].dtype) for c in df.columns}
 
+        name = self.statement if _reference else f"simfin_{self.statement}_{self.variant}"
         return Dataset(
-            name=f"simfin_{self.statement}_{self.variant}",
+            name=name,
             data=df,
             schema=schema,
             source="simfin",
