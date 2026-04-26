@@ -1,2 +1,6 @@
 [simfin]
 data_dir = "data/simfin"
+
+[stooq]
+download_dir = "data/stooq/download"
+data_dir     = "data/stooq/daily"

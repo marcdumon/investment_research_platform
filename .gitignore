@@ -12,3 +12,9 @@ wheels/
 # Secrets
 .env
 
+# Data — keep dirs, ignore contents
+data/simfin/*
+data/stooq/download/*
+data/stooq/daily/*
+!data/**/.gitkeep
+

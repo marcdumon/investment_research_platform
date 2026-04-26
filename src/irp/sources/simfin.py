@@ -1,7 +1,9 @@
 
 import os
+from contextlib import contextmanager
 from typing import Literal
 
+import pandas as pd
 import simfin
 
 import irp.config as _config
@@ -15,6 +17,22 @@ _LOADERS = {
 }
 
 Statement = Literal["income", "balance", "cashflow"]
+
+
+@contextmanager
+def _pandas_compat():
+    """Patch pd.read_csv to drop kwargs removed in pandas 2.0 that simfin still passes."""
+    _orig = pd.read_csv
+
+    def _patched(*args, **kwargs):
+        kwargs.pop("date_parser", None)
+        return _orig(*args, **kwargs)
+
+    pd.read_csv = _patched
+    try:
+        yield
+    finally:
+        pd.read_csv = _orig
 
 
 class SimFinFundamentalsSource(BaseSource):
@@ -40,16 +58,18 @@ class SimFinFundamentalsSource(BaseSource):
         self,
         start_date: str | None = None,
         end_date: str | None = None,
+        **kwargs,
     ) -> Dataset:
         simfin.set_api_key(self._api_key)
         simfin.set_data_dir(self._data_dir)
 
-        df = _LOADERS[self.statement](
-            variant=self.variant,
-            market=self.market,
-            start_date=start_date,
-            end_date=end_date,
-        )
+        with _pandas_compat():
+            df = _LOADERS[self.statement](
+                variant=self.variant,
+                market=self.market,
+                start_date=start_date,
+                end_date=end_date,
+            )
         df = df.reset_index()
         schema = {c: str(df[c].dtype) for c in df.columns}
 
