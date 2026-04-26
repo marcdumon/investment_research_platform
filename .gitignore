@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Secrets
+.env
+
+# Allow project Claude settings despite global gitignore
+!.claude/
+!.claude/settings.json
