@@ -44,6 +44,19 @@ Free, no registration required:
 2. Solve the captcha
 3. Copy the key from the CSV download link shown at the bottom
 
+### Stooq bulk data (optional)
+
+For full historical data without per-ticker API calls, download bulk zips manually:
+
+1. Go to `https://stooq.com/db/h/` (requires captcha per file)
+2. Download the zips you need — recommended:
+   - `d_us_txt.zip` — US equities (NYSE, NASDAQ, etc.)
+   - `d_world_txt.zip` — indices, FX, bonds, crypto, money markets
+3. Place them in `data/stooq/download/`
+
+On first `StooqBulkSource.fetch()` each zip is extracted automatically to `data/stooq/daily/`.
+Subsequent calls read from disk with no network request.
+
 ### Get a SimFin API key
 
 Register at `https://simfin.com` and copy your API key from account settings.
@@ -51,5 +64,7 @@ Register at `https://simfin.com` and copy your API key from account settings.
 ## Running tests
 
 ```bash
-uv run pytest
+uv run irp test          # run all tests
+uv run irp test -v       # verbose
+uv run irp test tests/sources/test_stooq.py  # specific file
 ```

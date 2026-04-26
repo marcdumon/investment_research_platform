@@ -33,7 +33,7 @@ class StooqPriceSource(BaseSource):
         self.end = end
         self._api_key = os.environ["STOOQ_API_KEY"]
 
-    def fetch(self) -> Dataset:
+    def fetch(self, **kwargs) -> Dataset:
         d1 = datetime.strptime(self.start, "%Y-%m-%d").strftime("%Y%m%d")
         d2 = datetime.strptime(self.end, "%Y-%m-%d").strftime("%Y%m%d")
         url = (
