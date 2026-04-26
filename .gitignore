@@ -12,11 +12,8 @@ wheels/
 # Secrets
 .env
 
-# Data — keep dirs, ignore contents
-data/simfin/*
-data/stooq/download/*
-data/stooq/daily/*
-!data/**/.gitkeep
+# Data
+data/
 
 # Allow project Claude settings despite global gitignore
 !.claude/
