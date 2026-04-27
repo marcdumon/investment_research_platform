@@ -12,12 +12,11 @@ load_dotenv()
 
 import duckdb
 import irp.config as _config
-from irp.sources.stooq import StooqPriceSource, normalize_ticker
+from irp.sources.stooq import StooqPriceSource
 from irp.store import Store
 from irp.transforms.cleaner import Cleaner
 
 cfg = _config.load()
-data_dir = Path(cfg["stooq"]["data_dir"])
 db_path = cfg["store"]["db_path"]
 
 store = Store()
@@ -28,29 +27,21 @@ if not store.exists("prices"):
     sys.exit(0)
 
 with duckdb.connect(db_path, read_only=True) as con:
-    known_tickers = sorted(r[0] for r in con.execute("SELECT DISTINCT ticker FROM prices").fetchall())
+    rows = con.execute("SELECT DISTINCT ticker, source_id FROM prices").fetchall()
 
-# Build reverse map db_ticker -> stooq_ticker from local txt files.
-# Needed because the Stooq API requires the full symbol (e.g. "msft.us").
-ticker_map: dict[str, str] = {}
-for txt_path in data_dir.rglob("*.txt"):
-    stooq_t = txt_path.stem
-    db_t = normalize_ticker(stooq_t)
-    ticker_map.setdefault(db_t, stooq_t)
+ticker_map: dict[str, str] = {ticker: source_id for ticker, source_id in rows}
 
 today = datetime.today().strftime("%Y-%m-%d")
 yesterday = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-total = len(known_tickers)
+tickers = sorted(ticker_map)
+total = len(tickers)
 print(f"{total} tickers in DB", flush=True)
 
-updated = skipped = errors_list = 0
+updated = skipped = 0
 errors = []
 
-for i, db_ticker in enumerate(known_tickers, 1):
-    stooq_ticker = ticker_map.get(db_ticker)
-    if stooq_ticker is None:
-        skipped += 1
-        continue
+for i, db_ticker in enumerate(tickers, 1):
+    stooq_ticker = ticker_map[db_ticker]
 
     try:
         max_dt = store.max_date("prices", "date", filter_col="ticker", filter_val=db_ticker)
