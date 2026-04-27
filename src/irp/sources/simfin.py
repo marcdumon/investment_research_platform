@@ -77,11 +77,11 @@ class SimFinFundamentalsSource(BaseSource):
                     end_date=end_date,
                 )
         df = df.reset_index()
+        if not _reference:
+            df.insert(0, "variant", "A" if self.variant == "annual" else "Q")
         schema = {c: str(df[c].dtype) for c in df.columns}
-
-        name = self.statement if _reference else f"simfin_{self.statement}_{self.variant}"
         return Dataset(
-            name=name,
+            name=self.statement,
             data=df,
             schema=schema,
             source="simfin",

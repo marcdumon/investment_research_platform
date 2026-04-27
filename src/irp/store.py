@@ -78,6 +78,41 @@ class Store:
                 dataset.captured_at,
             ])
 
+    def merge(
+        self,
+        dataset: Dataset,
+        *,
+        table: str | None = None,
+        delete_col: str,
+        delete_values: list,
+    ) -> None:
+        """Delete rows where delete_col IN delete_values, then insert dataset rows.
+
+        Used to upsert a slice of a shared table (e.g. quarterly periods)
+        without touching other slices (e.g. annual rows).
+        """
+        tbl = table or dataset.name
+        df = dataset.data
+        placeholders = ",".join(["?" for _ in delete_values])
+        with self._conn() as con:
+            con.register("_df", df)
+            existing = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+            if tbl not in existing:
+                con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM _df WHERE false')
+            con.execute(
+                f'DELETE FROM "{tbl}" WHERE "{delete_col}" IN ({placeholders})',
+                delete_values,
+            )
+            con.execute(f'INSERT INTO "{tbl}" SELECT * FROM _df')
+            con.execute(f"""
+                INSERT OR REPLACE INTO "{_META_TABLE}" VALUES (?, ?, ?, ?)
+            """, [
+                tbl,
+                dataset.source,
+                json.dumps(dataset.schema),
+                dataset.captured_at,
+            ])
+
     def load(self, name: str) -> Dataset:
         """Read a dataset by name (full table)."""
         with self._conn() as con:
