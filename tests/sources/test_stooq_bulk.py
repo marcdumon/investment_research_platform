@@ -40,12 +40,14 @@ def test_fetch_us_ticker(bulk_config):
     assert ds.source == "stooq_bulk"
     assert list(ds.data.columns) == ["ticker", "date", "open", "high", "low", "close", "volume"]
     assert len(ds.data) == 2
+    assert ds.data["ticker"].iloc[0] == "MSFT"
 
 
 def test_fetch_world_ticker(bulk_config):
     ds = StooqBulkSource("^spx").fetch()
     assert ds.name == "^spx"
     assert len(ds.data) == 1
+    assert ds.data["ticker"].iloc[0] == "^SPX"
 
 
 def test_date_normalized(bulk_config):

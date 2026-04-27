@@ -35,6 +35,7 @@ def test_fetch_returns_dataset():
     assert ds.name == "msft.us"
     assert ds.source == "stooq"
     assert list(ds.data.columns) == ["ticker", "date", "open", "high", "low", "close", "volume"]
+    assert ds.data["ticker"].iloc[0] == "MSFT"
     assert len(ds.data) == 2
 
 
@@ -43,3 +44,11 @@ def test_fetch_schema_keys():
         ds = StooqPriceSource("msft.us", "2024-01-01", "2024-01-31").fetch()
 
     ds.validate()
+
+
+def test_normalize_ticker():
+    from irp.sources.stooq import normalize_ticker
+    assert normalize_ticker("msft.us") == "MSFT"
+    assert normalize_ticker("aapl.us") == "AAPL"
+    assert normalize_ticker("eurusd.fx") == "EURUSD"
+    assert normalize_ticker("^spx") == "^SPX"

@@ -22,6 +22,11 @@ PRICE_SCHEMA = {
 _BASE_URL = "https://stooq.com/q/d/l/"
 
 
+def normalize_ticker(ticker: str) -> str:
+    """Strip country suffix and uppercase: 'msft.us' -> 'MSFT', '^spx' -> '^SPX'."""
+    return ticker.split(".")[0].upper()
+
+
 class StooqPriceSource(BaseSource):
     def __init__(self, ticker: str, start: str, end: str) -> None:
         """
@@ -48,7 +53,7 @@ class StooqPriceSource(BaseSource):
         df.columns = [c.lower() for c in df.columns]
         for col in ("open", "high", "low", "close", "volume"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
-        df.insert(0, "ticker", self.ticker)
+        df.insert(0, "ticker", normalize_ticker(self.ticker))
 
         return Dataset(
             name=self.ticker,
