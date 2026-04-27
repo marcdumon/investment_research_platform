@@ -69,3 +69,51 @@ def test_exists(store):
     assert not store.exists("test_prices")
     store.save(make_ds())
     assert store.exists("test_prices")
+
+
+def make_price_ds(ticker: str) -> Dataset:
+    df = pd.DataFrame({
+        "ticker": [ticker, ticker],
+        "date": pd.to_datetime(["2024-01-01", "2024-01-02"]),
+        "close": [100.0, 101.0],
+    })
+    return Dataset(name=ticker, data=df, schema={"ticker": "object", "date": "datetime64[ns]", "close": "float64"}, source="stooq_bulk")
+
+
+def test_save_partition_creates_shared_table(store):
+    ds = make_price_ds("msft.us")
+    store.save(ds, table="prices", partition_col="ticker")
+    assert store.exists("prices")
+    loaded = store.load("prices")
+    assert len(loaded.data) == 2
+    assert set(loaded.data["ticker"]) == {"msft.us"}
+
+
+def test_save_partition_two_tickers(store):
+    store.save(make_price_ds("msft.us"), table="prices", partition_col="ticker")
+    store.save(make_price_ds("aapl.us"), table="prices", partition_col="ticker")
+    loaded = store.load("prices")
+    assert len(loaded.data) == 4
+    assert set(loaded.data["ticker"]) == {"msft.us", "aapl.us"}
+
+
+def test_save_partition_upsert_replaces(store):
+    store.save(make_price_ds("msft.us"), table="prices", partition_col="ticker")
+    store.save(make_price_ds("msft.us"), table="prices", partition_col="ticker")
+    loaded = store.load("prices")
+    assert len(loaded.data) == 2  # not 4
+
+
+def test_exists_partition(store):
+    assert not store.exists_partition("prices", "ticker", "msft.us")
+    store.save(make_price_ds("msft.us"), table="prices", partition_col="ticker")
+    assert store.exists_partition("prices", "ticker", "msft.us")
+    assert not store.exists_partition("prices", "ticker", "aapl.us")
+
+
+def test_load_partition(store):
+    store.save(make_price_ds("msft.us"), table="prices", partition_col="ticker")
+    store.save(make_price_ds("aapl.us"), table="prices", partition_col="ticker")
+    ds = store.load_partition("prices", "ticker", "msft.us")
+    assert len(ds.data) == 2
+    assert set(ds.data["ticker"]) == {"msft.us"}
