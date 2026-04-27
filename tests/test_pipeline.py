@@ -32,6 +32,18 @@ def test_runs_all_steps(store):
     assert store.exists("clean")
 
 
+def test_save_false_skips_store(store):
+    result = (
+        Pipeline(store)
+        .step(DateParser("date"), name="parsed", save=False)
+        .step(Cleaner(), name="clean")
+        .run(make_ds())
+    )
+    assert result.name == "clean"
+    assert not store.exists("parsed")
+    assert store.exists("clean")
+
+
 def test_skips_cached_steps(store):
     pipeline = (
         Pipeline(store)
