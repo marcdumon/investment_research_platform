@@ -69,13 +69,16 @@ class StooqBulkSource(BaseSource):
         path = self._find_file()
 
         df = pd.read_csv(path, header=0)
-        df.columns = [c.strip().lower() for c in df.columns]
+        # strip angle brackets: <DATE> → date, <VOL> → vol
+        df.columns = [c.strip().strip("<>").lower() for c in df.columns]
+        # rename stooq-specific names to standard schema
+        df = df.rename(columns={"vol": "volume"})
+        df = df[["date", "open", "high", "low", "close", "volume"]]
 
         df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d").dt.strftime("%Y-%m-%d")
 
         for col in ("open", "high", "low", "close", "volume"):
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
         if self.start:
             df = df[df["date"] >= self.start]

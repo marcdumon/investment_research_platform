@@ -1,3 +1,6 @@
+[store]
+db_path = "data/irp.duckdb"
+
 [simfin]
 data_dir = "data/simfin"
 
