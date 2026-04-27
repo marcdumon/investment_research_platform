@@ -34,8 +34,10 @@ def test_fetch_returns_dataset():
 
     assert ds.name == "msft.us"
     assert ds.source == "stooq"
-    assert list(ds.data.columns) == ["ticker", "date", "open", "high", "low", "close", "volume"]
+    assert list(ds.data.columns) == ["ticker", "source_id", "source", "date", "open", "high", "low", "close", "volume"]
     assert ds.data["ticker"].iloc[0] == "MSFT"
+    assert ds.data["source_id"].iloc[0] == "msft.us"
+    assert ds.data["source"].iloc[0] == "stooq"
     assert len(ds.data) == 2
 
 

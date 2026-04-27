@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -183,3 +185,66 @@ class Store:
                 [partition_val],
             ).fetchone()[0]
         return count > 0
+
+    def max_date(
+        self,
+        table: str,
+        date_col: str,
+        *,
+        filter_col: str | None = None,
+        filter_val: str | None = None,
+    ) -> str | None:
+        """Return MAX(date_col) from table, optionally filtered by filter_col = filter_val.
+
+        Returns None if the table does not exist or contains no rows.
+        """
+        if not self.exists(table):
+            return None
+        with self._conn() as con:
+            if filter_col is not None:
+                result = con.execute(
+                    f'SELECT MAX("{date_col}") FROM "{table}" WHERE "{filter_col}" = ?',
+                    [filter_val],
+                ).fetchone()[0]
+            else:
+                result = con.execute(
+                    f'SELECT MAX("{date_col}") FROM "{table}"',
+                ).fetchone()[0]
+        return str(result)[:10] if result is not None else None
+
+    def append(
+        self,
+        dataset: Dataset,
+        *,
+        table: str | None = None,
+        conflict_cols: list[str] | None = None,
+    ) -> None:
+        """Insert dataset rows without deleting existing rows.
+
+        Creates the table with the correct schema if it does not exist.
+        If conflict_cols is given, rows whose (col1, col2, ...) already exist are skipped.
+        """
+        tbl = table or dataset.name
+        df = dataset.data
+        with self._conn() as con:
+            con.register("_df", df)
+            existing = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+            if tbl not in existing:
+                con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM _df WHERE false')
+            if conflict_cols:
+                cond = " AND ".join(f'ex."{c}" = _df."{c}"' for c in conflict_cols)
+                con.execute(f"""
+                    INSERT INTO "{tbl}"
+                    SELECT _df.* FROM _df
+                    WHERE NOT EXISTS (SELECT 1 FROM "{tbl}" ex WHERE {cond})
+                """)
+            else:
+                con.execute(f'INSERT INTO "{tbl}" SELECT * FROM _df')
+            con.execute(f"""
+                INSERT OR REPLACE INTO "{_META_TABLE}" VALUES (?, ?, ?, ?)
+            """, [
+                tbl,
+                dataset.source,
+                json.dumps(dataset.schema),
+                dataset.captured_at,
+            ])
