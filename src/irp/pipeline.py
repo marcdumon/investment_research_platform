@@ -10,6 +10,7 @@ class _Step:
     transformer: Transformer
     name: str
     force: bool = False
+    save: bool = True
 
 
 class Pipeline:
@@ -30,14 +31,15 @@ class Pipeline:
         transformer: Transformer,
         name: str,
         force: bool = False,
+        save: bool = True,
     ) -> "Pipeline":
-        self._steps.append(_Step(transformer, name, force or self._force))
+        self._steps.append(_Step(transformer, name, force or self._force, save))
         return self
 
     def run(self, dataset: Dataset) -> Dataset:
         current = dataset
         for step in self._steps:
-            if not step.force and self._store.exists(step.name):
+            if not step.force and step.save and self._store.exists(step.name):
                 current = self._store.load(step.name)
                 continue
             current = step.transformer.transform(current)
@@ -48,7 +50,8 @@ class Pipeline:
                 source=current.source,
                 captured_at=current.captured_at,
             )
-            self._store.save(current)
+            if step.save:
+                self._store.save(current)
         return current
 
     def reset(self, name: str | None = None) -> None:
