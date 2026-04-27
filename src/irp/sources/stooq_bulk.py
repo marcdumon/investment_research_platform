@@ -74,6 +74,7 @@ class StooqBulkSource(BaseSource):
         # rename stooq-specific names to standard schema
         df = df.rename(columns={"vol": "volume"})
         df = df[["date", "open", "high", "low", "close", "volume"]]
+        df.insert(0, "ticker", self.ticker)
 
         df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d").dt.strftime("%Y-%m-%d")
 

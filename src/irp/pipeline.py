@@ -11,6 +11,8 @@ class _Step:
     name: str
     force: bool = False
     save: bool = True
+    table: str | None = None
+    partition_col: str | None = None
 
 
 class Pipeline:
@@ -19,6 +21,9 @@ class Pipeline:
 
     Each step is saved under its name. On re-run, cached steps are
     skipped unless force=True or Pipeline(force=True).
+
+    Use table + partition_col to write into a shared table keyed by a
+    column value (e.g. table="prices", partition_col="ticker").
     """
 
     def __init__(self, store: Store, force: bool = False) -> None:
@@ -32,26 +37,46 @@ class Pipeline:
         name: str,
         force: bool = False,
         save: bool = True,
+        table: str | None = None,
+        partition_col: str | None = None,
     ) -> "Pipeline":
-        self._steps.append(_Step(transformer, name, force or self._force, save))
+        self._steps.append(
+            _Step(transformer, name, force or self._force, save, table, partition_col)
+        )
         return self
 
     def run(self, dataset: Dataset) -> Dataset:
         current = dataset
         for step in self._steps:
-            if not step.force and step.save and self._store.exists(step.name):
-                current = self._store.load(step.name)
+            tbl = step.table or step.name
+
+            if step.save and not step.force:
+                if step.partition_col is not None:
+                    partition_val = current.data[step.partition_col].iloc[0]
+                    cached = self._store.exists_partition(tbl, step.partition_col, partition_val)
+                else:
+                    cached = self._store.exists(tbl)
+            else:
+                cached = False
+
+            if cached:
+                if step.partition_col is not None:
+                    current = self._store.load_partition(tbl, step.partition_col, partition_val)
+                else:
+                    current = self._store.load(tbl)
                 continue
+
             current = step.transformer.transform(current)
             current = Dataset(
-                name=step.name,
+                name=tbl,
                 data=current.data,
                 schema=current.schema,
                 source=current.source,
                 captured_at=current.captured_at,
             )
             if step.save:
-                self._store.save(current)
+                self._store.save(current, table=tbl, partition_col=step.partition_col)
+
         return current
 
     def reset(self, name: str | None = None) -> None:
@@ -60,4 +85,4 @@ class Pipeline:
             self._store.delete(name)
         else:
             for step in self._steps:
-                self._store.delete(step.name)
+                self._store.delete(step.table or step.name)

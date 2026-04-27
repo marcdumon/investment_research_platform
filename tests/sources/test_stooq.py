@@ -34,7 +34,7 @@ def test_fetch_returns_dataset():
 
     assert ds.name == "msft.us"
     assert ds.source == "stooq"
-    assert list(ds.data.columns) == ["date", "open", "high", "low", "close", "volume"]
+    assert list(ds.data.columns) == ["ticker", "date", "open", "high", "low", "close", "volume"]
     assert len(ds.data) == 2
 
 

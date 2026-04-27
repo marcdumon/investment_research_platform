@@ -38,7 +38,7 @@ def test_fetch_us_ticker(bulk_config):
     ds = StooqBulkSource("msft.us").fetch()
     assert ds.name == "msft.us"
     assert ds.source == "stooq_bulk"
-    assert list(ds.data.columns) == ["date", "open", "high", "low", "close", "volume"]
+    assert list(ds.data.columns) == ["ticker", "date", "open", "high", "low", "close", "volume"]
     assert len(ds.data) == 2
 
 
