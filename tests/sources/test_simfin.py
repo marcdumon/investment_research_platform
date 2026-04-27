@@ -7,12 +7,13 @@ from irp.sources.simfin import SimFinFundamentalsSource
 
 _FIXTURE_DF = pd.DataFrame(
     {
+        "SimFinId": [1001, 1002],
         "Ticker": ["MSFT", "AAPL"],
         "Report Date": ["2023-12-31", "2023-09-30"],
         "Revenue": [211915e6, 383285e6],
         "Net Income": [72361e6, 96995e6],
     }
-).set_index(["Ticker", "Report Date"])
+).set_index(["SimFinId", "Ticker", "Report Date"])
 
 _MOCK_LOADERS = {"income": lambda **_: _FIXTURE_DF}
 
@@ -39,6 +40,9 @@ def test_fetch_income_returns_dataset():
 
     assert ds.name == "income"
     assert ds.source == "simfin"
+    assert "source_id" in ds.data.columns
+    assert "source" in ds.data.columns
+    assert ds.data["source"].iloc[0] == "simfin"
     assert "Ticker" in ds.data.columns
     assert "Revenue" in ds.data.columns
     assert len(ds.data) == 2

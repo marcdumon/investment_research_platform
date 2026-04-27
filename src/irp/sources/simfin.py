@@ -77,6 +77,11 @@ class SimFinFundamentalsSource(BaseSource):
                     end_date=end_date,
                 )
         df = df.reset_index()
+        if "SimFinId" in df.columns:
+            df = df.rename(columns={"SimFinId": "source_id"})
+            df.insert(df.columns.get_loc("source_id") + 1, "source", "simfin")
+        else:
+            df.insert(0, "source", "simfin")
         if not _reference:
             df.insert(0, "variant", "A" if self.variant == "annual" else "Q")
         schema = {c: str(df[c].dtype) for c in df.columns}

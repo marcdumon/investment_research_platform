@@ -75,6 +75,8 @@ class StooqBulkSource(BaseSource):
         df = df.rename(columns={"vol": "volume"})
         df = df[["date", "open", "high", "low", "close", "volume"]]
         df.insert(0, "ticker", normalize_ticker(self.ticker))
+        df.insert(1, "source_id", self.ticker)
+        df.insert(2, "source", "stooq")
 
         df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d").dt.strftime("%Y-%m-%d")
 
