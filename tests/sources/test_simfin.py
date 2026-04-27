@@ -37,7 +37,7 @@ def test_fetch_income_returns_dataset():
     ):
         ds = SimFinFundamentalsSource("income").fetch()
 
-    assert ds.name == "simfin_income_annual"
+    assert ds.name == "income"
     assert ds.source == "simfin"
     assert "Ticker" in ds.data.columns
     assert "Revenue" in ds.data.columns
