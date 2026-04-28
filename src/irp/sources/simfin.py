@@ -18,7 +18,7 @@ _LOADERS = {
     "companies": simfin.load_companies,
 }
 
-Statement = Literal["income", "balance", "cashflow", "industries", "companies"]
+SimFinDatasetType = Literal["income", "balance", "cashflow", "industries", "companies"] 
 
 
 @contextmanager
@@ -40,15 +40,15 @@ def _pandas_compat():
 class SimFinFundamentalsSource(BaseSource):
     def __init__(
         self,
-        statement: Statement,
+        statement: SimFinDatasetType,
         variant: str = "annual",
         market: str = "us",
         data_dir: str | None = None,
     ) -> None:
         """
-        statement: one of "income", "balance", "cashflow"
+        statement: one of "income", "balance", "cashflow", "industries", "companies"
         Reads SIMFIN_API_KEY from environment.
-        data_dir defaults to SIMFIN_DATA_DIR env var or "data/simfin".
+        data_dir defaults to config [simfin] data_dir.
         """
         self.statement = statement
         self.variant = variant
@@ -65,9 +65,9 @@ class SimFinFundamentalsSource(BaseSource):
         simfin.set_api_key(self._api_key)
         simfin.set_data_dir(self._data_dir)
 
-        _reference = self.statement in ("industries", "companies")
+        is_reference_table = self.statement in ("industries", "companies")
         with _pandas_compat():
-            if _reference:
+            if is_reference_table:
                 df = _LOADERS[self.statement]()
             else:
                 df = _LOADERS[self.statement](
@@ -82,12 +82,7 @@ class SimFinFundamentalsSource(BaseSource):
             df.insert(df.columns.get_loc("source_id") + 1, "source", "simfin")
         else:
             df.insert(0, "source", "simfin")
-        if not _reference:
+        if not is_reference_table:
             df.insert(0, "variant", "A" if self.variant == "annual" else "Q")
-        schema = {c: str(df[c].dtype) for c in df.columns}
-        return Dataset(
-            name=self.statement,
-            data=df,
-            schema=schema,
-            source="simfin",
-        )
+
+        return Dataset.from_df(df, name=self.statement, source="simfin")

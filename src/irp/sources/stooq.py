@@ -10,10 +10,10 @@ from irp.datasets.dataset import Dataset
 from irp.sources.base import BaseSource
 
 PRICE_SCHEMA = {
-    "ticker": "object",
-    "source_id": "object",
-    "source": "object",
-    "date": "object",
+    "ticker": "str",
+    "source_id": "str",
+    "source": "str",
+    "date": "str",
     "open": "float64",
     "high": "float64",
     "low": "float64",
@@ -54,7 +54,7 @@ class StooqPriceSource(BaseSource):
         df = pd.read_csv(io.StringIO(raw))
         df.columns = [c.lower() for c in df.columns]
         for col in ("open", "high", "low", "close", "volume"):
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
         df.insert(0, "ticker", normalize_ticker(self.ticker))
         df.insert(1, "source_id", self.ticker)
         df.insert(2, "source", "stooq")

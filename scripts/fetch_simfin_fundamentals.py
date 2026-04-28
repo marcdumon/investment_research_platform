@@ -1,33 +1,32 @@
 """Fetch SimFin fundamentals (annual + quarterly) and merge into DuckDB tables."""
 
-import sys
-from pathlib import Path
+import logging
 
 from dotenv import load_dotenv
 
-from irp.sources.simfin import SimFinFundamentalsSource
+from irp._logging import configure
+from irp.sources.simfin import SimFinFundamentalsSource, SimFinDatasetType
 from irp.store import Store
 from irp.transforms.cleaner import Cleaner
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
-
-
 load_dotenv()
 
+configure()
+logger = logging.getLogger(__name__)
 
-STATEMENTS = ["income", "balance", "cashflow"]
-VARIANTS = [("annual", "A"), ("quarterly", "Q")]
+statements: list[SimFinDatasetType] = ["income", "balance", "cashflow"] 
+variants: list[tuple[str, str]]  = [("annual", "A"), ("quarterly", "Q")]
 
 store = Store()
 cleaner = Cleaner()
 
-for variant, code in VARIANTS:
-    for stmt in STATEMENTS:
-        print(f"Fetching {variant} {stmt}...", flush=True)
+for variant, code in variants:
+    for stmt in statements:
+        logger.info("Fetching %s %s...", variant, stmt)
         dataset = SimFinFundamentalsSource(stmt, variant=variant).fetch()
         dataset = cleaner.transform(dataset)
-        print(f"  {len(dataset.data):,} rows — merging into '{stmt}'...", flush=True)
+        logger.info("  %d rows — merging into '%s'...", len(dataset.data), stmt)
         store.merge(dataset, table=stmt, delete_col="variant", delete_values=[code])
-        print(f"  Done.", flush=True)
+        logger.info("  Done.")
 
-print("All fundamentals loaded.")
+logger.info("All fundamentals loaded.")

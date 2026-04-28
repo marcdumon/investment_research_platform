@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 
 from irp.datasets.dataset import Dataset
 from irp.transforms.base import Transformer
@@ -29,9 +28,4 @@ class Cleaner(Transformer):
             hi = df[numeric_cols].quantile(1 - p)
             df[numeric_cols] = df[numeric_cols].clip(lower=lo, upper=hi, axis=1)
 
-        return Dataset(
-            name=dataset.name,
-            data=df.reset_index(drop=True),
-            schema=dataset.schema,
-            source=dataset.source,
-        )
+        return dataset.evolve(data=df.reset_index(drop=True))

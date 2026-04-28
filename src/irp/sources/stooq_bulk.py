@@ -1,3 +1,4 @@
+
 import zipfile
 from pathlib import Path
 
@@ -7,6 +8,26 @@ import irp.config as _config
 from irp.datasets.dataset import Dataset
 from irp.sources.base import BaseSource
 from irp.sources.stooq import PRICE_SCHEMA, normalize_ticker
+
+
+def ensure_zips_extracted(download_dir: Path, data_dir: Path) -> None:
+    """Extract any not-yet-extracted Stooq bulk zips from download_dir into data_dir."""
+    zips = sorted(download_dir.glob("*.zip"))
+    if not zips:
+        raise FileNotFoundError(
+            f"No zip files found in {download_dir}\n"
+            "Download bulk zips from https://stooq.com/db/h/"
+        )
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for zip_path in zips:
+        marker = data_dir / f".extracted_{zip_path.stem}"
+        if marker.exists():
+            continue
+        dest = data_dir / zip_path.stem
+        dest.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(dest)
+        marker.touch()
 
 
 class StooqBulkSource(BaseSource):
@@ -35,27 +56,6 @@ class StooqBulkSource(BaseSource):
         self._download_dir = Path(cfg["download_dir"])
         self._data_dir = Path(cfg["data_dir"])
 
-    def _zips(self) -> list[Path]:
-        zips = sorted(self._download_dir.glob("*.zip"))
-        if not zips:
-            raise FileNotFoundError(
-                f"No zip files found in {self._download_dir}\n"
-                "Download bulk zips from https://stooq.com/db/h/"
-            )
-        return zips
-
-    def _ensure_extracted(self) -> None:
-        self._data_dir.mkdir(parents=True, exist_ok=True)
-        for zip_path in self._zips():
-            marker = self._data_dir / f".extracted_{zip_path.stem}"
-            if marker.exists():
-                continue
-            dest = self._data_dir / zip_path.stem
-            dest.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(zip_path) as zf:
-                zf.extractall(dest)
-            marker.touch()
-
     def _find_file(self) -> Path:
         matches = list(self._data_dir.rglob(f"{self.ticker}.txt"))
         if not matches:
@@ -65,13 +65,11 @@ class StooqBulkSource(BaseSource):
         return matches[0]
 
     def fetch(self, **kwargs) -> Dataset:
-        self._ensure_extracted()
+        ensure_zips_extracted(self._download_dir, self._data_dir)
         path = self._find_file()
 
         df = pd.read_csv(path, header=0)
-        # strip angle brackets: <DATE> → date, <VOL> → vol
         df.columns = [c.strip().strip("<>").lower() for c in df.columns]
-        # rename stooq-specific names to standard schema
         df = df.rename(columns={"vol": "volume"})
         df = df[["date", "open", "high", "low", "close", "volume"]]
         df.insert(0, "ticker", normalize_ticker(self.ticker))
@@ -81,7 +79,7 @@ class StooqBulkSource(BaseSource):
         df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d").dt.strftime("%Y-%m-%d")
 
         for col in ("open", "high", "low", "close", "volume"):
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
 
         if self.start:
             df = df[df["date"] >= self.start]

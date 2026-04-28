@@ -1,3 +1,4 @@
+
 from typing import Literal
 
 from irp.datasets.dataset import Dataset
@@ -24,10 +25,9 @@ class Joiner(Transformer):
             how=self.how,
             suffixes=self.suffixes,
         )
-        schema = {c: str(merged[c].dtype) for c in merged.columns}
-        return Dataset(
+        return dataset.evolve(
             name=f"{dataset.name}+{self.right.name}",
             data=merged,
-            schema=schema,
+            schema={c: str(merged[c].dtype) for c in merged.columns},
             source="join",
         )
