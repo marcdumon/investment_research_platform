@@ -1,18 +1,19 @@
 """Load all Stooq bulk prices into DuckDB (US + world zips)."""
 
-import sys
+import logging
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 import irp.config as _config
-from irp.sources.stooq_bulk import StooqBulkSource
+from irp._logging import configure
+from irp.sources.stooq_bulk import StooqBulkSource, ensure_zips_extracted
 from irp.store import Store
 from irp.transforms.cleaner import Cleaner
+
+load_dotenv()
+configure()
+logger = logging.getLogger(__name__)
 
 cfg = _config.load()["stooq"]
 data_dir = Path(cfg["data_dir"])
@@ -20,15 +21,11 @@ data_dir = Path(cfg["data_dir"])
 store = Store()
 cleaner = Cleaner()
 
-# Trigger extraction of all zips before iterating
-_dummy = StooqBulkSource.__new__(StooqBulkSource)
-_dummy._download_dir = Path(cfg["download_dir"])
-_dummy._data_dir = data_dir
-_dummy._ensure_extracted()
+ensure_zips_extracted(Path(cfg["download_dir"]), data_dir)
 
 tickers = sorted(p.stem for p in data_dir.rglob("*.txt"))
 total = len(tickers)
-print(f"{total} tickers found", flush=True)
+logger.info("%d tickers found", total)
 
 errors = []
 for i, ticker in enumerate(tickers, 1):
@@ -39,8 +36,8 @@ for i, ticker in enumerate(tickers, 1):
     except Exception as e:
         errors.append((ticker, str(e)))
     if i % 500 == 0:
-        print(f"  {i}/{total}", flush=True)
+        logger.info("  %d/%d", i, total)
 
-print(f"Done. {len(errors)} errors.")
+logger.info("Done. %d errors.", len(errors))
 for ticker, msg in errors:
-    print(f"  SKIP {ticker}: {msg}")
+    logger.warning("  SKIP %s: %s", ticker, msg)

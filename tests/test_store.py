@@ -51,7 +51,7 @@ def test_overwrite(store):
 def test_list(store):
     store.save(make_ds("ds_a"))
     store.save(make_ds("ds_b"))
-    assert set(store.list()) == {"ds_a", "ds_b"}
+    assert set(store.datasets()) == {"ds_a", "ds_b"}
 
 
 def test_delete(store):

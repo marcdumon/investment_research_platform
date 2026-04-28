@@ -27,13 +27,6 @@ class CachingTransformer(Transformer):
             return self.store.load(self.name)
 
         result = self.transformer.transform(dataset)
-        # persist under the given name
-        named = Dataset(
-            name=self.name,
-            data=result.data,
-            schema=result.schema,
-            source=result.source,
-            captured_at=result.captured_at,
-        )
+        named = result.evolve(name=self.name)
         self.store.save(named)
         return named

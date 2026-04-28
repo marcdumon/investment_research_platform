@@ -1,20 +1,20 @@
 """Incrementally update prices table using Stooq API (new days only)."""
 
-import sys
+import logging
 from datetime import datetime, timedelta
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
-
-from dotenv import load_dotenv
-
-load_dotenv()
 
 import duckdb
+from dotenv import load_dotenv
+
 import irp.config as _config
+from irp._logging import configure 
 from irp.sources.stooq import StooqPriceSource
 from irp.store import Store
 from irp.transforms.cleaner import Cleaner
+
+load_dotenv()
+configure()
+logger = logging.getLogger(__name__)
 
 cfg = _config.load()
 db_path = cfg["store"]["db_path"]
@@ -23,8 +23,8 @@ store = Store()
 cleaner = Cleaner()
 
 if not store.exists("prices"):
-    print("No 'prices' table found. Run fetch_stooq_prices.py first.")
-    sys.exit(0)
+    logger.error("No 'prices' table found. Run fetch_stooq_prices.py first.")
+    raise SystemExit(1)
 
 with duckdb.connect(db_path, read_only=True) as con:
     rows = con.execute("SELECT DISTINCT ticker, source_id FROM prices").fetchall()
@@ -35,7 +35,7 @@ today = datetime.today().strftime("%Y-%m-%d")
 yesterday = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 tickers = sorted(ticker_map)
 total = len(tickers)
-print(f"{total} tickers in DB", flush=True)
+logger.info("%d tickers in DB", total)
 
 updated = skipped = 0
 errors = []
@@ -66,8 +66,8 @@ for i, db_ticker in enumerate(tickers, 1):
         errors.append((db_ticker, str(e)))
 
     if i % 100 == 0:
-        print(f"  {i}/{total} — updated {updated}, skipped {skipped}", flush=True)
+        logger.info("  %d/%d — updated %d, skipped %d", i, total, updated, skipped)
 
-print(f"Done. {updated} tickers updated, {skipped} skipped, {len(errors)} errors.")
+logger.info("Done. %d tickers updated, %d skipped, %d errors.", updated, skipped, len(errors))
 for ticker, msg in errors:
-    print(f"  ERROR {ticker}: {msg}")
+    logger.warning("  ERROR %s: %s", ticker, msg)

@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
@@ -42,6 +41,19 @@ class Store:
                 )
             """)
 
+    def _ensure_table(self, con: duckdb.DuckDBPyConnection, tbl: str) -> None:
+        existing = {r[0] for r in con.execute("SHOW TABLES").fetchall()}
+        if tbl not in existing:
+            con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM _df WHERE false')
+
+    def _upsert_meta(
+        self, con: duckdb.DuckDBPyConnection, tbl: str, dataset: Dataset
+    ) -> None:
+        con.execute(
+            f'INSERT OR REPLACE INTO "{_META_TABLE}" VALUES (?, ?, ?, ?)',
+            [tbl, dataset.source, json.dumps(dataset.schema), dataset.captured_at],
+        )
+
     def save(
         self,
         dataset: Dataset,
@@ -51,9 +63,8 @@ class Store:
     ) -> None:
         """Write dataset to DuckDB.
 
-        table: override table name (default: dataset.name)
-        partition_col: column to partition on; existing rows for that value
-                       are deleted before insert, enabling upsert per ticker.
+        Without partition_col: CREATE OR REPLACE (full overwrite).
+        With partition_col: delete rows for the partition value in dataset, then insert.
         """
         tbl = table or dataset.name
         df = dataset.data
@@ -61,9 +72,7 @@ class Store:
             con.register("_df", df)
             if partition_col is not None:
                 partition_val = df[partition_col].iloc[0]
-                existing = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
-                if tbl not in existing:
-                    con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM _df WHERE false')
+                self._ensure_table(con, tbl)
                 con.execute(
                     f'DELETE FROM "{tbl}" WHERE "{partition_col}" = ?',
                     [partition_val],
@@ -71,14 +80,7 @@ class Store:
                 con.execute(f'INSERT INTO "{tbl}" SELECT * FROM _df')
             else:
                 con.execute(f'CREATE OR REPLACE TABLE "{tbl}" AS SELECT * FROM _df')
-            con.execute(f"""
-                INSERT OR REPLACE INTO "{_META_TABLE}" VALUES (?, ?, ?, ?)
-            """, [
-                tbl,
-                dataset.source,
-                json.dumps(dataset.schema),
-                dataset.captured_at,
-            ])
+            self._upsert_meta(con, tbl, dataset)
 
     def merge(
         self,
@@ -95,25 +97,16 @@ class Store:
         """
         tbl = table or dataset.name
         df = dataset.data
-        placeholders = ",".join(["?" for _ in delete_values])
+        placeholders = ",".join("?" for _ in delete_values)
         with self._conn() as con:
             con.register("_df", df)
-            existing = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
-            if tbl not in existing:
-                con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM _df WHERE false')
+            self._ensure_table(con, tbl)
             con.execute(
                 f'DELETE FROM "{tbl}" WHERE "{delete_col}" IN ({placeholders})',
                 delete_values,
             )
             con.execute(f'INSERT INTO "{tbl}" SELECT * FROM _df')
-            con.execute(f"""
-                INSERT OR REPLACE INTO "{_META_TABLE}" VALUES (?, ?, ?, ?)
-            """, [
-                tbl,
-                dataset.source,
-                json.dumps(dataset.schema),
-                dataset.captured_at,
-            ])
+            self._upsert_meta(con, tbl, dataset)
 
     def load(self, name: str) -> Dataset:
         """Read a dataset by name (full table)."""
@@ -160,7 +153,7 @@ class Store:
                         else datetime.fromisoformat(str(captured_at)),
         )
 
-    def list(self) -> list[str]:
+    def datasets(self) -> list[str]:
         """Return names of all saved datasets."""
         with self._conn() as con:
             rows = con.execute(f'SELECT name FROM "{_META_TABLE}" ORDER BY name').fetchall()
@@ -173,7 +166,7 @@ class Store:
             con.execute(f'DELETE FROM "{_META_TABLE}" WHERE name = ?', [name])
 
     def exists(self, name: str) -> bool:
-        return name in self.list()
+        return name in self.datasets()
 
     def exists_partition(self, table: str, partition_col: str, partition_val: str) -> bool:
         """Check if rows exist for a partition value in a shared table."""
@@ -194,7 +187,7 @@ class Store:
         filter_col: str | None = None,
         filter_val: str | None = None,
     ) -> str | None:
-        """Return MAX(date_col) from table, optionally filtered by filter_col = filter_val.
+        """Return MAX(date_col) from table, optionally filtered.
 
         Returns None if the table does not exist or contains no rows.
         """
@@ -228,9 +221,7 @@ class Store:
         df = dataset.data
         with self._conn() as con:
             con.register("_df", df)
-            existing = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
-            if tbl not in existing:
-                con.execute(f'CREATE TABLE "{tbl}" AS SELECT * FROM _df WHERE false')
+            self._ensure_table(con, tbl)
             if conflict_cols:
                 cond = " AND ".join(f'ex."{c}" = _df."{c}"' for c in conflict_cols)
                 con.execute(f"""
@@ -240,11 +231,4 @@ class Store:
                 """)
             else:
                 con.execute(f'INSERT INTO "{tbl}" SELECT * FROM _df')
-            con.execute(f"""
-                INSERT OR REPLACE INTO "{_META_TABLE}" VALUES (?, ?, ?, ?)
-            """, [
-                tbl,
-                dataset.source,
-                json.dumps(dataset.schema),
-                dataset.captured_at,
-            ])
+            self._upsert_meta(con, tbl, dataset)

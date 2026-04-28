@@ -1,31 +1,31 @@
 """Force-refresh SimFin fundamentals from the API and merge into DuckDB tables."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
+import logging
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
-from irp.sources.simfin import SimFinFundamentalsSource
+from irp._logging import configure
+from irp.sources.simfin import SimFinFundamentalsSource, SimFinDatasetType
 from irp.store import Store
 from irp.transforms.cleaner import Cleaner
 
-STATEMENTS = ["income", "balance", "cashflow"]
-VARIANTS = [("annual", "A"), ("quarterly", "Q")]
+load_dotenv()
+configure()
+logger = logging.getLogger(__name__)
+
+statements: list[SimFinDatasetType] = ["income", "balance", "cashflow"]
+variants: list[tuple[str, str]] = [("annual", "A"), ("quarterly", "Q")]
 
 store = Store()
 cleaner = Cleaner()
 
-for variant, code in VARIANTS:
-    for stmt in STATEMENTS:
-        print(f"Fetching {variant} {stmt} (force refresh)...", flush=True)
+for variant, code in variants:
+    for stmt in statements:
+        logger.info("Fetching %s %s (force refresh)...", variant, stmt)
         dataset = SimFinFundamentalsSource(stmt, variant=variant).fetch(refresh_days=0)
         dataset = cleaner.transform(dataset)
-        print(f"  {len(dataset.data):,} rows — merging into '{stmt}'...", flush=True)
+        logger.info("  %d rows — merging into '%s'...", len(dataset.data), stmt)
         store.merge(dataset, table=stmt, delete_col="variant", delete_values=[code])
-        print(f"  Done.", flush=True)
+        logger.info("  Done.")
 
-print("All fundamentals updated.")
+logger.info("All fundamentals updated.")

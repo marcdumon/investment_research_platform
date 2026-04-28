@@ -1,3 +1,4 @@
+
 from typing import Literal
 
 import pandas as pd
@@ -30,12 +31,7 @@ class DateAligner(Transformer):
         else:
             aligned = self._align_group(df)
 
-        return Dataset(
-            name=dataset.name,
-            data=aligned.reset_index(drop=True),
-            schema=dataset.schema,
-            source=dataset.source,
-        )
+        return dataset.evolve(data=aligned.reset_index(drop=True))
 
     def _align_group(self, group: pd.DataFrame) -> pd.DataFrame:
         group = group.set_index(self.date_col) if self.date_col in group.columns else group
