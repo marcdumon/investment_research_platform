@@ -32,39 +32,48 @@ data_dir = "data/simfin"
 Secrets go in `.env` (gitignored):
 
 ```
-STOOQ_API_KEY=
 SIMFIN_API_KEY=
 ```
-
-### Get a Stooq API key
-
-Free, no registration required:
-
-1. Go to `https://stooq.com/q/d/?s=msft.us&get_apikey`
-2. Solve the captcha
-3. Copy the key from the CSV download link shown at the bottom
-
-### Stooq bulk data (optional)
-
-For full historical data without per-ticker API calls, download bulk zips manually:
-
-1. Go to `https://stooq.com/db/h/` (requires captcha per file)
-2. Download the zips you need — recommended:
-   - `d_us_txt.zip` — US equities (NYSE, NASDAQ, etc.)
-   - `d_world_txt.zip` — indices, FX, bonds, crypto, money markets
-3. Place them in `data/stooq/download/`
-
-On first `StooqBulkSource.fetch()` each zip is extracted automatically to `data/stooq/daily/`.
-Subsequent calls read from disk with no network request.
 
 ### Get a SimFin API key
 
 Register at `https://simfin.com` and copy your API key from account settings.
 
+## Price data (Stooq)
+
+### Initial load — full history
+
+1. Go to `https://stooq.com/db/h/` (captcha per file)
+2. Download the zips you need:
+   - `d_us_txt.zip` — US equities (NYSE, NASDAQ, etc.)
+   - `d_world_txt.zip` — indices, FX, bonds, crypto, commodities
+3. Place them in `data/stooq/download/`
+4. Run:
+
+```bash
+uv run python scripts/fetch_stooq_prices.py
+```
+
+Each zip is extracted once to `data/stooq/daily/<zip_stem>/`. Re-downloading a zip with a newer mtime triggers automatic re-extraction on the next run.
+
+### Incremental updates
+
+1. Go to `https://stooq.com/db/`
+2. Select the missing date range (up to ~1 month back)
+3. Download — the file is named `data_d.txt`
+4. Save it to `data/stooq/daily/data_d.txt` (overwrite)
+5. Run:
+
+```bash
+uv run python scripts/update_stooq_prices.py
+```
+
+All rows are upserted on `(source_id, date)` — safe to re-run.
+
 ## Running tests
 
 ```bash
-uv run irp test          # run all tests
-uv run irp test -v       # verbose
-uv run irp test tests/sources/test_stooq.py  # specific file
+uv run pytest
+uv run pytest -v
+uv run pytest tests/test_store.py   # specific file
 ```
