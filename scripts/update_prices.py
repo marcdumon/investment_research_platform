@@ -1,20 +1,23 @@
 """Incrementally update prices table using Stooq API (new days only)."""
 
 import logging
+import time
 from datetime import datetime, timedelta
 
 import duckdb
 from dotenv import load_dotenv
 
 import irp.config as _config
-from irp._logging import configure 
-from irp.sources.stooq import StooqPriceSource
+from irp._logging import configure
+from irp.sources.stooq import StooqPriceSource, StooqRateLimitError
 from irp.store import Store
 from irp.transforms.cleaner import Cleaner
 
 load_dotenv()
 configure()
 logger = logging.getLogger(__name__)
+
+_THROTTLE_SECONDS = 0.5
 
 cfg = _config.load()
 db_path = cfg["store"]["db_path"]
@@ -55,6 +58,8 @@ for i, db_ticker in enumerate(tickers, 1):
             continue
 
         ds = StooqPriceSource(stooq_ticker, start=next_day, end=yesterday).fetch()
+        time.sleep(_THROTTLE_SECONDS)
+
         if ds.data.empty:
             skipped += 1
             continue
@@ -62,8 +67,14 @@ for i, db_ticker in enumerate(tickers, 1):
         store.append(cleaner.transform(ds), table="prices", conflict_cols=["ticker", "date"])
         updated += 1
 
+    except StooqRateLimitError as e:
+        logger.error("Rate limit hit at ticker %d/%d (%s): %s", i, total, db_ticker, e)
+        logger.error("Stopping. %d updated, %d skipped before limit.", updated, skipped)
+        break
+
     except Exception as e:
         errors.append((db_ticker, str(e)))
+        logger.warning("ERROR %s: %s", db_ticker, e)
 
     if i % 100 == 0:
         logger.info("  %d/%d — updated %d, skipped %d", i, total, updated, skipped)

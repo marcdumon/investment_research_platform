@@ -1,6 +1,7 @@
 
 import io
 import os
+import urllib.error
 import urllib.request
 from datetime import datetime
 
@@ -22,6 +23,10 @@ PRICE_SCHEMA = {
 }
 
 _BASE_URL = "https://stooq.com/q/d/l/"
+
+
+class StooqRateLimitError(Exception):
+    """Raised when Stooq returns a rate-limit or invalid response."""
 
 
 def normalize_ticker(ticker: str) -> str:
@@ -48,8 +53,22 @@ class StooqPriceSource(BaseSource):
             f"{_BASE_URL}?s={self.ticker}&d1={d1}&d2={d2}"
             f"&i=d&apikey={self._api_key}"
         )
-        with urllib.request.urlopen(url) as resp:
-            raw = resp.read().decode("utf-8")
+        
+        try:
+            with urllib.request.urlopen(url) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 429, 503):
+                raise StooqRateLimitError(
+                    f"Stooq returned HTTP {e.code} for {self.ticker} — daily limit likely exceeded"
+                ) from e
+            raise
+
+        # HTML response = rate limit page
+        if raw.lstrip().startswith("<") or "exceeded" in raw.lower():
+            raise StooqRateLimitError(
+                f"Stooq rate limit response for {self.ticker}: {raw[:120]!r}"
+            )
 
         df = pd.read_csv(io.StringIO(raw))
         df.columns = [c.lower() for c in df.columns]
