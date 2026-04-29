@@ -12,14 +12,17 @@ load_dotenv()
 configure()
 logger = logging.getLogger(__name__)
 
+_PKS: dict[SimFinDatasetType, list[str]] = {
+    "companies": ["source_id"],
+    "industries": ["IndustryId"],
+}
+
 store = Store()
 
-reference_datasets: list[SimFinDatasetType] = ["companies", "industries"]
-
-for ref in reference_datasets:
+for ref, pk in _PKS.items():
     logger.info("Fetching %s...", ref)
     dataset = SimFinFundamentalsSource(ref).fetch()
-    store.save(dataset, table=ref)
+    store.upsert(dataset, table=ref, primary_key=pk)
     logger.info("  %d rows — done.", len(dataset.data))
 
 logger.info("Reference data loaded.")

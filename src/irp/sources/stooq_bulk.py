@@ -21,7 +21,7 @@ def ensure_zips_extracted(download_dir: Path, data_dir: Path) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     for zip_path in zips:
         marker = data_dir / f".extracted_{zip_path.stem}"
-        if marker.exists():
+        if marker.exists() and marker.stat().st_mtime >= zip_path.stat().st_mtime:
             continue
         dest = data_dir / zip_path.stem
         dest.mkdir(parents=True, exist_ok=True)
@@ -66,7 +66,7 @@ class StooqBulkSource(BaseSource):
 
     def fetch(self, **kwargs) -> Dataset:
         ensure_zips_extracted(self._download_dir, self._data_dir)
-        path = self._find_file()
+        path = kwargs.get("file_path") or self._find_file()
 
         df = pd.read_csv(path, header=0)
         df.columns = [c.strip().strip("<>").lower() for c in df.columns]
