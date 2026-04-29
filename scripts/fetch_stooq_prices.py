@@ -31,11 +31,17 @@ cleaner = Cleaner()
 ensure_zips_extracted(Path(cfg["download_dir"]), data_dir)
 
 logger.info("Indexing ticker files...")
-file_index: dict[str, Path] = {p.stem: p for p in data_dir.rglob("*.txt")}
+file_index: dict[str, Path] = {
+    p.stem: p
+    for subdir in data_dir.iterdir()
+    if subdir.is_dir()
+    for p in subdir.rglob("*.txt")
+}
 
 tickers = sorted(file_index)
 total = len(tickers)
 logger.info("%d tickers to load", total)
+
 
 errors: list[tuple[str, str]] = []
 batch: list[pd.DataFrame] = []
