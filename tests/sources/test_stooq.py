@@ -1,10 +1,11 @@
 
 import io
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from irp.sources.stooq import StooqPriceSource
+from irp.sources.stooq import StooqPriceSource, StooqRateLimitError
 
 _FIXTURE_CSV = "Date,Open,High,Low,Close,Volume\n2024-01-02,374.0,376.5,372.0,375.0,20000000\n2024-01-03,375.0,378.0,373.0,377.0,21000000\n"
 
@@ -46,6 +47,27 @@ def test_fetch_schema_keys():
         ds = StooqPriceSource("msft.us", "2024-01-01", "2024-01-31").fetch()
 
     ds.validate()
+
+
+def _mock_urlopen_html(url):
+    resp = MagicMock()
+    resp.read.return_value = b"<html><body>Exceeded the daily number</body></html>"
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def test_rate_limit_html_response_raises():
+    with patch("irp.sources.stooq.urllib.request.urlopen", side_effect=_mock_urlopen_html):
+        with pytest.raises(StooqRateLimitError):
+            StooqPriceSource("msft.us", "2024-01-01", "2024-01-31").fetch()
+
+
+def test_rate_limit_http_403_raises():
+    err = urllib.error.HTTPError(url="", code=403, msg="Forbidden", hdrs=None, fp=None)
+    with patch("irp.sources.stooq.urllib.request.urlopen", side_effect=err):
+        with pytest.raises(StooqRateLimitError):
+            StooqPriceSource("msft.us", "2024-01-01", "2024-01-31").fetch()
 
 
 def test_normalize_ticker():
