@@ -64,7 +64,7 @@ for i, db_ticker in enumerate(tickers, 1):
             skipped += 1
             continue
 
-        store.append(cleaner.transform(ds), table="prices", conflict_cols=["ticker", "date"])
+        store.upsert(cleaner.transform(ds), table="prices", primary_key=["source_id", "date"])
         updated += 1
 
     except StooqRateLimitError as e:

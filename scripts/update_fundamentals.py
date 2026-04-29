@@ -1,4 +1,4 @@
-"""Force-refresh SimFin fundamentals from the API and merge into DuckDB tables."""
+"""Force-refresh SimFin fundamentals from the API and upsert into DuckDB tables."""
 
 import logging
 
@@ -13,19 +13,19 @@ load_dotenv()
 configure()
 logger = logging.getLogger(__name__)
 
+_PK = ["variant", "source_id", "Report Date"]
 statements: list[SimFinDatasetType] = ["income", "balance", "cashflow"]
-variants: list[tuple[str, str]] = [("annual", "A"), ("quarterly", "Q")]
+variants: list[str] = ["annual", "quarterly"]
 
 store = Store()
 cleaner = Cleaner()
 
-for variant, code in variants:
+for variant in variants:
     for stmt in statements:
         logger.info("Fetching %s %s (force refresh)...", variant, stmt)
-        dataset = SimFinFundamentalsSource(stmt, variant=variant).fetch(refresh_days=0)
-        dataset = cleaner.transform(dataset)
-        logger.info("  %d rows — merging into '%s'...", len(dataset.data), stmt)
-        store.merge(dataset, table=stmt, delete_col="variant", delete_values=[code])
+        dataset = cleaner.transform(SimFinFundamentalsSource(stmt, variant=variant).fetch(refresh_days=0))
+        logger.info("  %d rows — upserting into '%s'...", len(dataset.data), stmt)
+        store.upsert(dataset, table=stmt, primary_key=_PK)
         logger.info("  Done.")
 
 logger.info("All fundamentals updated.")
