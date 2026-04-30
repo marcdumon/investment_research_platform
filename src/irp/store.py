@@ -153,9 +153,15 @@ class Store:
 
     def exists(self, name: str) -> bool:
         with self._conn() as con:
-            return con.execute(
+            in_meta = con.execute(
                 f'SELECT 1 FROM "{_META_TABLE}" WHERE name = ?', [name]
             ).fetchone() is not None
+            if not in_meta:
+                return False
+            in_catalog = con.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_name = ?", [name]
+            ).fetchone() is not None
+            return in_catalog
 
     def max_date(
         self,

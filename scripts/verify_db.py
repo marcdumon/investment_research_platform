@@ -1,4 +1,5 @@
 """Print row counts for all tables in the store."""
+from pathlib import Path
 
 import duckdb
 

@@ -1,4 +1,5 @@
 """Force-refresh SimFin fundamentals from the API and upsert into DuckDB tables."""
+from pathlib import Path
 
 import logging
 
@@ -11,7 +12,7 @@ from irp.transforms.cleaner import Cleaner
 
 load_dotenv()
 configure()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(Path(__file__).stem)
 
 _PK = ["variant", "source_id", "Report Date"]
 statements: list[SimFinDatasetType] = ["income", "balance", "cashflow"]
