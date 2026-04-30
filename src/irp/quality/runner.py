@@ -83,45 +83,31 @@ def _enrich_company(findings: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
         return findings
 
     meta = (
-        data["companies"][["Ticker", "Company Name", "ISIN", "CIK"]]
+        data["companies"][["Ticker", "Company Name", "ISIN"]]
         .drop_duplicates("Ticker")
         .rename(columns={"Ticker": "ticker", "Company Name": "company_name", "ISIN": "isin"})
     )
     enriched = findings.merge(meta, on="ticker", how="left")
 
     # insert company_name and isin right after ticker
-    ticker_idx = list(findings.drop(columns=["variant", "report_date"], errors="ignore").columns).index("ticker") + 1
+    ticker_idx = list(enriched.columns).index("ticker") + 1
     for col in ("isin", "company_name"):
         enriched.insert(ticker_idx, col, enriched.pop(col))
 
-    # edgar_url last — links to exact filing type near the report date
-    period_col = enriched.get("period") if "period" in enriched.columns else None
-    variant_col = enriched.get("variant") if "variant" in enriched.columns else None
-    report_date_col = enriched.get("report_date") if "report_date" in enriched.columns else None
+    # edgar_url last — looked up from sec_filings table (run fetch_sec_filings.py to populate)
+    enriched["edgar_url"] = _lookup_edgar_urls(enriched, data)
+    return enriched
 
-    if variant_col is not None:
-        filing_type = variant_col.map({"A": "10-K", "Q": "10-Q"}).fillna("10-K")
-        offset_days = variant_col.map({"A": 120, "Q": 60}).fillna(120).astype(int)
-        date_base = pd.to_datetime(report_date_col)
-    elif period_col is not None:
-        # derive variant from period suffix: ends with 'A' → annual, else quarterly
-        is_annual = period_col.str.endswith("A")
-        filing_type = is_annual.map({True: "10-K", False: "10-Q"})
-        offset_days = is_annual.map({True: 120, False: 60}).astype(int)
-        # extract year from period (first 4 chars) + use Dec 31 as proxy date
-        date_base = pd.to_datetime(period_col.str[:4] + "-12-31", errors="coerce")
-    else:
-        return enriched.drop(columns=["CIK"])
 
-    dateb = (date_base + pd.to_timedelta(offset_days, unit="D")).dt.strftime("%Y%m%d")
-    cik_str = enriched["CIK"].apply(lambda c: f"{int(c):010d}" if pd.notna(c) else None)
+def _lookup_edgar_urls(df: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.Series:
+    """Join edgar_url from the pre-built sec_filings table."""
+    empty = pd.Series([None] * len(df), index=df.index, dtype=object)
+    if "period" not in df.columns or "sec_filings" not in data:
+        return empty
 
-    enriched["edgar_url"] = (
-        "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK="
-        + cik_str.fillna("")
-        + "&type=" + filing_type
-        + "&dateb=" + dateb
-        + "&owner=include&count=5"
-    ).where(cik_str.notna(), other=None)
-
-    return enriched.drop(columns=["CIK"])
+    url_map = (
+        data["sec_filings"][["ticker", "period", "url"]]
+        .drop_duplicates(subset=["ticker", "period"])
+        .set_index(["ticker", "period"])["url"]
+    )
+    return df.apply(lambda r: url_map.get((r["ticker"], r["period"])), axis=1)
