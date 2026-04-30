@@ -39,6 +39,29 @@ SIMFIN_API_KEY=
 
 Register at `https://simfin.com` and copy your API key from account settings.
 
+## Fundamental data workflow
+
+Run scripts in order:
+
+```bash
+# 1. Fetch all historical fundamentals (income, balance, cashflow, companies, industries)
+uv run python scripts/fetch_simfin_fundamentals.py
+
+# 2. Resolve SEC EDGAR filing URLs for every (ticker, period) pair — slow, run once
+#    Subsequent runs only process new periods added since the last run.
+uv run python scripts/fetch_sec_filings.py
+
+# 3. Incremental updates (new quarters / restatements)
+uv run python scripts/update_simfin_fundamentals.py
+uv run python scripts/fetch_sec_filings.py   # picks up new periods only
+```
+
+`fetch_sec_filings.py` writes to the `sec_filings` table `(ticker, period, url)`.
+Already-resolved pairs are skipped on subsequent runs.  To force a full
+re-resolve, drop the `sec_filings` table first.
+The quality notebook and other downstream scripts read URLs from that table — no
+live HTTP calls at analysis time.
+
 ## Price data (Stooq)
 
 ### Initial load — full history
