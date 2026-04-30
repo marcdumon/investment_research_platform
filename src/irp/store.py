@@ -66,14 +66,19 @@ class Store:
         primary_key: list[str],
     ) -> None:
         existing = {r[0] for r in con.execute("SHOW TABLES").fetchall()}
+        df_cols = con.execute("DESCRIBE SELECT * FROM _df").fetchall()
         if tbl not in existing:
-            cols = con.execute("DESCRIBE SELECT * FROM _df").fetchall()
-            col_defs = ", ".join(f'"{c[0]}" {c[1]}' for c in cols)
+            col_defs = ", ".join(f'"{c[0]}" {c[1]}' for c in df_cols)
             pk = ", ".join(f'"{c}"' for c in primary_key)
             con.execute(f'CREATE TABLE "{tbl}" ({col_defs}, PRIMARY KEY ({pk}))')
-        elif self._table_pk(con, tbl) != primary_key:
-            pk = ", ".join(f'"{c}"' for c in primary_key)
-            con.execute(f'ALTER TABLE "{tbl}" ADD PRIMARY KEY ({pk})')
+        else:
+            if self._table_pk(con, tbl) != primary_key:
+                pk = ", ".join(f'"{c}"' for c in primary_key)
+                con.execute(f'ALTER TABLE "{tbl}" ADD PRIMARY KEY ({pk})')
+            existing_cols = {r[0] for r in con.execute(f'DESCRIBE "{tbl}"').fetchall()}
+            for col_name, col_type, *_ in df_cols:
+                if col_name not in existing_cols:
+                    con.execute(f'ALTER TABLE "{tbl}" ADD COLUMN "{col_name}" {col_type}')
 
     def _upsert_meta(
         self,
