@@ -10,6 +10,8 @@ _FIXTURE_DF = pd.DataFrame(
         "SimFinId": [1001, 1002],
         "Ticker": ["MSFT", "AAPL"],
         "Report Date": ["2023-12-31", "2023-09-30"],
+        "Fiscal Year": [2023, 2023],
+        "Fiscal Period": ["FY", "FY"],
         "Revenue": [211915e6, 383285e6],
         "Net Income": [72361e6, 96995e6],
     }

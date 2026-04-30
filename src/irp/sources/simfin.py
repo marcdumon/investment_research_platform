@@ -84,5 +84,8 @@ class SimFinFundamentalsSource(BaseSource):
             df.insert(0, "source", "simfin")
         if not is_reference_table:
             df.insert(0, "variant", "A" if self.variant == "annual" else "Q")
+            # period: "2023A" for annual, "2023Q1" for quarterly
+            period_suffix = df["variant"].map({"A": "A"}).fillna(df["Fiscal Period"])
+            df.insert(1, "period", df["Fiscal Year"].astype(int).astype(str) + period_suffix)
 
         return Dataset.from_df(df, name=self.statement, source="simfin")
