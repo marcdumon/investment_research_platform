@@ -11,10 +11,14 @@ Q4 reports are the same filing as the annual (10-K).  The script resolves
 the URL once for the canonical period (yyyyA) and writes it for both yyyyA
 and yyyyQ4 rows without making a second HTTP request.
 """
+from pathlib import Path
 
 import logging
+import random
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -26,7 +30,7 @@ from irp.store import Store
 
 load_dotenv()
 configure()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(Path(__file__).stem)
 
 store = Store()
 
@@ -42,20 +46,29 @@ if "period" not in income.columns:
 pairs = (
     income[["Ticker", "period"]]
     .drop_duplicates()
-    .dropna(subset=["period"])
+    .dropna(subset=["Ticker", "period"])
     .rename(columns={"Ticker": "ticker"})
     .reset_index(drop=True)
 )
 
+RETRY_ERRORS = False
+
+
+def _exclude_done(pairs: pd.DataFrame, existing: pd.DataFrame, *, retry_errors: bool) -> pd.DataFrame:
+    merged = pairs.merge(existing[["ticker", "period", "url", "error"]], on=["ticker", "period"], how="left")
+    if retry_errors:
+        keep = merged["url"].isna()
+    else:
+        keep = merged["url"].isna() & merged["error"].isna()
+    return merged[keep].drop(columns=["url", "error"], errors="ignore").reset_index(drop=True)
+
+
 if store.exists("sec_filings"):
-    existing = store.load("sec_filings").data[["ticker", "period", "url"]]
-    pairs = (
-        pairs
-        .merge(existing, on=["ticker", "period"], how="left")
-        .query("url.isna()")
-        .drop(columns=["url"])
-        .reset_index(drop=True)
-    )
+    try:
+        existing = store.load("sec_filings").data
+        pairs = _exclude_done(pairs, existing, retry_errors=RETRY_ERRORS)
+    except Exception:
+        logger.warning("sec_filings table missing from DB despite metadata entry — resolving all pairs")
 
 # Q4 == annual 10-K: map yyyyQ4 → yyyyA so we resolve the URL once.
 # Both the original period and the canonical period are written to the table.
@@ -73,23 +86,40 @@ if total == 0:
 
 FLUSH_EVERY = 50
 
+ERROR_PATH = "data/sec_filings_errors.csv"
+
 url_cache: dict[tuple[str, str], str | None] = {}
+error_cache: dict[tuple[str, str], str | None] = {}
 error_rows: list[dict] = []
 total_written = 0
 total_resolved = 0
 
 
+_error_file_initialized = False
+
+
+def _flush_errors(rows: list[dict]) -> None:
+    global _error_file_initialized
+    pd.DataFrame(rows).to_csv(
+        ERROR_PATH,
+        mode="w" if not _error_file_initialized else "a",
+        header=not _error_file_initialized,
+        index=False,
+    )
+    _error_file_initialized = True
+
+
 def _flush(batch: list[tuple[str, str]]) -> None:
     global total_written, total_resolved
     keys = set(batch)
-    mask = [
-        (t, c) in keys
-        for t, c in zip(pairs["ticker"], pairs["canon"])
-    ]
+    mask = pd.Series(
+        [(t, c) in keys for t, c in zip(pairs["ticker"], pairs["canon"])],
+        index=pairs.index,
+    )
     chunk = pairs[mask].copy()
     chunk["url"] = [url_cache[(t, c)] for t, c in zip(chunk["ticker"], chunk["canon"])]
-    rows = chunk[["ticker", "period", "url"]].to_dict("records")
-    df_chunk = pd.DataFrame(rows)
+    chunk["error"] = [error_cache.get((t, c)) for t, c in zip(chunk["ticker"], chunk["canon"])]
+    df_chunk = chunk[["ticker", "period", "url", "error"]]
     dataset = Dataset.from_df(df_chunk, name="sec_filings", source="sec_edgar")
     store.upsert(dataset, table="sec_filings", primary_key=["ticker", "period"])
     total_written += len(df_chunk)
@@ -97,31 +127,79 @@ def _flush(batch: list[tuple[str, str]]) -> None:
     logger.info(f"Flushed {len(df_chunk)} rows to DB.")
 
 
+MAX_WORKERS = 5
+MAX_RETRIES = 6
+MIN_REQUEST_INTERVAL = 0.12  # ~8 req/s across all threads
+
+_rate_lock = threading.Lock()
+_last_request_time = 0.0
+
+
+def _throttle() -> None:
+    global _last_request_time
+    with _rate_lock:
+        now = time.monotonic()
+        wait = MIN_REQUEST_INTERVAL - (now - _last_request_time)
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_time = time.monotonic()
+
+
+# Pre-warm ticker map so all threads share one HTTP call
+from irp.sources.sec_edgar import _load_ticker_map  # noqa: E402
+_load_ticker_map()
+
+
+def _resolve(ticker: str, canon: str) -> tuple[str, str, str | None, str | None, float]:
+    t_start = time.monotonic()
+    for attempt in range(MAX_RETRIES):
+        _throttle()
+        try:
+            url: str | None = sec_filing_url(ticker, canon)
+            return ticker, canon, url, None, time.monotonic() - t_start
+        except Exception as exc:
+            if "429" in str(exc) and attempt < MAX_RETRIES - 1:
+                wait = 2 ** attempt + random.random()
+                logger.info(f"{ticker} {canon} 429 — retry {attempt + 1}/{MAX_RETRIES} in {wait:.1f}s")
+                time.sleep(wait)
+            else:
+                return ticker, canon, None, str(exc), time.monotonic() - t_start
+    return ticker, canon, None, "max retries exceeded", time.monotonic() - t_start
+
+
 pending: list[tuple[str, str]] = []
-for i, (ticker, canon) in enumerate(zip(to_resolve["ticker"], to_resolve["canon"]), 1):
-    t0 = time.monotonic()
-    try:
-        url: str | None = sec_filing_url(ticker, canon)
-        elapsed = time.monotonic() - t0
-        logger.info(f"[{i}/{total}] {ticker} {canon} OK ({elapsed:.2f}s)")
-    except Exception as exc:
-        elapsed = time.monotonic() - t0
-        logger.info(f"[{i}/{total}] {ticker} {canon} SKIP: {exc} ({elapsed:.2f}s)")
-        url = None
-        error_rows.append({"ticker": ticker, "period": canon, "error": str(exc)})
-    url_cache[(ticker, canon)] = url
-    pending.append((ticker, canon))
-    if len(pending) >= FLUSH_EVERY:
-        _flush(pending)
-        pending.clear()
+done = 0
+with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+    futures = {
+        pool.submit(_resolve, ticker, canon): (ticker, canon)
+        for ticker, canon in zip(to_resolve["ticker"], to_resolve["canon"])
+    }
+    _GREEN = "\033[32m"
+    _YELLOW = "\033[33m"
+    _RESET = "\033[0m"
+    for future in as_completed(futures):
+        ticker, canon, url, err, elapsed = future.result()
+        done += 1
+        if err:
+            status = f"{_YELLOW}SKIP: {err}{_RESET}"
+        else:
+            status = f"{_GREEN}OK{_RESET}"
+        logger.info(f"[{done}/{total}] {ticker} {canon} {status} ({elapsed:.2f}s)")
+        url_cache[(ticker, canon)] = url
+        error_cache[(ticker, canon)] = err
+        if err:
+            error_rows.append({"ticker": ticker, "period": canon, "error": err})
+            _flush_errors(error_rows[-1:])
+        pending.append((ticker, canon))
+        if len(pending) >= FLUSH_EVERY:
+            _flush(pending)
+            pending.clear()
 
 if pending:
     _flush(pending)
 
 errors = len(error_rows)
-if error_rows:
-    error_path = "data/sec_filings_errors.csv"
-    pd.DataFrame(error_rows).to_csv(error_path, index=False)
-    logger.info(f"{errors} errors saved to {error_path}")
+if errors:
+    logger.info(f"{errors} errors saved to {ERROR_PATH}")
 
 logger.info(f"Done. {total_written} rows written, {total_resolved} resolved, {errors} failed.")

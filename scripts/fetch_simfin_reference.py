@@ -1,4 +1,5 @@
 """Load SimFin reference data (companies, industries) into DuckDB."""
+from pathlib import Path
 
 import logging
 
@@ -10,7 +11,7 @@ from irp.store import Store
 
 load_dotenv()
 configure()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(Path(__file__).stem)
 
 _PKS: dict[SimFinDatasetType, list[str]] = {
     "companies": ["source_id"],

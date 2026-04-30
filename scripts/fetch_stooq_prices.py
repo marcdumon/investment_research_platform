@@ -17,7 +17,7 @@ from irp.transforms.cleaner import Cleaner
 
 load_dotenv()
 configure()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(Path(__file__).stem)
 
 _BATCH_SIZE = 5000
 _PK = ["source_id", "date"]

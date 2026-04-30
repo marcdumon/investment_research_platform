@@ -15,7 +15,7 @@ from irp.transforms.cleaner import Cleaner
 
 load_dotenv()
 configure()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(Path(__file__).stem)
 
 cfg = _config.load()["stooq"]
 path = Path(cfg["data_dir"]) / "data_d.txt"

@@ -28,7 +28,7 @@ def _ticker_to_cik(ticker: str) -> int:
     mapping = _load_ticker_map()
     ticker = ticker.upper()
     if ticker not in mapping:
-        raise ValueError(f"ticker not found: {ticker}")
+        raise ValueError("ticker not found")
     return mapping[ticker]
 
 
@@ -68,7 +68,7 @@ def _pick_filing(filings: dict, year: int, kind: str, quarter: int | None) -> tu
                     candidates.append((date, acc, doc))
 
     if not candidates:
-        raise ValueError(f"no matching filing (year={year}, kind={kind}, quarter={quarter})")
+        raise ValueError("no matching filing")
 
     candidates.sort(key=lambda x: x[0], reverse=True)
     return candidates[0]
