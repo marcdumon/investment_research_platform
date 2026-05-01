@@ -2,7 +2,7 @@ import logging
 
 import pandas as pd
 
-from irp.quality.base import Finding, Rule, default_registry
+from irp.anomalies.base import Finding, Rule, default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ def run(
                Pass a list to test rules in isolation without touching global state.
     """
     if rules is None:
-        import irp.quality.rules  # noqa: F401 — side-effect: auto-registers rules
+        import irp.anomalies.rules  # noqa: F401 — side-effect: auto-registers rules
         rules = default_registry.rules()
 
     frames: list[pd.DataFrame] = []

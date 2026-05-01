@@ -29,6 +29,9 @@ Non-secret config lives in `config.toml`:
 data_dir = "data/simfin"
 ```
 
+`data/simfin/` will contain `info/` and `cache/` subdirectories created automatically
+by the `simfin` library on each run. They are always empty and can be safely deleted.
+
 Secrets go in `.env` (gitignored):
 
 ```
@@ -59,7 +62,7 @@ uv run python scripts/fetch_sec_filings.py   # picks up new periods only
 `fetch_sec_filings.py` writes to the `sec_filings` table `(ticker, period, url)`.
 Already-resolved pairs are skipped on subsequent runs.  To force a full
 re-resolve, drop the `sec_filings` table first.
-The quality notebook and other downstream scripts read URLs from that table — no
+The anomaly notebook and other downstream scripts read URLs from that table — no
 live HTTP calls at analysis time.
 
 ## Price data (Stooq)
