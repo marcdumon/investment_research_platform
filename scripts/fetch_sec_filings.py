@@ -44,10 +44,11 @@ if "period" not in income.columns:
     sys.exit(1)
 
 pairs = (
-    income[["Ticker", "period"]]
+    income[["Ticker", "period", "Publish Date"]]
     .drop_duplicates()
     .dropna(subset=["Ticker", "period"])
-    .rename(columns={"Ticker": "ticker"})
+    .rename(columns={"Ticker": "ticker", "Publish Date": "publish_date"})
+    .assign(publish_date=lambda df: df["publish_date"].astype(str).str[:10])
     .reset_index(drop=True)
 )
 
@@ -76,8 +77,12 @@ pairs["canon"] = pairs["period"].apply(
     lambda p: p[:4] + "A" if p.endswith("Q4") else p
 )
 
-# Resolve unique (ticker, canonical_period) only
-to_resolve = pairs[["ticker", "canon"]].drop_duplicates().reset_index(drop=True)
+# Resolve unique (ticker, canonical_period) — use publish_date from annual row when available
+to_resolve = (
+    pairs.groupby(["ticker", "canon"], as_index=False)
+    .agg(publish_date=("publish_date", "first"))
+    .reset_index(drop=True)
+)
 total = len(to_resolve)
 logger.info(f"{total} unique (ticker, canonical_period) pairs to resolve")
 if total == 0:
@@ -127,7 +132,7 @@ def _flush(batch: list[tuple[str, str]]) -> None:
     logger.info(f"Flushed {len(df_chunk)} rows to DB.")
 
 
-MAX_WORKERS = 5
+MAX_WORKERS = 6
 MAX_RETRIES = 6
 MIN_REQUEST_INTERVAL = 0.12  # ~8 req/s across all threads
 
@@ -150,12 +155,12 @@ from irp.sources.sec_edgar import _load_ticker_map  # noqa: E402
 _load_ticker_map()
 
 
-def _resolve(ticker: str, canon: str) -> tuple[str, str, str | None, str | None, float]:
+def _resolve(ticker: str, canon: str, publish_date: str | None) -> tuple[str, str, str | None, str | None, float]:
     t_start = time.monotonic()
     for attempt in range(MAX_RETRIES):
         _throttle()
         try:
-            url: str | None = sec_filing_url(ticker, canon)
+            url: str | None = sec_filing_url(ticker, canon, publish_date)
             return ticker, canon, url, None, time.monotonic() - t_start
         except Exception as exc:
             if "429" in str(exc) and attempt < MAX_RETRIES - 1:
@@ -171,8 +176,10 @@ pending: list[tuple[str, str]] = []
 done = 0
 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
     futures = {
-        pool.submit(_resolve, ticker, canon): (ticker, canon)
-        for ticker, canon in zip(to_resolve["ticker"], to_resolve["canon"])
+        pool.submit(_resolve, ticker, canon, publish_date): (ticker, canon)
+        for ticker, canon, publish_date in zip(
+            to_resolve["ticker"], to_resolve["canon"], to_resolve["publish_date"]
+        )
     }
     _GREEN = "\033[32m"
     _YELLOW = "\033[33m"
