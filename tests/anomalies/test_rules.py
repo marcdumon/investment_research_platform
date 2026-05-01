@@ -6,7 +6,7 @@ from irp.anomalies.rules.accounting import AccountingIdentity
 from irp.anomalies.rules.impossible import ImpossibleValues
 from irp.anomalies.rules.jumps import SuddenJumps
 from irp.anomalies.rules.outliers import SectorOutliers
-from irp.anomalies.rules.accounting import QuarterlyConsistency
+
 from irp.anomalies.runner import run
 
 
@@ -238,7 +238,7 @@ def _quarterly_income(
 
 
 class TestQuarterlyConsistency:
-    rule = QuarterlyConsistency()
+    rule = AccountingIdentity()
 
     def test_consistent_q4_no_finding(self):
         df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=100)
@@ -249,7 +249,7 @@ class TestQuarterlyConsistency:
         df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=5)
         result = self.rule.check({"income": df})
         assert len(result) == 1
-        assert result.iloc[0]["rule"] == "quarterly_consistency"
+        assert result.iloc[0]["rule"] == "accounting_identity"
         assert result.iloc[0]["column"] == "Revenue"
         assert result.iloc[0]["value"] > 0.01
 
@@ -273,7 +273,7 @@ class TestQuarterlyConsistency:
         assert list(result.columns) == Finding.columns()
 
     def test_custom_tolerance(self):
-        strict = QuarterlyConsistency(tolerance=0.001)
+        strict = AccountingIdentity(tolerance=0.001)
         # 0.5% discrepancy → flagged with strict tolerance
         df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=99.5)
         assert not strict.check({"income": df}).empty
