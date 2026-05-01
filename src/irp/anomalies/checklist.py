@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-_PATH = Path(__file__).parents[3] / "data" / "data_quality" / "anomaly_watchlist.toml"
+_PATH = Path(__file__).parents[3] / "data" / "data_quality" / "anomaly_checklist.toml"
 _KEYS = ["ticker", "period", "rule", "column"]
 _COLS = _KEYS + ["note"]
 
