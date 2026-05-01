@@ -66,13 +66,14 @@ _FLOW_CHECKS: list[tuple[str, str]] = [
 
 @register
 class QuarterlyConsistency(Rule):
-    """Q4 = Annual - Q1 - Q2 - Q3 for income statement flow columns.
+    """Annual = Q1 + Q2 + Q3 + Q4 for income statement flow columns.
 
     Uses SimFin's Fiscal Period column so fiscal-year-end date doesn't matter.
+    Flags the Annual row when the sum of quarters diverges beyond tolerance.
     """
 
     name = "quarterly_consistency"
-    description = "Q4 = Annual - Q1 - Q2 - Q3 for income statement flow columns"
+    description = "Annual = Q1 + Q2 + Q3 + Q4 for income statement flow columns"
     severity = Severity.ERROR
     tolerance: float = 0.01
 
@@ -95,7 +96,7 @@ class QuarterlyConsistency(Rule):
         annual = (
             df[df["variant"] == "A"]
             .rename(columns={col: "annual"})
-            [["Ticker", "Fiscal Year", "annual"]]
+            [["Ticker", "Fiscal Year", "annual", "report_date"]]
         )
 
         qtrs = df[df["variant"] == "Q"].copy()
@@ -117,37 +118,31 @@ class QuarterlyConsistency(Rule):
         merged = wide.merge(annual, on=["Ticker", "Fiscal Year"], how="inner")
         merged = merged.dropna(subset=["Q1", "Q2", "Q3", "Q4", "annual"])
 
-        merged["derived"] = merged["annual"] - merged["Q1"] - merged["Q2"] - merged["Q3"]
+        merged["sum_qtrs"] = merged["Q1"] + merged["Q2"] + merged["Q3"] + merged["Q4"]
         denom = merged["annual"].abs().replace(0, float("nan"))
-        merged["rel_err"] = (merged["Q4"] - merged["derived"]).abs() / denom
+        merged["rel_err"] = (merged["annual"] - merged["sum_qtrs"]).abs() / denom
 
         bad = merged[merged["rel_err"] > self.tolerance].copy()
         if bad.empty:
             return Finding.empty_df()
 
-        q4_meta = (
-            qtrs[qtrs["qtr"] == "Q4"][["Ticker", "Fiscal Year", "report_date"]]
-            .drop_duplicates(["Ticker", "Fiscal Year"])
-        )
-        bad = bad.merge(q4_meta, on=["Ticker", "Fiscal Year"], how="left")
-
-        derived_str = bad["derived"].round(0).astype("Int64").astype(str)
-        reported_str = bad["Q4"].round(0).astype("Int64").astype(str)
-        pct_str = (bad["rel_err"] * 100).round(1).astype(str)
+        annual_str  = bad["annual"].round(0).astype("Int64").astype(str)
+        sum_str     = bad["sum_qtrs"].round(0).astype("Int64").astype(str)
+        pct_str     = (bad["rel_err"] * 100).round(1).astype(str)
 
         return pd.DataFrame(
             {
                 "table": table_name,
                 "ticker": bad["Ticker"].values,
-                "variant": "Q",
+                "variant": "A",
                 "report_date": bad["report_date"].fillna("").values,
                 "column": col,
                 "value": bad["rel_err"].round(4).values,
                 "rule": self.name,
                 "detail": (
-                    "derived Q4=" + derived_str
-                    + ", reported=" + reported_str
-                    + " (" + pct_str + "% discrepancy)"
+                    "Annual=" + annual_str
+                    + ", Q1+Q2+Q3+Q4=" + sum_str
+                    + ", rel_err=" + pct_str + "%"
                 ).values,
                 "severity": self.severity,
             }
