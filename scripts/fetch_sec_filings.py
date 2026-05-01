@@ -91,7 +91,7 @@ if total == 0:
 
 FLUSH_EVERY = 50
 
-ERROR_PATH = "data/sec_filings_errors.csv"
+ERROR_PATH = "data/data_quality/sec_filings_errors.csv"
 
 url_cache: dict[tuple[str, str], str | None] = {}
 error_cache: dict[tuple[str, str], str | None] = {}
