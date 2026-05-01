@@ -1,12 +1,12 @@
 import pandas as pd
 import pytest
 
-from irp.quality.base import Finding, Registry, Severity
-from irp.quality.rules.accounting import AccountingIdentity
-from irp.quality.rules.impossible import ImpossibleValues
-from irp.quality.rules.jumps import SuddenJumps
-from irp.quality.rules.outliers import SectorOutliers
-from irp.quality.runner import run
+from irp.anomalies.base import Finding, Registry, Severity
+from irp.anomalies.rules.accounting import AccountingIdentity
+from irp.anomalies.rules.impossible import ImpossibleValues
+from irp.anomalies.rules.jumps import SuddenJumps
+from irp.anomalies.rules.outliers import SectorOutliers
+from irp.anomalies.runner import run
 
 
 def _balance(**overrides) -> pd.DataFrame:

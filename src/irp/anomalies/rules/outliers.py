@@ -2,7 +2,7 @@ from typing import ClassVar
 
 import pandas as pd
 
-from irp.quality.base import Finding, Rule, Severity, register
+from irp.anomalies.base import Finding, Rule, Severity, register
 
 _DEFAULT_METRICS = ["Revenue", "Net Income", "Operating Income (Loss)"]
 

@@ -3,7 +3,7 @@ from typing import ClassVar
 
 import pandas as pd
 
-from irp.quality.base import Finding, Rule, Severity, register
+from irp.anomalies.base import Finding, Rule, Severity, register
 
 # Extend this list to add new impossible-value checks — no other changes needed.
 _Check = tuple[str, str, Callable[[pd.Series], pd.Series], str]
