@@ -6,6 +6,7 @@ from irp.anomalies.rules.accounting import AccountingIdentity
 from irp.anomalies.rules.impossible import ImpossibleValues
 from irp.anomalies.rules.jumps import SuddenJumps
 from irp.anomalies.rules.outliers import SectorOutliers
+from irp.anomalies.rules.quarterly import QuarterlyConsistency
 from irp.anomalies.runner import run
 
 
@@ -101,6 +102,17 @@ class TestImpossibleValues:
         result = self.rule.check({"income": df})
         assert not (result["column"] == "Revenue").any() if not result.empty else True
 
+    def test_negative_revenue_q4_not_flagged(self):
+        # Q4 Revenue is excluded — caught by quarterly_consistency instead
+        df = _income(Revenue=-100.0, variant="Q", **{"Fiscal Period": "Q4"})
+        result = self.rule.check({"income": df})
+        assert result.empty or not (result["column"] == "Revenue").any()
+
+    def test_negative_revenue_q1_still_flagged(self):
+        df = _income(Revenue=-100.0, variant="Q", **{"Fiscal Period": "Q1"})
+        result = self.rule.check({"income": df})
+        assert (result["column"] == "Revenue").any()
+
 
 # ---------------------------------------------------------------------------
 # SuddenJumps
@@ -179,6 +191,110 @@ class TestSectorOutliers:
         tight = SectorOutliers(iqr_fence=0.5)
         data  = self._build([100.0, 105.0, 95.0, 102.0, 98.0], outlier=130.0)
         assert not tight.check(data).empty
+
+
+# ---------------------------------------------------------------------------
+# QuarterlyConsistency
+# ---------------------------------------------------------------------------
+
+def _quarterly_income(
+    ticker: str = "AAA",
+    fiscal_year: int = 2023,
+    annual: float = 400.0,
+    q1: float = 100.0,
+    q2: float = 100.0,
+    q3: float = 100.0,
+    q4: float = 100.0,
+) -> pd.DataFrame:
+    """Build an income DataFrame with one annual row + four quarterly rows."""
+    rows = [
+        {
+            "Ticker": ticker, "Fiscal Year": fiscal_year,
+            "Fiscal Period": "FY", "variant": "A",
+            "Report Date": f"{fiscal_year}-12-31", "Revenue": annual,
+        },
+        {
+            "Ticker": ticker, "Fiscal Year": fiscal_year,
+            "Fiscal Period": "Q1", "variant": "Q",
+            "Report Date": f"{fiscal_year}-03-31", "Revenue": q1,
+        },
+        {
+            "Ticker": ticker, "Fiscal Year": fiscal_year,
+            "Fiscal Period": "Q2", "variant": "Q",
+            "Report Date": f"{fiscal_year}-06-30", "Revenue": q2,
+        },
+        {
+            "Ticker": ticker, "Fiscal Year": fiscal_year,
+            "Fiscal Period": "Q3", "variant": "Q",
+            "Report Date": f"{fiscal_year}-09-30", "Revenue": q3,
+        },
+        {
+            "Ticker": ticker, "Fiscal Year": fiscal_year,
+            "Fiscal Period": "Q4", "variant": "Q",
+            "Report Date": f"{fiscal_year}-12-31", "Revenue": q4,
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+class TestQuarterlyConsistency:
+    rule = QuarterlyConsistency()
+
+    def test_consistent_q4_no_finding(self):
+        df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=100)
+        assert self.rule.check({"income": df}).empty
+
+    def test_mismatched_q4_flagged(self):
+        # derived Q4 = 400 - 100 - 100 - 100 = 100, reported = 5 → 95% error
+        df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=5)
+        result = self.rule.check({"income": df})
+        assert len(result) == 1
+        assert result.iloc[0]["rule"] == "quarterly_consistency"
+        assert result.iloc[0]["column"] == "Revenue"
+        assert result.iloc[0]["value"] > 0.01
+
+    def test_within_tolerance_no_finding(self):
+        # 0.5% discrepancy < 1% tolerance
+        df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=99.5)
+        assert self.rule.check({"income": df}).empty
+
+    def test_missing_quarter_skipped(self):
+        # only Q1-Q3 and Annual — no Q4 row
+        df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=100)
+        df = df[df["Fiscal Period"] != "Q4"]
+        assert self.rule.check({"income": df}).empty
+
+    def test_missing_table_returns_empty(self):
+        assert self.rule.check({}).empty
+
+    def test_result_has_finding_schema(self):
+        df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=5)
+        result = self.rule.check({"income": df})
+        assert list(result.columns) == Finding.columns()
+
+    def test_custom_tolerance(self):
+        strict = QuarterlyConsistency(tolerance=0.001)
+        # 0.5% discrepancy → flagged with strict tolerance
+        df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=99.5)
+        assert not strict.check({"income": df}).empty
+
+    def test_non_december_fiscal_year(self):
+        # Apple-like: fiscal year ends September, Q4 = Jul-Sep
+        rows = [
+            {"Ticker": "AAPL", "Fiscal Year": 2023, "Fiscal Period": "FY",
+             "variant": "A", "Report Date": "2023-09-30", "Revenue": 400.0},
+            {"Ticker": "AAPL", "Fiscal Year": 2023, "Fiscal Period": "Q1",
+             "variant": "Q", "Report Date": "2022-12-31", "Revenue": 100.0},
+            {"Ticker": "AAPL", "Fiscal Year": 2023, "Fiscal Period": "Q2",
+             "variant": "Q", "Report Date": "2023-03-31", "Revenue": 100.0},
+            {"Ticker": "AAPL", "Fiscal Year": 2023, "Fiscal Period": "Q3",
+             "variant": "Q", "Report Date": "2023-06-30", "Revenue": 100.0},
+            {"Ticker": "AAPL", "Fiscal Year": 2023, "Fiscal Period": "Q4",
+             "variant": "Q", "Report Date": "2023-09-30", "Revenue": 50.0},  # wrong
+        ]
+        df = pd.DataFrame(rows)
+        result = self.rule.check({"income": df})
+        assert len(result) == 1  # flagged correctly despite non-Dec fiscal year
 
 
 # ---------------------------------------------------------------------------

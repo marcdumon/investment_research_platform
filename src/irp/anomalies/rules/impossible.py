@@ -5,14 +5,30 @@ import pandas as pd
 
 from irp.anomalies.base import Finding, Rule, Severity, register
 
-# Extend this list to add new impossible-value checks — no other changes needed.
-_Check = tuple[str, str, Callable[[pd.Series], pd.Series], str]
+# (table, column, predicate, label, exclude_fn)
+# exclude_fn(df) -> boolean Series; matching rows are excluded from findings.
+# Use None for no exclusion.
+_Check = tuple[
+    str,
+    str,
+    Callable[[pd.Series], pd.Series],
+    str,
+    Callable[[pd.DataFrame], pd.Series] | None,
+]
 
 _DEFAULT_CHECKS: list[_Check] = [
-    ("income", "Revenue", lambda s: s < 0, "Revenue is negative"),
-    ("income", "Shares (Diluted)", lambda s: s <= 0, "Diluted shares non-positive"),
-    ("income", "Shares (Basic)", lambda s: s <= 0, "Basic shares non-positive"),
-    ("balance", "Total Assets", lambda s: s <= 0, "Total Assets non-positive"),
+    # Q4 Revenue is excluded: Q4 = Annual - Q1 - Q2 - Q3 is verified by
+    # the quarterly_consistency rule instead (unverifiable via 10-Q filing).
+    (
+        "income",
+        "Revenue",
+        lambda s: s < 0,
+        "Revenue is negative",
+        lambda df: df["Fiscal Period"].eq("Q4"),
+    ),
+    ("income", "Shares (Diluted)", lambda s: s <= 0, "Diluted shares non-positive", None),
+    ("income", "Shares (Basic)", lambda s: s <= 0, "Basic shares non-positive", None),
+    ("balance", "Total Assets", lambda s: s <= 0, "Total Assets non-positive", None),
 ]
 
 
@@ -27,11 +43,13 @@ class ImpossibleValues(Rule):
     def check(self, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         frames: list[pd.DataFrame] = []
 
-        for table, column, predicate, label in self.checks:
+        for table, column, predicate, label, exclude_fn in self.checks:
             if table not in data or column not in data[table].columns:
                 continue
             df = data[table].dropna(subset=[column])
             mask = predicate(df[column])
+            if exclude_fn is not None and "Fiscal Period" in df.columns:
+                mask = mask & ~exclude_fn(df)
             bad = df[mask]
             if bad.empty:
                 continue
