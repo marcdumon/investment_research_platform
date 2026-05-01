@@ -6,7 +6,7 @@ from irp.anomalies.rules.accounting import AccountingIdentity
 from irp.anomalies.rules.impossible import ImpossibleValues
 from irp.anomalies.rules.jumps import SuddenJumps
 from irp.anomalies.rules.outliers import SectorOutliers
-from irp.anomalies.rules.quarterly import QuarterlyConsistency
+from irp.anomalies.rules.accounting import QuarterlyConsistency
 from irp.anomalies.runner import run
 
 
