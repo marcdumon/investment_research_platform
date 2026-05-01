@@ -4,16 +4,37 @@ import pandas as pd
 
 from irp.anomalies.base import Finding, Rule, Severity, register
 
+# Income statement flow items where Annual = Q1 + Q2 + Q3 + Q4
+_QUARTERLY_CHECKS: list[tuple[str, str]] = [
+    ("income", "Revenue"),
+]
+
 
 @register
 class AccountingIdentity(Rule):
+    """Accounting identity checks:
+    - Balance sheet:    Assets = Liabilities + Equity
+    - Income statement: Annual = Q1 + Q2 + Q3 + Q4  (flow columns)
+    """
+
     name = "accounting_identity"
-    description = "Total Assets = Total Liabilities + Total Equity (within tolerance)"
+    description = "Accounting identities: balance sheet and quarterly aggregation"
     severity = Severity.ERROR
 
     tolerance: ClassVar[float] = 0.01  # 1% relative error
 
     def check(self, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
+        frames = []
+        result = self._check_balance(data)
+        if not result.empty:
+            frames.append(result)
+        for table_name, col in _QUARTERLY_CHECKS:
+            result = self._check_quarterly(data, table_name, col)
+            if not result.empty:
+                frames.append(result)
+        return pd.concat(frames, ignore_index=True) if frames else Finding.empty_df()
+
+    def _check_balance(self, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
         if "balance" not in data:
             return Finding.empty_df()
 
@@ -42,7 +63,6 @@ class AccountingIdentity(Rule):
             + (bad_rel * 100).round(2).astype(str)
             + "%"
         )
-
         return pd.DataFrame(
             {
                 "table": "balance",
@@ -57,38 +77,13 @@ class AccountingIdentity(Rule):
             }
         )
 
+    def _check_quarterly(
+        self, data: dict[str, pd.DataFrame], table_name: str, col: str
+    ) -> pd.DataFrame:
+        tbl = data.get(table_name)
+        if tbl is None or col not in tbl.columns:
+            return Finding.empty_df()
 
-# Income statement flow items (additive across fiscal quarters: Q1+Q2+Q3+Q4 = Annual)
-_FLOW_CHECKS: list[tuple[str, str]] = [
-    ("income", "Revenue"),
-]
-
-
-@register
-class QuarterlyConsistency(Rule):
-    """Annual = Q1 + Q2 + Q3 + Q4 for income statement flow columns.
-
-    Uses SimFin's Fiscal Period column so fiscal-year-end date doesn't matter.
-    Flags the Annual row when the sum of quarters diverges beyond tolerance.
-    """
-
-    name = "quarterly_consistency"
-    description = "Annual = Q1 + Q2 + Q3 + Q4 for income statement flow columns"
-    severity = Severity.ERROR
-    tolerance: float = 0.01
-
-    def check(self, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-        frames = []
-        for table_name, col in _FLOW_CHECKS:
-            tbl = data.get(table_name)
-            if tbl is None or col not in tbl.columns:
-                continue
-            result = self._check_column(tbl, table_name, col)
-            if not result.empty:
-                frames.append(result)
-        return pd.concat(frames, ignore_index=True) if frames else Finding.empty_df()
-
-    def _check_column(self, tbl: pd.DataFrame, table_name: str, col: str) -> pd.DataFrame:
         needed = ["Ticker", "Fiscal Year", "Fiscal Period", "variant", "Report Date", col]
         df = tbl[[c for c in needed if c in tbl.columns]].copy().dropna(subset=[col])
         df["report_date"] = df["Report Date"].astype(str).str[:10]
@@ -98,7 +93,6 @@ class QuarterlyConsistency(Rule):
             .rename(columns={col: "annual"})
             [["Ticker", "Fiscal Year", "annual", "report_date"]]
         )
-
         qtrs = df[df["variant"] == "Q"].copy()
         qtrs["qtr"] = qtrs["Fiscal Period"]  # "Q1"…"Q4" — fiscal, not calendar
 
@@ -126,9 +120,9 @@ class QuarterlyConsistency(Rule):
         if bad.empty:
             return Finding.empty_df()
 
-        annual_str  = bad["annual"].round(0).astype("Int64").astype(str)
-        sum_str     = bad["sum_qtrs"].round(0).astype("Int64").astype(str)
-        pct_str     = (bad["rel_err"] * 100).round(1).astype(str)
+        annual_str = bad["annual"].round(0).astype("Int64").astype(str)
+        sum_str    = bad["sum_qtrs"].round(0).astype("Int64").astype(str)
+        pct_str    = (bad["rel_err"] * 100).round(1).astype(str)
 
         return pd.DataFrame(
             {
