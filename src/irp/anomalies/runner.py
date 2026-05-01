@@ -72,10 +72,11 @@ def _replace_with_period(findings: pd.DataFrame, data: dict[str, pd.DataFrame]) 
     )
     enriched = findings.merge(lookup, on=["table", "ticker", "variant", "report_date"], how="left")
 
-    # place period where variant was, then drop variant + report_date
+    # place period where variant was, report_date after it; drop variant only
     idx = list(findings.columns).index("variant")
     enriched.insert(idx, "period", enriched.pop("period"))
-    return enriched.drop(columns=["variant", "report_date"])
+    enriched.insert(idx + 1, "report_date", enriched.pop("report_date"))
+    return enriched.drop(columns=["variant"])
 
 
 def _enrich_company(findings: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
