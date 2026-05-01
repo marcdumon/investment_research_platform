@@ -108,7 +108,7 @@ Skip first period per ticker (no prior to compare).
 3. **Run rules** — `from irp.quality import run; findings = run(data)`
 4. **Summary** — count findings by rule + severity
 5. **Per-rule drill-down** — display flagged rows per rule
-6. **Export** — `findings.to_csv('../data/flagged_anomalies.csv', index=False)`
+6. **Export** — `findings.to_csv('../data/data_quality/flagged_anomalies.csv', index=False)`
 
 ---
 
