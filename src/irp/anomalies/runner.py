@@ -95,20 +95,24 @@ def _enrich_company(findings: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd
     for col in ("isin", "company_name"):
         enriched.insert(ticker_idx, col, enriched.pop(col))
 
-    # edgar_url last — looked up from sec_filings table (run fetch_sec_filings.py to populate)
-    enriched["edgar_url"] = _lookup_edgar_urls(enriched, data)
+    # edgar_url/form last — looked up from sec_filings table (run fetch_sec_filings.py to populate)
+    enriched["edgar_url"], enriched["edgar_form"] = _lookup_edgar_filings(enriched, data)
     return enriched
 
 
-def _lookup_edgar_urls(df: pd.DataFrame, data: dict[str, pd.DataFrame]) -> pd.Series:
-    """Join edgar_url from the pre-built sec_filings table."""
+def _lookup_edgar_filings(df: pd.DataFrame, data: dict[str, pd.DataFrame]) -> tuple[pd.Series, pd.Series]:
+    """Join edgar_url and edgar_form from the pre-built sec_filings table."""
     empty = pd.Series([None] * len(df), index=df.index, dtype=object)
     if "period" not in df.columns or "sec_filings" not in data:
-        return empty
+        return empty, empty.copy()
 
-    url_map = (
-        data["sec_filings"][["ticker", "period", "url"]]
+    sf = (
+        data["sec_filings"]
         .drop_duplicates(subset=["ticker", "period"])
-        .set_index(["ticker", "period"])["url"]
+        .set_index(["ticker", "period"])
     )
-    return df.apply(lambda r: url_map.get((r["ticker"], r["period"])), axis=1)
+    url_map = sf["url"] if "url" in sf.columns else pd.Series(dtype=object)
+    form_map = sf["form"] if "form" in sf.columns else pd.Series(dtype=object)
+    urls = df.apply(lambda r: url_map.get((r["ticker"], r["period"])), axis=1)
+    forms = df.apply(lambda r: form_map.get((r["ticker"], r["period"])), axis=1)
+    return urls, forms

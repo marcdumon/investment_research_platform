@@ -94,6 +94,7 @@ FLUSH_EVERY = 50
 ERROR_PATH = "data/data_quality/sec_filings_errors.csv"
 
 url_cache: dict[tuple[str, str], str | None] = {}
+form_cache: dict[tuple[str, str], str | None] = {}
 error_cache: dict[tuple[str, str], str | None] = {}
 error_rows: list[dict] = []
 total_written = 0
@@ -122,9 +123,10 @@ def _flush(batch: list[tuple[str, str]]) -> None:
         index=pairs.index,
     )
     chunk = pairs[mask].copy()
-    chunk["url"] = [url_cache[(t, c)] for t, c in zip(chunk["ticker"], chunk["canon"])]
+    chunk["url"] = [url_cache.get((t, c)) for t, c in zip(chunk["ticker"], chunk["canon"])]
+    chunk["form"] = [form_cache.get((t, c)) for t, c in zip(chunk["ticker"], chunk["canon"])]
     chunk["error"] = [error_cache.get((t, c)) for t, c in zip(chunk["ticker"], chunk["canon"])]
-    df_chunk = chunk[["ticker", "period", "url", "error"]]
+    df_chunk = chunk[["ticker", "period", "url", "form", "error"]]
     dataset = Dataset.from_df(df_chunk, name="sec_filings", source="sec_edgar")
     store.upsert(dataset, table="sec_filings", primary_key=["ticker", "period"])
     total_written += len(df_chunk)
@@ -155,52 +157,79 @@ from irp.sources.sec_edgar import _load_ticker_map  # noqa: E402
 _load_ticker_map()
 
 
-def _resolve(ticker: str, canon: str, publish_date: str | None) -> tuple[str, str, str | None, str | None, float]:
-    t_start = time.monotonic()
-    for attempt in range(MAX_RETRIES):
-        _throttle()
-        try:
-            url: str | None = sec_filing_url(ticker, canon, publish_date)
-            return ticker, canon, url, None, time.monotonic() - t_start
-        except Exception as exc:
-            if "429" in str(exc) and attempt < MAX_RETRIES - 1:
-                wait = 2 ** attempt + random.random()
-                logger.info(f"{ticker} {canon} 429 — retry {attempt + 1}/{MAX_RETRIES} in {wait:.1f}s")
-                time.sleep(wait)
-            else:
-                return ticker, canon, None, str(exc), time.monotonic() - t_start
-    return ticker, canon, None, "max retries exceeded", time.monotonic() - t_start
+def _resolve_ticker(
+    ticker: str, periods: list[tuple[str, str | None]]
+) -> list[tuple[str, str, str | None, str | None, str | None, float]]:
+    """Resolve all periods for one ticker sequentially.
 
+    Stops making HTTP calls after the first 'ticker not found' error.
+    """
+    results = []
+    dead = False
+    for canon, publish_date in periods:
+        t_start = time.monotonic()
+        if dead:
+            results.append((ticker, canon, None, None, "ticker not found", time.monotonic() - t_start))
+            continue
+        for attempt in range(MAX_RETRIES):
+            _throttle()
+            try:
+                url, form = sec_filing_url(ticker, canon, publish_date)
+                results.append((ticker, canon, url, form, None, time.monotonic() - t_start))
+                break
+            except Exception as exc:
+                err = str(exc)
+                if err == "ticker not found":
+                    dead = True
+                    results.append((ticker, canon, None, None, err, time.monotonic() - t_start))
+                    break
+                if "429" in err and attempt < MAX_RETRIES - 1:
+                    wait = 2 ** attempt + random.random()
+                    logger.info(f"{ticker} {canon} 429 — retry {attempt + 1}/{MAX_RETRIES} in {wait:.1f}s")
+                    time.sleep(wait)
+                else:
+                    results.append((ticker, canon, None, None, err, time.monotonic() - t_start))
+                    break
+        else:
+            results.append((ticker, canon, None, None, "max retries exceeded", time.monotonic() - t_start))
+    return results
+
+
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+_RESET = "\033[0m"
 
 pending: list[tuple[str, str]] = []
 done = 0
+
+ticker_groups = {
+    ticker: list(zip(grp["canon"], grp["publish_date"]))
+    for ticker, grp in to_resolve.groupby("ticker")
+}
+
 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
     futures = {
-        pool.submit(_resolve, ticker, canon, publish_date): (ticker, canon)
-        for ticker, canon, publish_date in zip(
-            to_resolve["ticker"], to_resolve["canon"], to_resolve["publish_date"]
-        )
+        pool.submit(_resolve_ticker, ticker, periods): ticker
+        for ticker, periods in ticker_groups.items()
     }
-    _GREEN = "\033[32m"
-    _YELLOW = "\033[33m"
-    _RESET = "\033[0m"
     for future in as_completed(futures):
-        ticker, canon, url, err, elapsed = future.result()
-        done += 1
-        if err:
-            status = f"{_YELLOW}SKIP: {err}{_RESET}"
-        else:
-            status = f"{_GREEN}OK{_RESET}"
-        logger.info(f"[{done}/{total}] {ticker} {canon} {status} ({elapsed:.2f}s)")
-        url_cache[(ticker, canon)] = url
-        error_cache[(ticker, canon)] = err
-        if err:
-            error_rows.append({"ticker": ticker, "period": canon, "error": err})
-            _flush_errors(error_rows[-1:])
-        pending.append((ticker, canon))
-        if len(pending) >= FLUSH_EVERY:
-            _flush(pending)
-            pending.clear()
+        for ticker, canon, url, form, err, elapsed in future.result():
+            done += 1
+            if err:
+                status = f"{_YELLOW}SKIP: {err}{_RESET}"
+            else:
+                status = f"{_GREEN}OK ({form}){_RESET}"
+            logger.info(f"[{done}/{total}] {ticker} {canon} {status} ({elapsed:.2f}s)")
+            url_cache[(ticker, canon)] = url
+            form_cache[(ticker, canon)] = form
+            error_cache[(ticker, canon)] = err
+            if err:
+                error_rows.append({"ticker": ticker, "period": canon, "error": err})
+                _flush_errors(error_rows[-1:])
+            pending.append((ticker, canon))
+            if len(pending) >= FLUSH_EVERY:
+                _flush(pending)
+                pending.clear()
 
 if pending:
     _flush(pending)

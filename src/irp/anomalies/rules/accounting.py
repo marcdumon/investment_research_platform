@@ -53,12 +53,11 @@ class AccountingIdentity(Rule):
         bad_rel = rel_err[mask]
         detail = (
             "Assets="
-            + bad["Total Assets"].round(0).astype("int64").astype(str)
+            + bad["Total Assets"].round(0).apply(lambda v: f"{int(v):,}")
             + ", Liab+Eq="
             + (bad["Total Liabilities"] + bad["Total Equity"])
             .round(0)
-            .astype("int64")
-            .astype(str)
+            .apply(lambda v: f"{int(v):,}")
             + ", rel_err="
             + (bad_rel * 100).round(2).astype(str)
             + "%"
@@ -120,8 +119,8 @@ class AccountingIdentity(Rule):
         if bad.empty:
             return Finding.empty_df()
 
-        annual_str = bad["annual"].round(0).astype("Int64").astype(str)
-        sum_str    = bad["sum_qtrs"].round(0).astype("Int64").astype(str)
+        annual_str = bad["annual"].round(0).apply(lambda v: f"{int(v):,}")
+        sum_str    = bad["sum_qtrs"].round(0).apply(lambda v: f"{int(v):,}")
         pct_str    = (bad["rel_err"] * 100).round(1).astype(str)
 
         return pd.DataFrame(
