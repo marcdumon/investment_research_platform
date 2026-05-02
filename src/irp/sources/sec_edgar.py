@@ -56,7 +56,7 @@ def _pick_filing(
     quarter: int | None,
     *,
     publish_date: str | None = None,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     annual_forms = {"10-K", "20-F"}
     quarterly_forms = {"10-Q", "6-K"}
     valid_forms = annual_forms if kind == "A" else quarterly_forms
@@ -68,11 +68,11 @@ def _pick_filing(
     if publish_date:
         # Filter by form type only — date uniquely identifies the filing
         # regardless of fiscal year alignment
-        candidates = [(d, a, doc) for f, d, a, doc in rows if f in valid_forms]
+        candidates = [(f, d, a, doc) for f, d, a, doc in rows if f in valid_forms]
         if not candidates:
             raise ValueError("no matching filing")
         target = datetime.strptime(publish_date, "%Y-%m-%d")
-        candidates.sort(key=lambda x: abs((datetime.strptime(x[0], "%Y-%m-%d") - target).days))
+        candidates.sort(key=lambda x: abs((datetime.strptime(x[1], "%Y-%m-%d") - target).days))
         return candidates[0]
 
     # Fallback: calendar year/quarter matching
@@ -80,23 +80,23 @@ def _pick_filing(
     for form, date, acc, doc in rows:
         y = int(date[:4])
         if kind == "A" and form in annual_forms and y == year:
-            candidates.append((date, acc, doc))
+            candidates.append((form, date, acc, doc))
         elif kind == "Q" and form in quarterly_forms and y == year:
             if quarter is None:
-                candidates.append((date, acc, doc))
+                candidates.append((form, date, acc, doc))
             else:
                 m = int(date[5:7])
                 if (m - 1) // 3 + 1 == quarter:
-                    candidates.append((date, acc, doc))
+                    candidates.append((form, date, acc, doc))
 
     if not candidates:
         raise ValueError("no matching filing")
-    candidates.sort(key=lambda x: x[0], reverse=True)
+    candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[0]
 
 
-def sec_filing_url(ticker: str, period: str, publish_date: str | None = None) -> str:
-    """Return a direct URL to the primary document of the SEC filing.
+def sec_filing_url(ticker: str, period: str, publish_date: str | None = None) -> tuple[str, str]:
+    """Return URL and form type for the SEC filing.
 
     Args:
         ticker: Stock ticker (e.g. 'MSFT').
@@ -104,7 +104,7 @@ def sec_filing_url(ticker: str, period: str, publish_date: str | None = None) ->
         publish_date: Optional filing date hint (YYYY-MM-DD) for precise matching.
 
     Returns:
-        URL to the primary filing document on SEC EDGAR.
+        (url, form) — URL to primary filing document and form type (e.g. '10-K').
 
     Raises:
         ValueError: Ticker not found in SEC map, or no matching filing.
@@ -113,6 +113,6 @@ def sec_filing_url(ticker: str, period: str, publish_date: str | None = None) ->
     cik = _ticker_to_cik(ticker)
     year, kind, quarter = _parse_period(period)
     filings = _load_submissions(cik)
-    _, acc, doc = _pick_filing(filings, year, kind, quarter, publish_date=publish_date)
+    form, _, acc, doc = _pick_filing(filings, year, kind, quarter, publish_date=publish_date)
     acc_nodash = acc.replace("-", "")
-    return f"{ARCHIVE}/{cik}/{acc_nodash}/{doc}"
+    return f"{ARCHIVE}/{cik}/{acc_nodash}/{doc}", form
