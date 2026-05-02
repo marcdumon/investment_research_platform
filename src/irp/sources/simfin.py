@@ -84,8 +84,23 @@ class SimFinFundamentalsSource(BaseSource):
             df.insert(0, "source", "simfin")
         if not is_reference_table:
             df.insert(0, "variant", "A" if self.variant == "annual" else "Q")
-            # period: "2023A" for annual, "2023Q1" for quarterly
-            period_suffix = df["variant"].map({"A": "A"}).fillna(df["Fiscal Period"])
-            df.insert(1, "period", df["Fiscal Year"].astype(int).astype(str) + period_suffix)
+            # period: "2023FY" for annual, "2023Q1" for quarterly
+            # Display year follows SEC convention: FY named by year it ends.
+            # SimFin's Fiscal Year uses majority-calendar-year, so non-Dec FY companies
+            # need a +1 correction. Derive from Report Date (annual) or Q4 Report Date
+            # (quarterly, propagated to Q1-Q3 of the same fiscal year).
+            period_suffix = df["variant"].map({"A": "FY"}).fillna(df["Fiscal Period"])
+            if self.variant == "annual":
+                display_year = pd.to_datetime(df["Report Date"]).dt.year
+            else:
+                q4 = (
+                    df[df["Fiscal Period"] == "Q4"][["Ticker", "Fiscal Year", "Report Date"]]
+                    .assign(_yr=lambda d: pd.to_datetime(d["Report Date"]).dt.year)
+                    [["Ticker", "Fiscal Year", "_yr"]]
+                    .drop_duplicates(["Ticker", "Fiscal Year"])
+                )
+                df = df.merge(q4, on=["Ticker", "Fiscal Year"], how="left")
+                display_year = df.pop("_yr").fillna(df["Fiscal Year"].astype(int)).astype(int)
+            df.insert(1, "period", display_year.astype(str) + period_suffix)
 
         return Dataset.from_df(df, name=self.statement, source="simfin")

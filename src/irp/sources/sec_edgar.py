@@ -43,7 +43,7 @@ def _load_submissions(cik: int) -> dict:
 
 def _parse_period(period: str) -> tuple[int, str, int | None]:
     year = int(period[:4])
-    if period.endswith("A") or period.endswith("Q4"):
+    if period.endswith("FY") or period.endswith("A") or period.endswith("Q4"):
         return year, "A", None
     q = int(period[-1])
     return year, "Q", q
@@ -100,7 +100,7 @@ def sec_filing_url(ticker: str, period: str, publish_date: str | None = None) ->
 
     Args:
         ticker: Stock ticker (e.g. 'MSFT').
-        period: Reporting period string (e.g. '2023A', '2023Q1').
+        period: Reporting period string (e.g. '2023FY', '2023Q1').
         publish_date: Optional filing date hint (YYYY-MM-DD) for precise matching.
 
     Returns:

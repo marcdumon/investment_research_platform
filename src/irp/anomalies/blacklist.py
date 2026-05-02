@@ -45,6 +45,7 @@ def add(
     period: str,
     rule: str,
     column: str,
+    value: str = "",
     note: str = "",
     path: str | Path | None = None,
 ) -> bool:
@@ -69,6 +70,7 @@ def add(
         f'period = "{period}"\n'
         f'rule   = "{rule}"\n'
         f'column = "{column}"\n'
+        f'value  = "{value}"\n'
         f'note   = "{note}"\n'
     )
     with open(p, "a") as f:
