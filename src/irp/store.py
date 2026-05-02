@@ -28,11 +28,11 @@ class Store:
         self._db_path = str(path)
         self._init_meta()
 
-    def _conn(self) -> duckdb.DuckDBPyConnection:
+    def _open_conn(self) -> duckdb.DuckDBPyConnection:
         return duckdb.connect(self._db_path)
 
     def _init_meta(self) -> None:
-        with self._conn() as con:
+        with self._open_conn() as con:
             con.execute(f"""
                 CREATE TABLE IF NOT EXISTS "{_META_TABLE}" (
                     name             VARCHAR PRIMARY KEY,
@@ -51,7 +51,7 @@ class Store:
         df[_INSERTED_AT_COL] = datetime.now(timezone.utc)
         return df
 
-    def _table_pk(self, con: duckdb.DuckDBPyConnection, tbl: str) -> list[str]:
+    def _get_table_pk(self, con: duckdb.DuckDBPyConnection, tbl: str) -> list[str]:
         rows = con.execute(
             "SELECT constraint_column_names FROM duckdb_constraints() "
             "WHERE table_name = ? AND constraint_type = 'PRIMARY KEY'",
@@ -72,7 +72,7 @@ class Store:
             pk = ", ".join(f'"{c}"' for c in primary_key)
             con.execute(f'CREATE TABLE "{tbl}" ({col_defs}, PRIMARY KEY ({pk}))')
         else:
-            if self._table_pk(con, tbl) != primary_key:
+            if self._get_table_pk(con, tbl) != primary_key:
                 pk = ", ".join(f'"{c}"' for c in primary_key)
                 con.execute(f'ALTER TABLE "{tbl}" ADD PRIMARY KEY ({pk})')
             existing_cols = {r[0] for r in con.execute(f'DESCRIBE "{tbl}"').fetchall()}
@@ -98,7 +98,7 @@ class Store:
         """Full overwrite — CREATE OR REPLACE."""
         tbl = table or dataset.name
         df = self._stamp(dataset.data)
-        with self._conn() as con:
+        with self._open_conn() as con:
             con.register("_df", df)
             con.execute(f'CREATE OR REPLACE TABLE "{tbl}" AS SELECT * FROM _df')
             self._upsert_meta(con, tbl, dataset, {_INSERTED_AT_COL: str(df[_INSERTED_AT_COL].dtype)})
@@ -113,7 +113,7 @@ class Store:
         """Insert rows, updating existing ones on PK conflict."""
         tbl = table or dataset.name
         df = self._stamp(dataset.data)
-        with self._conn() as con:
+        with self._open_conn() as con:
             con.register("_df", df)
             self._ensure_table(con, tbl, primary_key)
             update_cols = [c for c in df.columns if c not in primary_key]
@@ -127,7 +127,7 @@ class Store:
 
     def load(self, name: str) -> Dataset:
         """Read a dataset by name."""
-        with self._conn() as con:
+        with self._open_conn() as con:
             row = con.execute(
                 f'SELECT source, schema_json, captured_at FROM "{_META_TABLE}" WHERE name = ?',
                 [name],
@@ -147,12 +147,12 @@ class Store:
 
     def delete(self, name: str) -> None:
         """Drop a dataset and its metadata."""
-        with self._conn() as con:
+        with self._open_conn() as con:
             con.execute(f'DROP TABLE IF EXISTS "{name}"')
             con.execute(f'DELETE FROM "{_META_TABLE}" WHERE name = ?', [name])
 
     def exists(self, name: str) -> bool:
-        with self._conn() as con:
+        with self._open_conn() as con:
             in_meta = con.execute(
                 f'SELECT 1 FROM "{_META_TABLE}" WHERE name = ?', [name]
             ).fetchone() is not None
@@ -163,7 +163,7 @@ class Store:
             ).fetchone() is not None
             return in_catalog
 
-    def max_date(
+    def get_max_date(
         self,
         table: str,
         date_col: str,
@@ -174,7 +174,7 @@ class Store:
         """Return MAX(date_col) from table, optionally filtered. None if missing or empty."""
         if not self.exists(table):
             return None
-        with self._conn() as con:
+        with self._open_conn() as con:
             if filter_col is not None:
                 row = con.execute(
                     f'SELECT MAX("{date_col}") FROM "{table}" WHERE "{filter_col}" = ?',

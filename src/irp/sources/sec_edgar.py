@@ -7,7 +7,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 SEC_HEADERS = {
-    "User-Agent": "marc Duon 7793950+marcdumon@users.noreply.github.com",
+    "User-Agent": "Marc Dumon 7793950+marcdumon@users.noreply.github.com",
     "Accept-Encoding": "gzip, deflate",
     "Host": "data.sec.gov",
 }
@@ -95,7 +95,7 @@ def _pick_filing(
     return candidates[0]
 
 
-def sec_filing_url(ticker: str, period: str, publish_date: str | None = None) -> tuple[str, str]:
+def get_sec_filing_url(ticker: str, period: str, publish_date: str | None = None) -> tuple[str, str]:
     """Return URL and form type for the SEC filing.
 
     Args:

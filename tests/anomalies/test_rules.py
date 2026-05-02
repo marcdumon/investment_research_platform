@@ -65,7 +65,7 @@ class TestAccountingIdentity:
         df = _balance()
         df["Total Equity"] = 0.0
         result = self.rule.check({"balance": df})
-        assert list(result.columns) == Finding.columns()
+        assert list(result.columns) == Finding.list_columns()
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +270,7 @@ class TestQuarterlyConsistency:
     def test_result_has_finding_schema(self):
         df = _quarterly_income(annual=400, q1=100, q2=100, q3=100, q4=5)
         result = self.rule.check({"income": df})
-        assert list(result.columns) == Finding.columns()
+        assert list(result.columns) == Finding.list_columns()
 
     def test_custom_tolerance(self):
         strict = AccountingIdentity(tolerance=0.001)
@@ -312,7 +312,7 @@ class TestRunnerDI:
     def test_run_empty_rules_returns_empty_df(self):
         result = run({"income": _income()}, rules=[])
         assert result.empty
-        assert list(result.columns) == Finding.columns()
+        assert list(result.columns) == Finding.list_columns()
 
     def test_registry_deduplication(self):
         reg = Registry()
