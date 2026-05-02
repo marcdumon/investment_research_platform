@@ -31,12 +31,12 @@ class Finding:
     severity: Severity
 
     @classmethod
-    def columns(cls) -> list[str]:
+    def list_columns(cls) -> list[str]:
         return [f.name for f in dataclasses.fields(cls)]
 
     @classmethod
     def empty_df(cls) -> pd.DataFrame:
-        return pd.DataFrame(columns=cls.columns())
+        return pd.DataFrame(columns=cls.list_columns())
 
 
 class Rule(ABC):
@@ -51,7 +51,7 @@ class Rule(ABC):
 
     @abstractmethod
     def check(self, data: dict[str, pd.DataFrame]) -> pd.DataFrame:
-        """Return a DataFrame conforming to Finding.columns().
+        """Return a DataFrame conforming to Finding.list_columns().
         Return Finding.empty_df() when no anomalies are found.
         Implementations must be fully vectorised — no iterrows().
         """

@@ -76,20 +76,20 @@ def test_exists(store):
     assert store.exists("test_prices")
 
 
-def test_max_date_nonexistent_table(store):
-    assert store.max_date("prices", "date") is None
+def test_get_max_date_nonexistent_table(store):
+    assert store.get_max_date("prices", "date") is None
 
 
-def test_max_date_no_filter(store):
+def test_get_max_date_no_filter(store):
     store.upsert(make_str_date_ds(), table="prices", primary_key=["ticker", "date"])
-    assert store.max_date("prices", "date") == "2024-01-02"
+    assert store.get_max_date("prices", "date") == "2024-01-02"
 
 
-def test_max_date_with_filter(store):
+def test_get_max_date_with_filter(store):
     store.upsert(make_str_date_ds(ticker="MSFT"), table="prices", primary_key=["ticker", "date"])
     store.upsert(make_str_date_ds(ticker="AAPL"), table="prices", primary_key=["ticker", "date"])
-    assert store.max_date("prices", "date", filter_col="ticker", filter_val="MSFT") == "2024-01-02"
-    assert store.max_date("prices", "date", filter_col="ticker", filter_val="GOOG") is None
+    assert store.get_max_date("prices", "date", filter_col="ticker", filter_val="MSFT") == "2024-01-02"
+    assert store.get_max_date("prices", "date", filter_col="ticker", filter_val="GOOG") is None
 
 
 def test_upsert_creates_table(store):

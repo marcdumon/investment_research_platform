@@ -7,7 +7,7 @@ from irp.anomalies.base import Finding, Rule, Severity, register
 _DEFAULT_METRICS = ["Revenue", "Net Income", "Operating Income (Loss)"]
 
 
-def _iqr_score(s: pd.Series, *, fence: float, min_peers: int) -> pd.Series:
+def _compute_iqr_score(s: pd.Series, *, fence: float, min_peers: int) -> pd.Series:
     """Signed IQR distance for each element.  NaN when group is too small or IQR=0.
     Positive → upper outlier; negative → lower outlier; NaN → inlier.
     """
@@ -64,7 +64,7 @@ class SectorOutliers(Rule):
             sub = df.dropna(subset=[metric]).copy()
 
             sub["_score"] = sub.groupby(["Sector", "variant"])[metric].transform(
-                _iqr_score, fence=self.iqr_fence, min_peers=self.min_peers
+                _compute_iqr_score, fence=self.iqr_fence, min_peers=self.min_peers
             )
             bad = sub.dropna(subset=["_score"])
             if bad.empty:

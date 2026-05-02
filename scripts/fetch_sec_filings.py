@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 
 from irp._logging import configure
 from irp.datasets.dataset import Dataset
-from irp.sources.sec_edgar import sec_filing_url
+from irp.sources.sec_edgar import get_sec_filing_url
 from irp.store import Store
 
 load_dotenv()
@@ -174,7 +174,7 @@ def _resolve_ticker(
         for attempt in range(MAX_RETRIES):
             _throttle()
             try:
-                url, form = sec_filing_url(ticker, canon, publish_date)
+                url, form = get_sec_filing_url(ticker, canon, publish_date)
                 results.append((ticker, canon, url, form, None, time.monotonic() - t_start))
                 break
             except Exception as exc:

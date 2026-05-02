@@ -22,15 +22,15 @@ SimFinDatasetType = Literal["income", "balance", "cashflow", "industries", "comp
 
 
 @contextmanager
-def _pandas_compat():
+def _patch_pandas_compat():
     """Patch pd.read_csv to drop kwargs removed in pandas 2.0 that simfin still passes."""
     _orig = pd.read_csv
 
-    def _patched(*args, **kwargs):
+    def _strip_legacy_kwargs(*args, **kwargs):
         kwargs.pop("date_parser", None)
         return _orig(*args, **kwargs)
 
-    pd.read_csv = _patched
+    pd.read_csv = _strip_legacy_kwargs
     try:
         yield
     finally:
@@ -66,7 +66,7 @@ class SimFinFundamentalsSource(BaseSource):
         simfin.set_data_dir(self._data_dir)
 
         is_reference_table = self.statement in ("industries", "companies")
-        with _pandas_compat():
+        with _patch_pandas_compat():
             if is_reference_table:
                 df = _LOADERS[self.statement]()
             else:
