@@ -8,7 +8,7 @@ Already-resolved pairs are skipped.  To force a full re-resolve, drop the
 sec_filings table first.
 
 Q4 reports are the same filing as the annual (10-K).  The script resolves
-the URL once for the canonical period (yyyyA) and writes it for both yyyyA
+the URL once for the canonical period (yyyyFY) and writes it for both yyyyFY
 and yyyyQ4 rows without making a second HTTP request.
 """
 from pathlib import Path
@@ -74,7 +74,7 @@ if store.exists("sec_filings"):
 # Q4 == annual 10-K: map yyyyQ4 → yyyyA so we resolve the URL once.
 # Both the original period and the canonical period are written to the table.
 pairs["canon"] = pairs["period"].apply(
-    lambda p: p[:4] + "A" if p.endswith("Q4") else p
+    lambda p: p[:4] + "FY" if p.endswith("Q4") else p
 )
 
 # Resolve unique (ticker, canonical_period) — use publish_date from annual row when available
