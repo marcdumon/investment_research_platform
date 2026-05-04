@@ -194,6 +194,7 @@ def _valuation(b: pd.DataFrame) -> pd.DataFrame:
     ebitda = b["Operating Income (Loss)"] + b.get("Depreciation & Amortization_cf", b.get("Depreciation & Amortization", 0))
     out["EV/EBITDA"] = _safe_div(ev, ebitda)
     out["EV/Sales"] = _safe_div(ev, b["Revenue"])
+    out["Enterprise Value"] = ev
     return out
 
 
@@ -407,4 +408,14 @@ def compute_metrics(
 
     if latest:
         out = out.drop(columns=["Publish Date"])
+
+    # Scale absolute dollar values to billions for human-readable filtering
+    out["Market Cap"] = out["market_cap"] / 1e9
+    out = out.drop(columns=["market_cap"])
+    out["Enterprise Value"] = out["Enterprise Value"] / 1e9
+
+    # PEG: only valid when EPS growth is positive
+    peg = _safe_div(out["P/E"], out["EPS Growth YoY"] * 100)
+    out["PEG"] = peg.where(out["EPS Growth YoY"] > 0)
+
     return out
