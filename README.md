@@ -86,9 +86,10 @@ Each zip is extracted once to `data/stooq/daily/<zip_stem>/`. Re-downloading a z
 
 1. Go to `https://stooq.com/db/`
 2. Select the missing date range (up to ~1 month back)
-3. Download — the file is named `data_d.txt`
-4. Save it to `data/stooq/daily/data_d.txt` (overwrite)
-5. Run:
+3. Click on "Setting Files Content" at the top left of the table. Select all of "World" and all of "U.S.".
+4. To download, click "N_d" at the bottom of the table; the file is named `data_d.txt`
+5. Save it to `data/stooq/daily/data_d.txt` (overwrite)
+6. Run:
 
 ```bash
 uv run python scripts/update_stooq_prices.py
