@@ -129,7 +129,7 @@ TRANSFORMS: dict[str, TransformSpec] = {
     ),
     'update': TransformSpec(
         input_path=raw_dir / stooq_cfg.update_file,
-        output_path=processed_dir / stooq_cfg.update_file,
+        output_path=processed_dir / 'update_prices.csv',
         input_format='csv',
         output_format='csv',
         header=True,
@@ -226,7 +226,8 @@ def main():
     provider = StooqProvider()
     # provider.fetch()
     # provider.update()
-    provider.transform('bulk')
+    # provider.transform('bulk')
+    provider.transform('update')
     # df = pd.read_parquet(processed_dir / 'bulk_prices.parquet')
     # print(df.head())
     # print(df.sample(10))
