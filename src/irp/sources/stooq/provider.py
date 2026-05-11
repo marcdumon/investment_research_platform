@@ -24,6 +24,7 @@ processed_dir = root_dir / stooq_cfg.processed_dir
 
 
 # Todo: script to setup dirs, or create dirs on demand 
+# Todo: avoid recreating existing files with markers
 
 def _ensure_files_available(
     files: str | Iterable[str], *, error_message: str, download_instruction: str
@@ -101,13 +102,14 @@ def _build_price_dataset() -> None:
     finally:
         if pq_writer:
             pq_writer.close()
+    logging.debug(f'Flattened {ticker_count} tickers to {parquet_path}.')
+
     csv_path = raw_dir / 'markets.csv'
     with open(csv_path, 'w', newline='') as fh:
-        writer = csv.DictWriter(fh, fieldnames=['src_ticker', 'market'])
+        writer = csv.DictWriter(fh, fieldnames=['ticker', 'market'])
         writer.writeheader()
         writer.writerows(market_rows)
     shutil.rmtree(data_root)
-    logging.debug(f'Flattened {ticker_count} tickers to {parquet_path}.')
 
 
 
@@ -321,14 +323,11 @@ class StooqProvider:
 
 def main():
     provider = StooqProvider()
-    # provider.fetch()
-    # provider.update()
-    # provider.transform('bulk')
-    # provider.transform('update')
-    # df = pd.read_parquet(processed_dir / 'bulk_prices.parquet')
-    # print(df.head())
-    # print(df.sample(10))
-    # provider.store('bulk')
+    provider.fetch()
+    provider.update()
+    provider.transform('bulk')
+    provider.transform('update')
+    provider.store('bulk')
     provider.store('update')
 
 
