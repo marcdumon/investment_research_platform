@@ -1,3 +1,6 @@
+from irp.core.config import config
+
+
 class SimFinProvider:
     def fetch(self): ...
 
