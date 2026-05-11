@@ -101,10 +101,9 @@ def _build_price_dataset() -> None:
     logging.debug(f"Flattened {ticker_count} tickers to {parquet_path}.")
 
 
-
-
 class StooqProvider:
     def fetch(self):
+        """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
         logging.info("Fetching Stooq price data...")
         _ensure_bulk_files_available()
         _unzip_bulk_files()
@@ -113,15 +112,23 @@ class StooqProvider:
 
     def update(self): ...
 
-    def transform(self, raw): ...
+    def transform(self, raw): 
+        # rename all columns in lowecase
+        # rename tickers to ticker_stook 
+        # add a ticker column derived from stooq's tickers
+        # transform must accept csv and parquet input
+        # duckdb over input files to do transformations in a scalable way
+        
+        ...
 
-    def store(self, data): ...
+    def store(self, data): 
+        # into duckdb database
+        ...
 
 
 def main():
     provider = StooqProvider()
     provider.fetch()
-    # _build_price_dataset()
 
 
 if __name__ == "__main__":
