@@ -23,8 +23,10 @@ raw_dir = root_dir / stooq_cfg.raw_dir
 processed_dir = root_dir / stooq_cfg.processed_dir
 
 
-# Todo: script to setup dirs, or create dirs on demand 
+# Todo: script to setup dirs, or create dirs on demand
 # Todo: avoid recreating existing files with markers
+# Todo: provider.py is the only file in ./stooq dir, consider flattening dir structure
+
 
 def _ensure_files_available(
     files: str | Iterable[str], *, error_message: str, download_instruction: str
@@ -110,7 +112,6 @@ def _build_price_dataset() -> None:
         writer.writeheader()
         writer.writerows(market_rows)
     shutil.rmtree(data_root)
-
 
 
 @dataclass(frozen=True)
