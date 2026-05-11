@@ -5,6 +5,10 @@ import zipfile
 from pathlib import Path
 from collections.abc import Iterator
 
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 from irp.core.config import config
 from irp.core.logging import configure
 
@@ -58,32 +62,43 @@ def _category_of(leaf: Path, data_root: Path) -> Path:
     return data_root / rel.parts[1]
 
 
-def _flatten_bulk_files() -> None:
-    """Move all ticker files into raw_dir/ticker_prices/, write raw_dir/ticker_markets.csv, delete data/."""
-    logging.debug("Flattening bulk files...")
-    tickers_dir = raw_dir / "ticker_prices"
-    tickers_dir.mkdir(exist_ok=True)
-    rows: list[dict[str, str]] = []
+def _build_price_dataset() -> None:
+    """Read extracted ticker CSVs, write ticker_prices.parquet + ticker_markets.csv, delete data/."""
+    logging.debug("Building price dataset...")
+    parquet_path = raw_dir / "ticker_prices.parquet"
+    market_rows: list[dict[str, str]] = []
+    pq_writer: pq.ParquetWriter | None = None
+    arrow_schema: pa.Schema | None = None
+    ticker_count = 0
     data_root = raw_dir / "data"
-    for freq_dir in data_root.iterdir():
-        if not freq_dir.is_dir():
-            continue
-        for leaf in _iter_file_dirs(freq_dir):
-            market = _category_of(leaf, freq_dir).name
-            for f in leaf.iterdir():
-                if f.is_file():
-                    target = tickers_dir / f.name
-                    if target.exists():
-                        raise FileExistsError(target)
-                    shutil.move(str(f), str(target))
-                    rows.append({"ticker": f.stem, "market": market})
+    try:
+        for freq_dir in data_root.iterdir():
+            if not freq_dir.is_dir():
+                continue
+            for leaf in _iter_file_dirs(freq_dir):
+                market = _category_of(leaf, freq_dir).name
+                for f in leaf.iterdir():
+                    if not f.is_file() or f.stat().st_size == 0:
+                        continue
+                    df = pd.read_csv(f)
+                    df["ticker"] = f.stem
+                    table = pa.Table.from_pandas(df, preserve_index=False)
+                    if pq_writer is None:
+                        arrow_schema = table.schema
+                        pq_writer = pq.ParquetWriter(parquet_path, arrow_schema)
+                    pq_writer.write_table(table.cast(arrow_schema))
+                    market_rows.append({"ticker": f.stem, "market": market})
+                    ticker_count += 1
+    finally:
+        if pq_writer:
+            pq_writer.close()
     csv_path = raw_dir / "ticker_markets.csv"
     with open(csv_path, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=["ticker", "market"])
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(market_rows)
     shutil.rmtree(data_root)
-    logging.debug(f"Flattened {len(rows)} tickers, markets written to {csv_path}.")
+    logging.debug(f"Flattened {ticker_count} tickers to {parquet_path}.")
 
 
 
@@ -93,7 +108,7 @@ class StooqProvider:
         logging.info("Fetching Stooq price data...")
         _ensure_bulk_files_available()
         _unzip_bulk_files()
-        _flatten_bulk_files()
+        _build_price_dataset()
         logging.info("Stooq price data fetched successfully.")
 
     def update(self): ...
@@ -106,7 +121,7 @@ class StooqProvider:
 def main():
     provider = StooqProvider()
     provider.fetch()
-    # _flatten_bulk_files()
+    # _build_price_dataset()
 
 
 if __name__ == "__main__":
