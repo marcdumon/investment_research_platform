@@ -1,9 +1,30 @@
-[store]
-db_path = "data/irp.duckdb"
 
-[simfin]
-data_dir = "data/simfin"
 
-[stooq]
-download_dir = "data/stooq/download"
-data_dir     = "data/stooq/daily"
+[database]
+path = "/mnt/Dev/active_python_projects/investment_research_platform/data/irp.duckdb"
+
+[data]
+root_dir = "/mnt/Dev/active_python_projects/investment_research_platform/data"
+
+[providers.simfin]
+raw_dir = "simfin/raw"
+processed_dir = "simfin/processed"
+
+[providers.stooq]
+raw_dir = "stooq/raw"
+processed_dir = "stooq/processed"
+
+# Bulk data download
+bulk_url = "http://stooq.com/db/h/"
+bulk_files = ["d_us_txt.zip", "d_world_txt.zip"]
+bulk_instruction_template = """
+
+The bulk historical price data is available for free download on the 
+stooq website at {bulk_url}.
+Manually download
+- the US, Daily, Ascii file: `{bulk_files[0]}`
+- the World, Daily, Ascii file: `{bulk_files[1]}`
+and place them in the raw data directory.
+"""
+
+# Update data download
