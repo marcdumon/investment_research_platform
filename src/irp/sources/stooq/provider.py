@@ -23,8 +23,7 @@ raw_dir = root_dir / stooq_cfg.raw_dir
 processed_dir = root_dir / stooq_cfg.processed_dir
 
 
-# Todo: script to setup dirs
-
+# Todo: script to setup dirs, or create dirs on demand 
 
 def _ensure_files_available(
     files: str | Iterable[str], *, error_message: str, download_instruction: str
@@ -111,6 +110,7 @@ def _build_price_dataset() -> None:
     logging.debug(f'Flattened {ticker_count} tickers to {parquet_path}.')
 
 
+
 @dataclass(frozen=True)
 class TransformSpec:
     input_path: Path
@@ -158,6 +158,7 @@ class StooqProvider:
         )
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
+        """Transforms the specified feed's raw data into a clean format and stores it in the processed directory."""
         logging.info(f'Transforming Stooq {feed} data...')
 
         spec = TRANSFORMS[feed]
@@ -217,9 +218,105 @@ class StooqProvider:
 
             logging.info('Market metadata transformed successfully.')
 
-    def store(self):
-        # into duckdb database
-        ...
+    def store(self, feed: Literal['bulk', 'update']) -> None:
+        logging.info('Storing %s data...', feed)
+
+        source_reader = 'read_parquet' if feed == 'bulk' else 'read_csv_auto'
+
+        prices_file = (
+            processed_dir / 'bulk_prices.parquet'
+            if feed == 'bulk'
+            else processed_dir / 'update_prices.csv'
+        )
+
+        key_cols = [
+            'src_ticker',
+            'date',
+        ]
+
+        update_cols = ['per', 'time', 'open', 'high', 'low', 'close', 'vol', 'openint']
+
+        insert_cols = [
+            'ticker',
+            'src_ticker',
+            'per',
+            'date',
+            'time',
+            'open',
+            'high',
+            'low',
+            'close',
+            'vol',
+            'openint',
+        ]
+
+        on_clause = '\nAND '.join(f't.{col} = s.{col}' for col in key_cols)
+
+        update_set_clause = ',\n'.join(f'{col} = s.{col}' for col in update_cols)
+
+        insert_columns_clause = ', '.join(insert_cols)
+
+        insert_values_clause = ', '.join(f's.{col}' for col in insert_cols)
+
+        with duckdb.connect(config.database.path) as con:
+            con.execute(f"""
+                CREATE TABLE IF NOT EXISTS prices AS
+                SELECT *
+                FROM {source_reader}('{prices_file}')
+                LIMIT 0
+            """)
+
+            con.execute(f"""
+                MERGE INTO prices t
+                USING (
+                    SELECT *
+                    FROM {source_reader}('{prices_file}')
+                ) s
+                ON {on_clause}
+
+                WHEN MATCHED THEN UPDATE SET
+                    {update_set_clause}
+
+                WHEN NOT MATCHED THEN INSERT (
+                    {insert_columns_clause}
+                )
+                VALUES (
+                    {insert_values_clause}
+                );
+            """)
+
+            if feed == 'bulk':
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS markets AS
+                    SELECT *
+                    FROM read_csv_auto('{processed_dir / 'markets.csv'}')
+                    LIMIT 0
+                """)
+
+                con.execute(f"""
+                    MERGE INTO markets t
+                    USING (
+                        SELECT *
+                        FROM read_csv_auto('{processed_dir / 'markets.csv'}')
+                    ) s
+                    ON t.src_ticker = s.src_ticker
+
+                    WHEN MATCHED THEN UPDATE SET
+                        market = s.market
+
+                    WHEN NOT MATCHED THEN INSERT (
+                        ticker,
+                        src_ticker,
+                        market
+                    )
+                    VALUES (
+                        s.ticker,
+                        s.src_ticker,
+                        s.market
+                    );
+                """)
+
+        logging.info('Stooq %s data stored successfully.', feed)
 
 
 def main():
@@ -227,10 +324,12 @@ def main():
     # provider.fetch()
     # provider.update()
     # provider.transform('bulk')
-    provider.transform('update')
+    # provider.transform('update')
     # df = pd.read_parquet(processed_dir / 'bulk_prices.parquet')
     # print(df.head())
     # print(df.sample(10))
+    # provider.store('bulk')
+    provider.store('update')
 
 
 if __name__ == '__main__':
