@@ -9,7 +9,7 @@ class DataProvider(Protocol):
     def store(self, data): ...
 
 
-def run_historicals(provider: DataProvider) -> None:
+def run_bulk_historicals(provider: DataProvider) -> None:
     raw = provider.fetch()
     clean = provider.transform(raw)
     provider.store(clean)
