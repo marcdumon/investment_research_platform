@@ -28,3 +28,9 @@ and place them in the raw data directory.
 """
 
 # Update data download
+update_url = "http://stooq.com/db/"
+update_file = "data_d.txt"
+update_instruction_template = """ # Todo: write the correct instructions.
+The daily price updates are available for free download on the
+stooq website at {update_url}.      
+"""
