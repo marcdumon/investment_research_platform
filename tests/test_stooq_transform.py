@@ -1,12 +1,10 @@
-from unittest.mock import MagicMock
-
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
 import irp.sources.stooq.provider as mod
-from irp.sources.stooq.provider import StooqProvider
+from irp.sources.stooq.provider import StooqProvider, TransformSpec
 
 
 _RAW_BULK_ROWS = [
@@ -43,8 +41,21 @@ def bulk_raw(tmp_path, monkeypatch):
         pa.Table.from_pandas(pd.DataFrame(_RAW_BULK_ROWS), preserve_index=False),
         raw / "bulk_prices.parquet",
     )
+    pd.DataFrame([
+        {"ticker": "aapl.us", "market": "nasdaq stocks"},
+        {"ticker": "eurusd", "market": "currencies"},
+    ]).to_csv(raw / "markets.csv", index=False)
     monkeypatch.setattr(mod, "raw_dir", raw)
     monkeypatch.setattr(mod, "processed_dir", processed)
+    monkeypatch.setattr(mod, "TRANSFORMS", {
+        **mod.TRANSFORMS,
+        "bulk": TransformSpec(
+            input_path=raw / "bulk_prices.parquet",
+            output_path=processed / "bulk_prices.parquet",
+            input_format="parquet",
+            output_format="parquet",
+        ),
+    })
     return raw, processed
 
 
@@ -55,11 +66,16 @@ def update_raw(tmp_path, monkeypatch):
     raw.mkdir()
     processed.mkdir()
     (raw / _UPDATE_FILE).write_text(_UPDATE_CSV)
-    cfg = MagicMock()
-    cfg.update_file = _UPDATE_FILE
-    monkeypatch.setattr(mod, "raw_dir", raw)
-    monkeypatch.setattr(mod, "processed_dir", processed)
-    monkeypatch.setattr(mod, "stooq_cfg", cfg)
+    monkeypatch.setattr(mod, "TRANSFORMS", {
+        **mod.TRANSFORMS,
+        "update": TransformSpec(
+            input_path=raw / _UPDATE_FILE,
+            output_path=processed / _UPDATE_FILE,
+            input_format="csv",
+            output_format="csv",
+            header=True,
+        ),
+    })
     return raw, processed
 
 
@@ -87,7 +103,7 @@ def test_transform_bulk_ticker_lowercase(bulk_raw):
 
 
 def test_transform_bulk_src_ticker(bulk_raw):
-    """src_ticker = lower(<TICKER>): full stooq symbol."""
+    """src_ticker = lower(<TICKER>)."""
     _, processed = bulk_raw
     StooqProvider().transform(feed="bulk")
     df = pd.read_parquet(processed / "bulk_prices.parquet")
@@ -105,12 +121,12 @@ def test_transform_update_creates_output(update_raw):
 def test_transform_update_columns(update_raw):
     _, processed = update_raw
     StooqProvider().transform(feed="update")
-    df = pd.read_parquet(processed / _UPDATE_FILE)
+    df = pd.read_csv(processed / _UPDATE_FILE)
     assert set(df.columns) == _EXPECTED_COLUMNS
 
 
 def test_transform_update_ticker(update_raw):
     _, processed = update_raw
     StooqProvider().transform(feed="update")
-    df = pd.read_parquet(processed / _UPDATE_FILE)
+    df = pd.read_csv(processed / _UPDATE_FILE)
     assert "aapl" in df["ticker"].values

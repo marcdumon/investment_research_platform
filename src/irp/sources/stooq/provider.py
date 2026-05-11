@@ -1,10 +1,11 @@
 import csv
 import logging
 import shutil
-from typing import Iterable, Literal
 import zipfile
-from pathlib import Path
 from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Literal
 
 import duckdb
 import pandas as pd
@@ -110,6 +111,32 @@ def _build_price_dataset() -> None:
     logging.debug(f'Flattened {ticker_count} tickers to {parquet_path}.')
 
 
+@dataclass(frozen=True)
+class TransformSpec:
+    input_path: Path
+    output_path: Path
+    input_format: Literal['csv', 'parquet']
+    output_format: Literal['csv', 'parquet']
+    header: bool = False
+
+
+TRANSFORMS: dict[str, TransformSpec] = {
+    'bulk': TransformSpec(
+        input_path=raw_dir / 'bulk_prices.parquet',
+        output_path=processed_dir / 'bulk_prices.parquet',
+        input_format='parquet',
+        output_format='parquet',
+    ),
+    'update': TransformSpec(
+        input_path=raw_dir / stooq_cfg.update_file,
+        output_path=processed_dir / stooq_cfg.update_file,
+        input_format='csv',
+        output_format='csv',
+        header=True,
+    ),
+}
+
+
 class StooqProvider:
     def fetch(self):
         """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
@@ -130,52 +157,64 @@ class StooqProvider:
             download_instruction=stooq_cfg.update_download_instruction,
         )
 
-    def transform(self, feed: Literal['bulk', 'update']):
+    def transform(self, feed: Literal['bulk', 'update']) -> None:
         logging.info(f'Transforming Stooq {feed} data...')
-        if feed == 'bulk':
-            from_file = raw_dir / 'bulk_prices.parquet'
-            to_file = processed_dir / 'bulk_prices.parquet'
-            from_claude = f"FROM read_parquet('{from_file}')"
-            to_clausse = f"TO '{to_file}' (FORMAT PARQUET);"
-        else:
-            from_file = raw_dir / stooq_cfg.update_file
-            to_file = processed_dir / stooq_cfg.update_file
-            from_claude = f"FROM read_csv_auto('{stooq_cfg.update_file}')"
-            to_clausse = f"TO '{to_file}' (FORMAT CSV, HEADER);"
 
+        spec = TRANSFORMS[feed]
         conn = duckdb.connect()
 
+        if spec.input_format == 'parquet':
+            source = f"read_parquet('{spec.input_path}')"
+        else:
+            source = f"read_csv_auto('{spec.input_path}')"
+
+        target_format = 'PARQUET' if spec.output_format == 'parquet' else 'CSV'
+
+        options = [f'FORMAT {target_format}']
+
+        if spec.header:
+            options.append('HEADER')
+
+        options_sql = ', '.join(options)
         conn.sql(f"""
-            COPY (SELECT
-                    split_part(lower("<TICKER>"), '.', 1) AS ticker,
-                    lower("<TICKER>") AS src_ticker,
-                    lower("<PER>") AS per,
-                    "<DATE>" AS date,
-                    "<TIME>" AS time,
-                    "<OPEN>" AS open,
-                    "<HIGH>" AS high,
-                    "<LOW>" AS low,
-                    "<CLOSE>" AS close,
-                    "<VOL>" AS vol,
-                    "<OPENINT>" AS openint
-                {from_claude})
-            {to_clausse}
+            COPY (
+                SELECT
+                    split_part(lower(t."<TICKER>"), '.', 1) AS ticker,
+                    lower(t."<TICKER>") AS src_ticker,
+                    t."<PER>" AS per,
+                    t."<DATE>" AS date,
+                    t."<TIME>" AS time,
+                    t."<OPEN>" AS open,
+                    t."<HIGH>" AS high,
+                    t."<LOW>" AS low,
+                    t."<CLOSE>" AS close,
+                    t."<VOL>" AS vol,
+                    t."<OPENINT>" AS openint
+                FROM {source} t
+            )
+            TO '{spec.output_path}'
+                ({options_sql});
         """)
+
         logging.info(f'Stooq {feed} data transformed successfully.')
 
         if feed == 'bulk':
-            logging.info('Transforming market metadata...')  
+            logging.info('Transforming market metadata...')
+
+            src_markets = raw_dir / 'markets.csv'
+            dst_markets = processed_dir / 'markets.csv'
             conn.sql(f"""
                 COPY (
                     SELECT
                         split_part(lower("ticker"), '.', 1) AS ticker,
-                        ticker as src_ticker,
+                        ticker AS src_ticker,
                         market
-                    FROM read_csv_auto('{raw_dir / "markets.csv"}')
+                    FROM read_csv_auto('{src_markets}')
                 )
-                TO '{processed_dir / "markets.csv"}'
+                TO '{dst_markets}'
                 (FORMAT CSV, HEADER);
             """)
+
             logging.info('Market metadata transformed successfully.')
 
     def store(self):
