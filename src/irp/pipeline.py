@@ -5,19 +5,19 @@ class DataProvider(Protocol):
     def fetch(self): ...
     def update(self): ...
     def transform(self, feed:Literal['bulk', 'update']): ...
-    def store(self): ...
+    def store(self, feed:Literal['bulk', 'update']): ...
 
 
 def run_bulk_historicals(provider: DataProvider) -> None:
     provider.fetch()
     provider.transform('bulk')
-    provider.store()
+    provider.store('bulk')
 
 
 def run_updates(provider: DataProvider) -> None:
     provider.update()
     provider.transform('update')
-    provider.store()
+    provider.store('update')
 
 
 def main():
