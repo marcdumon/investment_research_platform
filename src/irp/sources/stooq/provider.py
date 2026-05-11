@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 from collections.abc import Iterator
 
+import duckdb
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -18,6 +19,10 @@ configure()
 root_dir = config.data.root_dir
 stooq_cfg = config.providers.stooq
 raw_dir = root_dir / stooq_cfg.raw_dir
+processed_dir = root_dir / stooq_cfg.processed_dir
+
+
+# Todo: script to setup dirs
 
 
 def _ensure_files_available(
@@ -67,9 +72,9 @@ def _category_of(leaf: Path, data_root: Path) -> Path:
 
 
 def _build_price_dataset() -> None:
-    """Read extracted ticker CSVs, write ticker_prices.parquet + ticker_markets.csv, delete data/."""
+    """Read extracted ticker CSVs, write bulk_prices.parquet + markets.csv, delete data/."""
     logging.debug('Building price dataset...')
-    parquet_path = raw_dir / 'ticker_prices.parquet'
+    parquet_path = raw_dir / 'bulk_prices.parquet'
     market_rows: list[dict[str, str]] = []
     pq_writer: pq.ParquetWriter | None = None
     arrow_schema: pa.Schema | None = None
@@ -96,9 +101,9 @@ def _build_price_dataset() -> None:
     finally:
         if pq_writer:
             pq_writer.close()
-    csv_path = raw_dir / 'ticker_markets.csv'
+    csv_path = raw_dir / 'markets.csv'
     with open(csv_path, 'w', newline='') as fh:
-        writer = csv.DictWriter(fh, fieldnames=['ticker', 'market'])
+        writer = csv.DictWriter(fh, fieldnames=['src_ticker', 'market'])
         writer.writeheader()
         writer.writerows(market_rows)
     shutil.rmtree(data_root)
@@ -125,22 +130,55 @@ class StooqProvider:
             download_instruction=stooq_cfg.update_download_instruction,
         )
 
-    def transform(self, transform_target=Literal['bulk', 'update']):
-        target_file = raw_dir / (
-            'ticker_prices.parquet'
-            if transform_target == 'bulk'
-            else 'ticker_prices_update.parquet'
-        )
+    def transform(self, feed: Literal['bulk', 'update']):
+        logging.info(f'Transforming Stooq {feed} data...')
+        if feed == 'bulk':
+            from_file = raw_dir / 'bulk_prices.parquet'
+            to_file = processed_dir / 'bulk_prices.parquet'
+            from_claude = f"FROM read_parquet('{from_file}')"
+            to_clausse = f"TO '{to_file}' (FORMAT PARQUET);"
+        else:
+            from_file = raw_dir / stooq_cfg.update_file
+            to_file = processed_dir / stooq_cfg.update_file
+            from_claude = f"FROM read_csv_auto('{stooq_cfg.update_file}')"
+            to_clausse = f"TO '{to_file}' (FORMAT CSV, HEADER);"
 
-        # rename all columns in lowecase
-        # rename tickers to ticker_stook
-        # add a ticker column derived from stooq's tickers
-        # transform must accept csv and parquet input
-        # duckdb over input files to do transformations in a scalable way
+        conn = duckdb.connect()
 
-        ...
+        conn.sql(f"""
+            COPY (SELECT
+                    split_part(lower("<TICKER>"), '.', 1) AS ticker,
+                    lower("<TICKER>") AS src_ticker,
+                    lower("<PER>") AS per,
+                    "<DATE>" AS date,
+                    "<TIME>" AS time,
+                    "<OPEN>" AS open,
+                    "<HIGH>" AS high,
+                    "<LOW>" AS low,
+                    "<CLOSE>" AS close,
+                    "<VOL>" AS vol,
+                    "<OPENINT>" AS openint
+                {from_claude})
+            {to_clausse}
+        """)
+        logging.info(f'Stooq {feed} data transformed successfully.')
 
-    def store(self, data):
+        if feed == 'bulk':
+            logging.info('Transforming market metadata...')  
+            conn.sql(f"""
+                COPY (
+                    SELECT
+                        split_part(lower("ticker"), '.', 1) AS ticker,
+                        ticker as src_ticker,
+                        market
+                    FROM read_csv_auto('{raw_dir / "markets.csv"}')
+                )
+                TO '{processed_dir / "markets.csv"}'
+                (FORMAT CSV, HEADER);
+            """)
+            logging.info('Market metadata transformed successfully.')
+
+    def store(self):
         # into duckdb database
         ...
 
@@ -148,7 +186,11 @@ class StooqProvider:
 def main():
     provider = StooqProvider()
     # provider.fetch()
-    provider.update()
+    # provider.update()
+    provider.transform('bulk')
+    # df = pd.read_parquet(processed_dir / 'bulk_prices.parquet')
+    # print(df.head())
+    # print(df.sample(10))
 
 
 if __name__ == '__main__':
