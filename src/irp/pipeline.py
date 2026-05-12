@@ -2,7 +2,10 @@ import logging
 from typing import Literal, Protocol
 
 from irp.core.logging import configure_logging
+
+configure_logging(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
 
 class DataProvider(Protocol):
     def fetch(self): ...
@@ -12,17 +15,16 @@ class DataProvider(Protocol):
 
 
 def load_data(provider: DataProvider, feed: Literal['bulk', 'update']) -> None:
-    logger.info(f"Loading {feed} data from {provider.__class__.__name__}")
+    logger.info(f'Loading {feed} data from {provider.__class__.__name__}')
     provider.fetch() if feed == 'bulk' else provider.update()
     provider.transform(feed)
     provider.store(feed)
-    logger.info(f"Finished loading {feed} data from {provider.__class__.__name__}")    
+    logger.info(f'Finished loading {feed} data from {provider.__class__.__name__}')
 
 
 def main():
     from irp.sources.simfin import SimFinSource
     from irp.sources.stooq import StooqSource
-    configure_logging()
 
     stooq = StooqSource()
     simfin = SimFinSource()
