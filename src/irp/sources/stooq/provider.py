@@ -78,11 +78,11 @@ def _build_price_dataset() -> None:
     """Read extracted ticker CSVs, write bulk_prices.parquet + markets.csv, delete data/."""
     logging.debug('Building price dataset...')
     parquet_path = raw_dir / 'bulk_prices.parquet'
+    data_root = raw_dir / 'data'
     market_rows: list[dict[str, str]] = []
     pq_writer: pq.ParquetWriter | None = None
     arrow_schema: pa.Schema | None = None
     ticker_count = 0
-    data_root = raw_dir / 'data'
     try:
         for freq_dir in data_root.iterdir():
             if not freq_dir.is_dir():
@@ -135,7 +135,6 @@ TRANSFORMS: dict[str, TransformSpec] = {
         output_path=processed_dir / 'update_prices.csv',
         input_format='csv',
         output_format='csv',
-        header=True,
     ),
 }
 
@@ -172,14 +171,10 @@ class StooqProvider:
         else:
             source = f"read_csv_auto('{spec.input_path}')"
 
-        target_format = 'PARQUET' if spec.output_format == 'parquet' else 'CSV'
+        target_format = 'PARQUET' if spec.output_format == 'parquet' else 'CSV, HEADER'
 
-        options = [f'FORMAT {target_format}']
+        options_sql = f'FORMAT {target_format}'
 
-        if spec.header:
-            options.append('HEADER')
-
-        options_sql = ', '.join(options)
         conn.sql(f"""
             COPY (
                 SELECT
