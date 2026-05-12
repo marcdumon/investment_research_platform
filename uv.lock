@@ -586,7 +586,7 @@ wheels = [
 [[package]]
 name = "investment-research-platform"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "anywidget" },
     { name = "duckdb" },
@@ -629,7 +629,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.33.1" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "simfin", specifier = ">=1.0.1" },
+    { name = "simfin", specifier = ">=1.0.2" },
     { name = "statsmodels", specifier = ">=0.14.2" },
     { name = "yfinance", specifier = ">=1.3.0" },
 ]
@@ -2240,16 +2240,16 @@ wheels = [
 
 [[package]]
 name = "simfin"
-version = "1.0.1"
+version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/22/f187f230f42c96ae7508abccb11532f5342a1000480d552cc3744f212dff/simfin-1.0.1.tar.gz", hash = "sha256:24e921daff7f938e714ccc7543fd8e75d267f2844dcb0cee8e203259f1a17673", size = 54815, upload-time = "2024-04-03T11:31:11.879Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/12/4f7c5cf9b62974fd37bad9b56a08aa95e553c4605dcdc26c80220140d8aa/simfin-1.0.2.tar.gz", hash = "sha256:51aa37da7f84c06c61baed748e9b3812668b58dd61af869723fb11b8150baa3c", size = 54871, upload-time = "2026-04-30T19:45:03.363Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/43/e84640f5692b24d354001b2c635f09f6f5ddc3b89b1399ecff84dfd79a11/simfin-1.0.1-py3-none-any.whl", hash = "sha256:e2e6d9404d75f30e919f50f84dc576c0d833514a3ded1e38745365da150e5bf2", size = 61599, upload-time = "2024-04-03T11:31:04.995Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/2d/01d79f7fe346a963c4dac20c95c39c41fbd12246cc7955ce6a94a55b9a3d/simfin-1.0.2-py3-none-any.whl", hash = "sha256:869e9ec7750d6ee88deef6c1e450309a493599484fc34e982c0a2c448143d78c", size = 61629, upload-time = "2026-04-30T19:45:00.468Z" },
 ]
 
 [[package]]
