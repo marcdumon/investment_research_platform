@@ -141,7 +141,7 @@ TRANSFORMS: dict[str, TransformSpec] = {
 }
 
 
-class StooqProvider:
+class StooqSource:
     def fetch(self):
         """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
         logging.debug('Fetching Stooq price data...')
@@ -320,7 +320,7 @@ class StooqProvider:
 
 
 def main():
-    provider = StooqProvider()
+    provider = StooqSource()
     provider.fetch()
     provider.update()
     provider.transform('bulk')

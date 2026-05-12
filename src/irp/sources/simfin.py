@@ -1,7 +1,7 @@
 from irp.core.config import config
 
 
-class SimFinProvider:
+class SimFinSource:
     def fetch(self): ...
 
     def update(self): ...

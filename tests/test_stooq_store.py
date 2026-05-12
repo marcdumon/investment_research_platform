@@ -4,8 +4,8 @@ import duckdb
 import pandas as pd
 import pytest
 
-import irp.sources.stooq.provider as mod
-from irp.sources.stooq.provider import StooqProvider
+import irp.sources.stooq as mod
+from irp.sources.stooq import StooqSource
 
 
 _BULK_PRICES = pd.DataFrame([
@@ -51,26 +51,26 @@ def _query(db_path, sql):
 
 def test_store_bulk_creates_prices_table(store_env):
     _, db_path = store_env
-    StooqProvider().store(feed="bulk")
+    StooqSource().store(feed="bulk")
     assert "prices" in _tables(db_path)
 
 
 def test_store_bulk_creates_markets_table(store_env):
     _, db_path = store_env
-    StooqProvider().store(feed="bulk")
+    StooqSource().store(feed="bulk")
     assert "markets" in _tables(db_path)
 
 
 def test_store_bulk_prices_row_count(store_env):
     _, db_path = store_env
-    StooqProvider().store(feed="bulk")
+    StooqSource().store(feed="bulk")
     count = _query(db_path, "SELECT COUNT(*) AS n FROM prices")["n"][0]
     assert count == len(_BULK_PRICES)
 
 
 def test_store_bulk_markets_row_count(store_env):
     _, db_path = store_env
-    StooqProvider().store(feed="bulk")
+    StooqSource().store(feed="bulk")
     count = _query(db_path, "SELECT COUNT(*) AS n FROM markets")["n"][0]
     assert count == len(_MARKETS)
 
@@ -78,8 +78,8 @@ def test_store_bulk_markets_row_count(store_env):
 def test_store_bulk_idempotent(store_env):
     """Storing twice must not duplicate rows (MERGE key: src_ticker + date)."""
     _, db_path = store_env
-    StooqProvider().store(feed="bulk")
-    StooqProvider().store(feed="bulk")
+    StooqSource().store(feed="bulk")
+    StooqSource().store(feed="bulk")
     count = _query(db_path, "SELECT COUNT(*) AS n FROM prices")["n"][0]
     assert count == len(_BULK_PRICES)
 
@@ -97,13 +97,13 @@ _UPDATE_CSV = (
 def store_env_with_update(store_env):
     processed, db_path = store_env
     (processed / "update_prices.csv").write_text(_UPDATE_CSV)
-    StooqProvider().store(feed="bulk")
+    StooqSource().store(feed="bulk")
     return processed, db_path
 
 
 def test_store_update_inserts_new_ticker(store_env_with_update):
     _, db_path = store_env_with_update
-    StooqProvider().store(feed="update")
+    StooqSource().store(feed="update")
     tickers = _query(db_path, "SELECT DISTINCT ticker FROM prices")["ticker"].tolist()
     assert "msft" in tickers
 
@@ -111,7 +111,7 @@ def test_store_update_inserts_new_ticker(store_env_with_update):
 def test_store_update_overwrites_existing_row(store_env_with_update):
     """MERGE must update OHLCV for matching (src_ticker, date)."""
     _, db_path = store_env_with_update
-    StooqProvider().store(feed="update")
+    StooqSource().store(feed="update")
     close = _query(
         db_path,
         "SELECT close FROM prices WHERE src_ticker = 'aapl' AND date = 20230101",
@@ -122,7 +122,7 @@ def test_store_update_overwrites_existing_row(store_env_with_update):
 def test_store_update_does_not_duplicate(store_env_with_update):
     """Update must not add duplicate rows for matched keys."""
     _, db_path = store_env_with_update
-    StooqProvider().store(feed="update")
+    StooqSource().store(feed="update")
     count = _query(
         db_path,
         "SELECT COUNT(*) AS n FROM prices WHERE src_ticker = 'aapl' AND date = 20230101",

@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-import irp.sources.stooq.provider as mod
-from irp.sources.stooq.provider import StooqProvider
+import irp.sources.stooq as mod
+from irp.sources.stooq import StooqSource
 
 
 TICKER_CSV = (
@@ -37,24 +37,24 @@ def patched(raw_dir, monkeypatch):
 
 
 def test_fetch_creates_outputs(patched):
-    StooqProvider().fetch()
+    StooqSource().fetch()
     assert (patched / "ticker_prices.parquet").exists()
     assert (patched / "ticker_markets.csv").exists()
 
 
 def test_fetch_deletes_data_dir(patched):
-    StooqProvider().fetch()
+    StooqSource().fetch()
     assert not (patched / "data").exists()
 
 
 def test_fetch_parquet_contains_ticker(patched):
-    StooqProvider().fetch()
+    StooqSource().fetch()
     df = pd.read_parquet(patched / "ticker_prices.parquet")
     assert "aapl.us" in df["ticker"].values
 
 
 def test_fetch_markets_csv_contains_market(patched):
-    StooqProvider().fetch()
+    StooqSource().fetch()
     df = pd.read_csv(patched / "ticker_markets.csv")
     assert "nasdaq stocks" in df["market"].values
 
@@ -84,7 +84,7 @@ def test_fetch_nested_shards_and_subcategories(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "raw_dir", raw)
     monkeypatch.setattr(mod, "stooq_cfg", cfg)
 
-    StooqProvider().fetch()
+    StooqSource().fetch()
 
     markets = pd.read_csv(raw / "ticker_markets.csv").set_index("ticker")["market"]
     assert markets["aapl.us"] == "nasdaq stocks"
@@ -100,4 +100,4 @@ def test_fetch_raises_when_zips_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "raw_dir", raw)
     monkeypatch.setattr(mod, "stooq_cfg", cfg)
     with pytest.raises(FileNotFoundError):
-        StooqProvider().fetch()
+        StooqSource().fetch()
