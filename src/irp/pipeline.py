@@ -1,23 +1,23 @@
 from typing import Literal, Protocol
+import logging
+from irp.core.logging import configure_logging
+
+configure_logging()
 
 
 class DataProvider(Protocol):
     def fetch(self): ...
     def update(self): ...
-    def transform(self, feed:Literal['bulk', 'update']): ...
-    def store(self, feed:Literal['bulk', 'update']): ...
+    def transform(self, feed: Literal['bulk', 'update']): ...
+    def store(self, feed: Literal['bulk', 'update']): ...
 
 
-def run_bulk_historicals(provider: DataProvider) -> None:
-    provider.fetch()
-    provider.transform('bulk')
-    provider.store('bulk')
-
-
-def run_updates(provider: DataProvider) -> None:
-    provider.update()
-    provider.transform('update')
-    provider.store('update')
+def load_data(provider: DataProvider, feed: Literal['bulk', 'update']) -> None:
+    logging.info(f"Loading {feed} data from {provider.__class__.__name__}")
+    provider.fetch() if feed == 'bulk' else provider.update()
+    provider.transform(feed)
+    provider.store(feed)
+    logging.info(f"Finished loading {feed} data from {provider.__class__.__name__}")    
 
 
 def main():
@@ -27,8 +27,8 @@ def main():
     stooq = StooqProvider()
     simfin = SimFinProvider()
 
-    run_bulk_historicals(stooq)
-    run_updates(stooq)
+    load_data(stooq, 'bulk')
+    load_data(stooq, 'update')
 
 
 if __name__ == '__main__':
