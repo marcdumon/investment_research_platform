@@ -45,14 +45,8 @@ def _unzip_bulk_files() -> None:
     """Unzips the bulk files in the raw data directory. Uses marker files to avoid re-unzipping files that have already been extracted."""
     logger.debug('Unzipping bulk files...')
     for fname in stooq_cfg.bulk_files:
-        zip_path = raw_dir / fname
-        marker = raw_dir / f'.extracted_{zip_path.stem}'
-        if marker.exists() and marker.stat().st_mtime >= zip_path.stat().st_mtime:
-            logger.warning(f'{fname} already extracted, skipping.')
-            continue
-        with zipfile.ZipFile(zip_path) as zf:
+        with zipfile.ZipFile(raw_dir / fname) as zf:
             zf.extractall(raw_dir)
-        marker.touch()
 
 
 def _iter_file_dirs(path: Path) -> Iterator[Path]:
@@ -111,8 +105,8 @@ def _build_price_dataset() -> None:
         writer = csv.DictWriter(fh, fieldnames=['ticker', 'market'])
         writer.writeheader()
         writer.writerows(market_rows)
-    logger.debug(f'Deleting {data_root}...')
-    shutil.rmtree(data_root)
+    # logger.debug(f'Deleting {data_root}...')
+    # shutil.rmtree(data_root)
 
 
 @dataclass(frozen=True)
