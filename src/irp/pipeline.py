@@ -12,6 +12,7 @@ class DataProvider(Protocol):
     def update(self): ...
     def transform(self, feed: Literal['bulk', 'update']): ...
     def store(self, feed: Literal['bulk', 'update']): ...
+    def cleanup(self): ...
 
 
 def load_data(provider: DataProvider, feed: Literal['bulk', 'update']) -> None:
@@ -31,6 +32,7 @@ def main():
 
     load_data(stooq, 'bulk')
     load_data(stooq, 'update')
+    stooq.cleanup()
 
 
 if __name__ == '__main__':
