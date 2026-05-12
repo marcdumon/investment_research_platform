@@ -21,11 +21,11 @@ def load_data(provider: DataProvider, feed: Literal['bulk', 'update']) -> None:
 
 
 def main():
-    from irp.sources.stooq.provider import StooqProvider
-    from irp.sources.simfin.provider import SimFinProvider
+    from irp.sources.stooq import StooqSource
+    from irp.sources.simfin import SimFinSource
 
-    stooq = StooqProvider()
-    simfin = SimFinProvider()
+    stooq = StooqSource()
+    simfin = SimFinSource()
 
     load_data(stooq, 'bulk')
     load_data(stooq, 'update')

@@ -3,8 +3,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-import irp.sources.stooq.provider as mod
-from irp.sources.stooq.provider import StooqProvider, TransformSpec
+import irp.sources.stooq as mod
+from irp.sources.stooq import StooqSource, TransformSpec
 
 
 _RAW_BULK_ROWS = [
@@ -83,13 +83,13 @@ def update_raw(tmp_path, monkeypatch):
 
 def test_transform_bulk_creates_output(bulk_raw):
     _, processed = bulk_raw
-    StooqProvider().transform(feed="bulk")
+    StooqSource().transform(feed="bulk")
     assert (processed / "bulk_prices.parquet").exists()
 
 
 def test_transform_bulk_columns(bulk_raw):
     _, processed = bulk_raw
-    StooqProvider().transform(feed="bulk")
+    StooqSource().transform(feed="bulk")
     df = pd.read_parquet(processed / "bulk_prices.parquet")
     assert set(df.columns) == _EXPECTED_COLUMNS
 
@@ -97,7 +97,7 @@ def test_transform_bulk_columns(bulk_raw):
 def test_transform_bulk_ticker_lowercase(bulk_raw):
     """ticker = split_part(lower(<TICKER>), '.', 1): aapl, eurusd."""
     _, processed = bulk_raw
-    StooqProvider().transform(feed="bulk")
+    StooqSource().transform(feed="bulk")
     df = pd.read_parquet(processed / "bulk_prices.parquet")
     assert set(df["ticker"]) == {"aapl", "eurusd"}
 
@@ -105,7 +105,7 @@ def test_transform_bulk_ticker_lowercase(bulk_raw):
 def test_transform_bulk_src_ticker(bulk_raw):
     """src_ticker = lower(<TICKER>)."""
     _, processed = bulk_raw
-    StooqProvider().transform(feed="bulk")
+    StooqSource().transform(feed="bulk")
     df = pd.read_parquet(processed / "bulk_prices.parquet")
     assert set(df["src_ticker"]) == {"aapl", "eurusd"}
 
@@ -114,19 +114,19 @@ def test_transform_bulk_src_ticker(bulk_raw):
 
 def test_transform_update_creates_output(update_raw):
     _, processed = update_raw
-    StooqProvider().transform(feed="update")
+    StooqSource().transform(feed="update")
     assert (processed / _UPDATE_FILE).exists()
 
 
 def test_transform_update_columns(update_raw):
     _, processed = update_raw
-    StooqProvider().transform(feed="update")
+    StooqSource().transform(feed="update")
     df = pd.read_csv(processed / _UPDATE_FILE)
     assert set(df.columns) == _EXPECTED_COLUMNS
 
 
 def test_transform_update_ticker(update_raw):
     _, processed = update_raw
-    StooqProvider().transform(feed="update")
+    StooqSource().transform(feed="update")
     df = pd.read_csv(processed / _UPDATE_FILE)
     assert "aapl" in df["ticker"].values
