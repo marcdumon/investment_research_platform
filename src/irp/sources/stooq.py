@@ -13,9 +13,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from irp.core.config import config
-from irp.core.logging import configure_logging
 
-configure_logging()
+logger = logging.getLogger(__name__)
 
 root_dir = config.data.root_dir
 stooq_cfg = config.providers.stooq
@@ -25,8 +24,7 @@ processed_dir = root_dir / stooq_cfg.processed_dir
 
 # Todo: script to setup dirs, or create dirs on demand
 # Todo: avoid recreating existing files with markers
-# Todo: provider.py is the only file in ./stooq dir, consider flattening dir structure
-# Todo: rerunning the building_dataset crashes because ./raw/data is deleted after building. 
+# Todo: rerunning the building_dataset crashes because ./raw/data is deleted after building.
 
 
 def _ensure_files_available(
@@ -38,19 +36,19 @@ def _ensure_files_available(
     if all((raw_dir / file).is_file() for file in files):
         return
 
-    logging.error(error_message)
-    print(download_instruction)
+    logger.error(error_message)
+    logger.info(download_instruction)
     raise FileNotFoundError(error_message)
 
 
 def _unzip_bulk_files() -> None:
     """Unzips the bulk files in the raw data directory. Uses marker files to avoid re-unzipping files that have already been extracted."""
-    logging.debug('Unzipping bulk files...')
+    logger.debug('Unzipping bulk files...')
     for fname in stooq_cfg.bulk_files:
         zip_path = raw_dir / fname
         marker = raw_dir / f'.extracted_{zip_path.stem}'
         if marker.exists() and marker.stat().st_mtime >= zip_path.stat().st_mtime:
-            logging.warning(f'{fname} already extracted, skipping.')
+            logger.warning(f'{fname} already extracted, skipping.')
             continue
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(raw_dir)
@@ -77,7 +75,7 @@ def _category_of(leaf: Path, data_root: Path) -> Path:
 
 def _build_price_dataset() -> None:
     """Read extracted ticker CSVs, write bulk_prices.parquet + markets.csv, delete data/."""
-    logging.debug('Building price dataset...')
+    logger.debug('Building price dataset...')
     parquet_file = raw_dir / 'bulk_prices.parquet'
     data_root = raw_dir / 'data'
     market_rows: list[dict[str, str]] = []
@@ -106,18 +104,19 @@ def _build_price_dataset() -> None:
     finally:
         if pq_writer:
             pq_writer.close()
-    logging.debug(f'Flattened {ticker_count} tickers to {parquet_file}.')
+    logger.debug(f'Flattened {ticker_count} tickers to {parquet_file}.')
 
     csv_path = raw_dir / 'markets.csv'
     with open(csv_path, 'w', newline='') as fh:
         writer = csv.DictWriter(fh, fieldnames=['ticker', 'market'])
         writer.writeheader()
         writer.writerows(market_rows)
+    logger.debug(f'Deleting {data_root}...')
     shutil.rmtree(data_root)
 
 
 @dataclass(frozen=True)
-class TransformSpec:
+class FeedSpec:
     input_path: Path
     output_path: Path
     input_format: Literal['csv', 'parquet']
@@ -125,14 +124,14 @@ class TransformSpec:
     header: bool = False
 
 
-TRANSFORMS: dict[str, TransformSpec] = {
-    'bulk': TransformSpec(
+FEED_SPECS: dict[str, FeedSpec] = {
+    'bulk': FeedSpec(
         input_path=raw_dir / 'bulk_prices.parquet',
         output_path=processed_dir / 'bulk_prices.parquet',
         input_format='parquet',
         output_format='parquet',
     ),
-    'update': TransformSpec(
+    'update': FeedSpec(
         input_path=raw_dir / stooq_cfg.update_file,
         output_path=processed_dir / 'update_prices.csv',
         input_format='csv',
@@ -144,7 +143,7 @@ TRANSFORMS: dict[str, TransformSpec] = {
 class StooqSource:
     def fetch(self):
         """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
-        logging.debug('Fetching Stooq price data...')
+        logger.debug('Fetching Stooq price data...')
         _ensure_files_available(
             stooq_cfg.bulk_files,
             error_message='Bulk files not available.',
@@ -152,7 +151,7 @@ class StooqSource:
         )
         _unzip_bulk_files()
         _build_price_dataset()
-        logging.debug('Stooq price data  fetched successfully.')
+        logger.debug('Stooq price data  fetched successfully.')
 
     def update(self):
         _ensure_files_available(
@@ -163,9 +162,9 @@ class StooqSource:
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
         """Transforms the specified feed's raw data into a clean format and stores it in the processed directory."""
-        logging.debug(f'Transforming Stooq {feed} data...')
+        logger.debug(f'Transforming Stooq {feed} data...')
 
-        spec = TRANSFORMS[feed]
+        spec = FEED_SPECS[feed]
         conn = duckdb.connect()
 
         if spec.input_format == 'parquet':
@@ -197,10 +196,10 @@ class StooqSource:
                 ({options_sql});
         """)
 
-        logging.debug(f'Stooq {feed} data transformed successfully.')
+        logger.debug(f'Stooq {feed} data transformed successfully.')
 
         if feed == 'bulk':
-            logging.debug('Transforming market metadata...')
+            logger.debug('Transforming market metadata...')
 
             src_markets = raw_dir / 'markets.csv'
             dst_markets = processed_dir / 'markets.csv'
@@ -216,18 +215,16 @@ class StooqSource:
                 (FORMAT CSV, HEADER);
             """)
 
-            logging.debug('Market metadata transformed successfully.')
+            logger.debug('Market metadata transformed successfully.')
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
-        logging.debug('Storing %s data...', feed)
-
-        source_reader = 'read_parquet' if feed == 'bulk' else 'read_csv_auto'
-
-        prices_file = (
-            processed_dir / 'bulk_prices.parquet'
-            if feed == 'bulk'
-            else processed_dir / 'update_prices.csv'
+        logger.debug('Storing %s data...', feed)
+        spec = FEED_SPECS[feed]
+        source_reader = (
+            'read_parquet' if spec.output_format == 'parquet' else 'read_csv_auto'
         )
+
+        prices_file = spec.output_path
 
         key_cols = [
             'src_ticker',
@@ -286,10 +283,11 @@ class StooqSource:
             """)
 
             if feed == 'bulk':
+                markets_file = processed_dir / 'markets.csv'
                 con.execute(f"""
                     CREATE TABLE IF NOT EXISTS markets AS
                     SELECT *
-                    FROM read_csv_auto('{processed_dir / 'markets.csv'}')
+                    FROM read_csv_auto('{markets_file}')
                     LIMIT 0
                 """)
 
@@ -297,7 +295,7 @@ class StooqSource:
                     MERGE INTO markets t
                     USING (
                         SELECT *
-                        FROM read_csv_auto('{processed_dir / 'markets.csv'}')
+                        FROM read_csv_auto('{markets_file}')
                     ) s
                     ON t.src_ticker = s.src_ticker
 
@@ -316,7 +314,7 @@ class StooqSource:
                     );
                 """)
 
-        logging.debug('Stooq %s data stored successfully.', feed)
+        logger.debug('Stooq %s data stored successfully.', feed)
 
 
 def main():

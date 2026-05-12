@@ -4,7 +4,7 @@ import pyarrow.parquet as pq
 import pytest
 
 import irp.sources.stooq as mod
-from irp.sources.stooq import StooqSource, TransformSpec
+from irp.sources.stooq import StooqSource, FeedSpec
 
 
 _RAW_BULK_ROWS = [
@@ -48,8 +48,8 @@ def bulk_raw(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "raw_dir", raw)
     monkeypatch.setattr(mod, "processed_dir", processed)
     monkeypatch.setattr(mod, "TRANSFORMS", {
-        **mod.TRANSFORMS,
-        "bulk": TransformSpec(
+        **mod.FEED_SPECS,
+        "bulk": FeedSpec(
             input_path=raw / "bulk_prices.parquet",
             output_path=processed / "bulk_prices.parquet",
             input_format="parquet",
@@ -67,8 +67,8 @@ def update_raw(tmp_path, monkeypatch):
     processed.mkdir()
     (raw / _UPDATE_FILE).write_text(_UPDATE_CSV)
     monkeypatch.setattr(mod, "TRANSFORMS", {
-        **mod.TRANSFORMS,
-        "update": TransformSpec(
+        **mod.FEED_SPECS,
+        "update": FeedSpec(
             input_path=raw / _UPDATE_FILE,
             output_path=processed / _UPDATE_FILE,
             input_format="csv",

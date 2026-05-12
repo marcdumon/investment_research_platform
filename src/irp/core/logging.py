@@ -20,7 +20,7 @@ def configure_logging(level: int = logging.DEBUG) -> None:
     root.setLevel(level)
     if not root.handlers:
         handler = logging.StreamHandler()
-        fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
+        fmt = "%(asctime)s|%(levelname)s|%(name)s: %(message)s"
         formatter = _ColorFormatter(fmt)
         handler.setFormatter(formatter)
         root.addHandler(handler)
