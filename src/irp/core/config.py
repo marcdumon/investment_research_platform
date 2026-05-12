@@ -38,7 +38,7 @@ class StooqConfig(ProviderConfig):
     def update_download_instruction(self) -> str:
         """Resolves the download instruction by formatting the template with the config values."""
         return self.update_instruction_template.format(**self.model_dump())
-    
+
 
 class ProvidersConfig(BaseModel):
     simfin: SimfinConfig
