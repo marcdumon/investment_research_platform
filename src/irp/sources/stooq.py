@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from irp.core.config import config
-from irp.core.markers import is_fresh
+from irp.core.freshness import is_fresh
 
 logger = logging.getLogger(__name__)
 
