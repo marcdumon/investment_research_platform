@@ -9,6 +9,10 @@ root_dir = "/mnt/Dev/active_python_projects/investment_research_platform/data"
 [providers.simfin]
 raw_dir = "simfin/raw"
 processed_dir = "simfin/processed"
+refresh_days_fundamentals = 7
+refresh_days_shareprices = 7
+refresh_days_meta = 7
+
 
 [providers.stooq]
 raw_dir = "stooq/raw"

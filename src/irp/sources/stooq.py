@@ -23,7 +23,6 @@ processed_dir = root_dir / stooq_cfg.processed_dir
 
 
 # Todo: script to setup dirs, or create dirs on demand
-# Todo: rerunning the building_dataset crashes because ./raw/data is deleted after building.
 
 
 def _is_fresh(marker: Path, *inputs: Path) -> bool:
@@ -144,7 +143,7 @@ FEED_SPECS: dict[str, FeedSpec] = {
 
 
 class StooqSource:
-    def fetch(self):
+    def fetch_bulk(self) -> None:
         """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
         marker = raw_dir / '.fetched'
         zip_paths = [raw_dir / f for f in stooq_cfg.bulk_files]
@@ -162,7 +161,7 @@ class StooqSource:
         marker.touch()
         logger.debug('Stooq price data fetched successfully.')
 
-    def update(self):
+    def update(self) -> None:
         _ensure_files_available(
             stooq_cfg.update_file,
             error_message='Update file not available.',
@@ -358,7 +357,7 @@ class StooqSource:
 
 def main():
     provider = StooqSource()
-    provider.fetch()
+    provider.fetch_bulk()
     provider.update()
     provider.transform('bulk')
     provider.transform('update')
