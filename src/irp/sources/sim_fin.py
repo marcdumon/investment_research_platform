@@ -1,21 +1,20 @@
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Sequence
 
+import requests
 import simfin as sf
 
 from irp.core.config import config
-from irp.core.logging import configure_logging
 
 logger = logging.getLogger(__name__)
-configure_logging(level=logging.DEBUG)
 
 root_dir = config.data.root_dir
 simfin_cfg = config.providers.simfin
 raw_dir = root_dir / simfin_cfg.raw_dir
 processed_dir = root_dir / simfin_cfg.processed_dir
 
-
+FundamentalsNames = Literal['income', 'balance', 'cashflow']
 FundamentalsVariant = Literal['annual', 'quarterly', 'ttm']
 SharepricesVariant = Literal['daily', 'latest']
 Market = Literal['us', 'de', 'cn']
@@ -48,20 +47,13 @@ class MetaDataset:
 SimFinDataset = FundamentalsDataset | SharepricesDataset | MetaDataset
 
 
-_FUNDAMENTALS_NAMES: list[Literal['income', 'balance', 'cashflow']] = [
-    'income',
-    'balance',
-    'cashflow',
-]
-_FUNDAMENTALS_VARIANTS: list[FundamentalsVariant] = ['annual', 'quarterly', 'ttm']
-_SHAREPRICES_VARIANTS: list[SharepricesVariant] = ['daily', 'latest']
-_MARKETS: list[Market] = ['us', 'de']
-_META_NAMES: list[Literal['markets', 'industries']] = [
-    'markets',
-    'industries',
-]
+_FUNDAMENTALS_NAMES: list[FundamentalsNames] = ['income', 'balance', 'cashflow']
+_FUNDAMENTALS_VARIANTS: list[FundamentalsVariant] = ['annual', 'quarterly']
+_SHAREPRICES_VARIANTS: list[SharepricesVariant] = ['daily']
+_MARKETS: list[Market] = ['us','de']
+_META_NAMES: list[Literal['markets', 'industries']] = ['markets', 'industries']
 
-BULK_DATASETS: list[SimFinDataset] = (
+BULK_DATASETS: Sequence[SimFinDataset] = (
     [
         FundamentalsDataset(name, variant, market)
         for name in _FUNDAMENTALS_NAMES
@@ -84,30 +76,38 @@ class SimFinSource:
         sf.set_data_dir(str(raw_dir))
 
         for dataset in BULK_DATASETS:
-
-            logger.debug(
-                'Fetching %s/%s/%s', dataset.name, dataset.variant, dataset.market
-            )
-            sf.load(
-                dataset=dataset.name,
-                variant=dataset.variant,
-                market=dataset.market,
-                refresh_days=dataset.refresh_days,
-            )
+            logger.debug(f'Fetching {dataset.name}/{dataset.variant}/{dataset.market}')
+            try:
+                sf.load(
+                    dataset=dataset.name,
+                    variant=dataset.variant,
+                    market=dataset.market,
+                    refresh_days=dataset.refresh_days,
+                )
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    logger.error('Rate limit exceeded. Stopping bulk fetch.')
+                else:
+                    logger.error(
+                            f'Error fetching {dataset.name}/{dataset.variant}/{dataset.market}: {e}'
+                        )
+                break
 
     def update(self): ...
 
-    def transform(self, raw): ...
+    def transform(self, feed: Literal['bulk', 'update']): ...
 
-    def store(self, data): ...
+    def store(self, feed: Literal['bulk', 'update']): ...
 
     def cleanup(self): ...
 
 
 def main():
+
     source = SimFinSource()
     source.fetch_bulk()
 
 
 if __name__ == '__main__':
-    main()
+    # main()
+    ...
