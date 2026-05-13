@@ -1,5 +1,8 @@
 import logging
 
+logging.getLogger('urllib3').setLevel(logging.INFO)
+logging.getLogger('requests').setLevel(logging.INFO)
+
 _COLORS = {
     logging.DEBUG: '\033[37m',  # white
     logging.INFO: '\033[32m',  # green
