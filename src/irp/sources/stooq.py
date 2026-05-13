@@ -188,20 +188,22 @@ class StooqSource:
 
         options_sql = f'FORMAT {target_format}'
 
+        # Not selecting per, time and OpenInt columns
+        # Add Src and AdjClose column
+
         conn.sql(f"""
             COPY (
                 SELECT
-                    split_part(lower(t."<TICKER>"), '.', 1) AS ticker,
-                    lower(t."<TICKER>") AS src_ticker,
-                    t."<PER>" AS per,
-                    t."<DATE>" AS date,
-                    t."<TIME>" AS time,
-                    t."<OPEN>" AS open,
-                    t."<HIGH>" AS high,
-                    t."<LOW>" AS low,
-                    t."<CLOSE>" AS close,
-                    t."<VOL>" AS vol,
-                    t."<OPENINT>" AS openint
+                    split_part(upper(t."<TICKER>"), '.', 1) AS Ticker,
+                    t."<DATE>" AS Date,
+                    t."<OPEN>" AS O,
+                    t."<HIGH>" AS H,
+                    t."<LOW>" AS L,
+                    t."<CLOSE>" AS C,
+                    t."<VOL>" AS V,
+                    NULL::DOUBLE AS AdjClose,
+                    t."<TICKER>" AS SrcId,
+                    'stooq' AS Src,
                 FROM {source} t
             )
             TO '{spec.output_path}'
@@ -218,9 +220,10 @@ class StooqSource:
             conn.sql(f"""
                 COPY (
                     SELECT
-                        split_part(lower("ticker"), '.', 1) AS ticker,
-                        ticker AS src_ticker,
-                        market
+                        split_part(lower("ticker"), '.', 1) AS Ticker,
+                        market AS Market,
+                        ticker AS SrcId,
+                        'stooq' AS Src
                     FROM read_csv_auto('{src_markets}')
                 )
                 TO '{dst_markets}'
@@ -244,93 +247,63 @@ class StooqSource:
         )
 
         prices_file = spec.output_path
-
-        key_cols = [
-            'src_ticker',
-            'date',
-        ]
-
-        update_cols = ['per', 'time', 'open', 'high', 'low', 'close', 'vol', 'openint']
-
+        key_cols = ['Ticker', 'SrcId', 'Date', 'Src']
+        update_cols = ['O', 'H', 'L', 'C', 'V', 'AdjClose']
         insert_cols = [
-            'ticker',
-            'src_ticker',
-            'per',
-            'date',
-            'time',
-            'open',
-            'high',
-            'low',
-            'close',
-            'vol',
-            'openint',
+            'Ticker',
+            'Date',
+            'O',
+            'H',
+            'L',
+            'C',
+            'V',
+            'AdjClose',
+            'SrcId',
+            'Src',
         ]
 
         on_clause = '\nAND '.join(f't.{col} = s.{col}' for col in key_cols)
-
         update_set_clause = ',\n'.join(f'{col} = s.{col}' for col in update_cols)
-
         insert_columns_clause = ', '.join(insert_cols)
-
         insert_values_clause = ', '.join(f's.{col}' for col in insert_cols)
 
         with duckdb.connect(config.database.path) as con:
             con.execute(f"""
                 CREATE TABLE IF NOT EXISTS prices AS
-                SELECT *
-                FROM {source_reader}('{prices_file}')
-                LIMIT 0
+                SELECT * FROM {source_reader}('{prices_file}') LIMIT 0
             """)
 
             con.execute(f"""
                 MERGE INTO prices t
                 USING (
-                    SELECT *
+                    SELECT DISTINCT ON ({', '.join(key_cols)}) *
                     FROM {source_reader}('{prices_file}')
                 ) s
                 ON {on_clause}
-
                 WHEN MATCHED THEN UPDATE SET
                     {update_set_clause}
-
-                WHEN NOT MATCHED THEN INSERT (
-                    {insert_columns_clause}
-                )
-                VALUES (
-                    {insert_values_clause}
-                );
+                WHEN NOT MATCHED THEN INSERT ({insert_columns_clause})
+                VALUES ({insert_values_clause});
             """)
 
             if feed == 'bulk':
                 markets_file = processed_dir / 'markets.csv'
                 con.execute(f"""
                     CREATE TABLE IF NOT EXISTS markets AS
-                    SELECT *
-                    FROM read_csv_auto('{markets_file}')
-                    LIMIT 0
+                    SELECT * FROM read_csv_auto('{markets_file}') LIMIT 0
                 """)
 
                 con.execute(f"""
                     MERGE INTO markets t
                     USING (
-                        SELECT *
+                        SELECT DISTINCT ON (SrcId) *
                         FROM read_csv_auto('{markets_file}')
                     ) s
-                    ON t.src_ticker = s.src_ticker
-
+                    ON t.SrcId = s.SrcId
                     WHEN MATCHED THEN UPDATE SET
-                        market = s.market
-
-                    WHEN NOT MATCHED THEN INSERT (
-                        ticker,
-                        src_ticker,
-                        market
-                    )
-                    VALUES (
-                        s.ticker,
-                        s.src_ticker,
-                        s.market
-                    );
+                        Market = s.Market
+                    WHEN NOT MATCHED THEN INSERT (Ticker, Market, SrcId, Src)
+                    VALUES (s.Ticker, s.Market, s.SrcId, s.Src);
                 """)
 
         marker.touch()
