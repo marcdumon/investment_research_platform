@@ -142,6 +142,46 @@ FEED_SPECS: dict[str, FeedSpec] = {
 }
 
 
+def _transform_prices(conn: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
+    source = f"read_parquet('{spec.input_path}')" if spec.input_format == 'parquet' else f"read_csv_auto('{spec.input_path}')"
+    fmt = 'FORMAT PARQUET' if spec.output_format == 'parquet' else 'FORMAT CSV, HEADER'
+    conn.sql(f"""
+        COPY (
+            SELECT
+                split_part(upper(t."<TICKER>"), '.', 1) AS Ticker,
+                t."<DATE>"  AS Date,
+                t."<OPEN>"  AS O,
+                t."<HIGH>"  AS H,
+                t."<LOW>"   AS L,
+                t."<CLOSE>" AS C,
+                t."<VOL>"   AS V,
+                NULL::DOUBLE AS AdjClose,
+                t."<TICKER>" AS SrcId,
+                'stooq'      AS Src
+            FROM {source} t
+        )
+        TO '{spec.output_path}' ({fmt})
+    """)
+    logger.debug('Wrote %s', spec.output_path)
+
+
+def _transform_markets(conn: duckdb.DuckDBPyConnection) -> None:
+    src = raw_dir / 'markets.csv'
+    dst = processed_dir / 'markets.csv'
+    conn.sql(f"""
+        COPY (
+            SELECT
+                split_part(lower("ticker"), '.', 1) AS Ticker,
+                market AS Market,
+                ticker AS SrcId,
+                'stooq' AS Src
+            FROM read_csv_auto('{src}')
+        )
+        TO '{dst}' (FORMAT CSV, HEADER)
+    """)
+    logger.debug('Wrote %s', dst)
+
+
 class StooqSource:
     def fetch_bulk(self) -> None:
         """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
@@ -169,69 +209,16 @@ class StooqSource:
         )
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
-        """Transforms the specified feed's raw data into a clean format and stores it in the processed directory."""
         spec = FEED_SPECS[feed]
         marker = raw_dir / f'.transformed_{feed}'
         upstream = raw_dir / '.fetched' if feed == 'bulk' else spec.input_path
         if _is_fresh(marker, upstream):
             logger.info(f'transform({feed}): already up to date, skipping')
             return
-        logger.debug(f'Transforming Stooq {feed} data...')
         conn = duckdb.connect()
-
-        if spec.input_format == 'parquet':
-            source = f"read_parquet('{spec.input_path}')"
-        else:
-            source = f"read_csv_auto('{spec.input_path}')"
-
-        target_format = 'PARQUET' if spec.output_format == 'parquet' else 'CSV, HEADER'
-
-        options_sql = f'FORMAT {target_format}'
-
-        # Not selecting per, time and OpenInt columns
-        # Add Src and AdjClose column
-
-        conn.sql(f"""
-            COPY (
-                SELECT
-                    split_part(upper(t."<TICKER>"), '.', 1) AS Ticker,
-                    t."<DATE>" AS Date,
-                    t."<OPEN>" AS O,
-                    t."<HIGH>" AS H,
-                    t."<LOW>" AS L,
-                    t."<CLOSE>" AS C,
-                    t."<VOL>" AS V,
-                    NULL::DOUBLE AS AdjClose,
-                    t."<TICKER>" AS SrcId,
-                    'stooq' AS Src,
-                FROM {source} t
-            )
-            TO '{spec.output_path}'
-                ({options_sql});
-        """)
-
-        logger.debug(f'Stooq {feed} data transformed successfully.')
-
+        _transform_prices(conn, spec)
         if feed == 'bulk':
-            logger.debug('Transforming market metadata...')
-
-            src_markets = raw_dir / 'markets.csv'
-            dst_markets = processed_dir / 'markets.csv'
-            conn.sql(f"""
-                COPY (
-                    SELECT
-                        split_part(lower("ticker"), '.', 1) AS Ticker,
-                        market AS Market,
-                        ticker AS SrcId,
-                        'Stooq' AS Src
-                    FROM read_csv_auto('{src_markets}')
-                )
-                TO '{dst_markets}'
-                (FORMAT CSV, HEADER);
-            """)
-
-            logger.debug('Market metadata transformed successfully.')
-
+            _transform_markets(conn)
         marker.touch()
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
