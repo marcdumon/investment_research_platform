@@ -223,7 +223,7 @@ class StooqSource:
                         split_part(lower("ticker"), '.', 1) AS Ticker,
                         market AS Market,
                         ticker AS SrcId,
-                        'stooq' AS Src
+                        'Stooq' AS Src
                     FROM read_csv_auto('{src_markets}')
                 )
                 TO '{dst_markets}'
