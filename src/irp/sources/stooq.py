@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from irp.core.config import config
+from irp.core.markers import is_fresh
 
 logger = logging.getLogger(__name__)
 
@@ -20,19 +21,6 @@ root_dir = config.data.root_dir
 stooq_cfg = config.providers.stooq
 raw_dir = root_dir / stooq_cfg.raw_dir
 processed_dir = root_dir / stooq_cfg.processed_dir
-
-
-# Todo: script to setup dirs, or create dirs on demand
-
-
-def _is_fresh(marker: Path, *inputs: Path) -> bool:
-    """True if marker exists and is newer than all inputs."""
-    if not marker.exists():
-        return False
-    if not all(inp.exists() for inp in inputs):
-        return False
-    marker_mtime = marker.stat().st_mtime
-    return all(inp.stat().st_mtime <= marker_mtime for inp in inputs)
 
 
 def _ensure_files_available(
@@ -236,7 +224,7 @@ class StooqSource:
         """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
         marker = raw_dir / '.fetched'
         zip_paths = [raw_dir / f for f in stooq_cfg.bulk_files]
-        if _is_fresh(marker, *zip_paths):
+        if is_fresh(marker, *zip_paths):
             logger.info('fetch: already up to date, skipping')
             return
         logger.debug('Fetching Stooq price data...')
@@ -261,7 +249,7 @@ class StooqSource:
         spec = FEED_SPECS[feed]
         marker = raw_dir / f'.transformed_{feed}'
         upstream = raw_dir / '.fetched' if feed == 'bulk' else spec.input_path
-        if _is_fresh(marker, upstream):
+        if is_fresh(marker, upstream):
             logger.info(f'transform({feed}): already up to date, skipping')
             return
         conn = duckdb.connect()
@@ -273,7 +261,7 @@ class StooqSource:
     def store(self, feed: Literal['bulk', 'update']) -> None:
         marker = raw_dir / f'.stored_{feed}'
         upstream = raw_dir / f'.transformed_{feed}'
-        if _is_fresh(marker, upstream):
+        if is_fresh(marker, upstream):
             logger.info(f'store({feed}): already up to date, skipping')
             return
         spec = FEED_SPECS[feed]
