@@ -1,6 +1,11 @@
-from pathlib import Path
-from pydantic import BaseModel
+import os
 import tomllib
+from pathlib import Path
+
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+load_dotenv()
 
 
 class DatabaseConfig(BaseModel):
@@ -17,7 +22,11 @@ class ProviderConfig(BaseModel):
 
 
 class SimfinConfig(ProviderConfig):
-    api_key: str | None = None
+    api_key: str = os.environ['SIMFIN_API_KEY']
+    refresh_days_fundamentals: int 
+    refresh_days_shareprices: int
+    refresh_days_meta: int
+
 
 
 class StooqConfig(ProviderConfig):

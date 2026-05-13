@@ -47,7 +47,7 @@ def test_fetch_skips_when_marker_is_fresh(fetch_env):
     _touch(raw / ZIP_NAME, now - 10)
     _touch(raw / ".fetched", now)
     with patch.object(mod, "_build_price_dataset") as mock_build:
-        StooqSource().fetch()
+        StooqSource().fetch_bulk()
     mock_build.assert_not_called()
 
 
@@ -58,14 +58,14 @@ def test_fetch_runs_when_zip_is_newer(fetch_env):
     _touch(raw / ZIP_NAME, now)
     with patch.object(mod, "_build_price_dataset") as mock_build:
         with patch.object(mod, "_unzip_bulk_files"):
-            StooqSource().fetch()
+            StooqSource().fetch_bulk()
     mock_build.assert_called_once()
 
 
 def test_fetch_runs_when_marker_missing(fetch_env):
     with patch.object(mod, "_build_price_dataset") as mock_build:
         with patch.object(mod, "_unzip_bulk_files"):
-            StooqSource().fetch()
+            StooqSource().fetch_bulk()
     mock_build.assert_called_once()
 
 
@@ -73,7 +73,7 @@ def test_fetch_writes_marker(fetch_env):
     raw = fetch_env
     with patch.object(mod, "_unzip_bulk_files"):
         with patch.object(mod, "_build_price_dataset"):
-            StooqSource().fetch()
+            StooqSource().fetch_bulk()
     assert (raw / ".fetched").exists()
 
 
