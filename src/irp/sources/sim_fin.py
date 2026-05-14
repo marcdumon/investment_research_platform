@@ -1,7 +1,9 @@
 from collections import defaultdict
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Sequence
+import zipfile
 
 import duckdb
 import requests
@@ -64,7 +66,7 @@ _FUNDAMENTALS_NAMES: list[FundamentalsNames] = ['income', 'balance', 'cashflow']
 _FUNDAMENTALS_VARIANTS: list[FundamentalsVariant] = ['annual', 'quarterly']
 _SHAREPRICES_VARIANTS: list[SharepricesVariant] = ['daily']
 _MARKETS: list[Market] = ['us', 'de']
-_META_NAMES: list[Literal['markets', 'industries']] = ['markets', 'industries']
+_META_NAMES: list[Literal['markets', 'industries']] = [ 'industries']
 
 BULK_DATASETS: Sequence[SimFinDataset] = (
     [
@@ -81,6 +83,30 @@ BULK_DATASETS: Sequence[SimFinDataset] = (
     + [CompaniesDataset(market) for market in _MARKETS]
     + [MetaDataset(name) for name in _META_NAMES]
 )
+
+
+def _configure_sf() -> None:
+    sf.set_api_key(simfin_cfg.api_key)
+    sf.set_data_dir(str(raw_dir))
+
+
+def _download_dataset(dataset: SimFinDataset) -> bool:
+    try:
+        sf.load(
+            dataset=dataset.name,
+            variant=dataset.variant,
+            market=dataset.market,
+            refresh_days=dataset.refresh_days,
+        )
+        return True
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429:
+            logger.error('Rate limit exceeded. Stopping bulk fetch.')
+        else:
+            logger.error(
+                f'Error fetching {dataset.name}/{dataset.variant}/{dataset.market}: {e}'
+            )
+        return False
 
 
 def _transform_fundamentals(conn: duckdb.DuckDBPyConnection) -> None:
@@ -117,8 +143,8 @@ def _transform_fundamentals(conn: duckdb.DuckDBPyConnection) -> None:
         logger.debug('Wrote %s', out)
 
 
-def _transform_prices(conn: duckdb.DuckDBPyConnection) -> None:
-    prices_files = sorted(raw_dir.glob('*-shareprices-*.csv'))
+def _transform_prices(conn: duckdb.DuckDBPyConnection, variant: str = 'daily') -> None:
+    prices_files = sorted(raw_dir.glob(f'*-shareprices-{variant}.csv'))
     if not prices_files:
         return
 
@@ -202,7 +228,9 @@ def _store_fundamentals(con: duckdb.DuckDBPyConnection) -> None:
         if not src.exists():
             continue
         table = f'fundamentals_{statement}'
-        con.execute(f"CREATE TABLE IF NOT EXISTS {table} AS SELECT * FROM read_csv_auto('{src}') LIMIT 0")
+        con.execute(
+            f"CREATE TABLE IF NOT EXISTS {table} AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
+        )
         con.execute(f"""
             MERGE INTO {table} t
             USING (
@@ -224,7 +252,18 @@ def _store_prices_simfin(con: duckdb.DuckDBPyConnection) -> None:
         return
     key_cols = ['Ticker', 'SrcId', 'Date', 'Src']
     update_cols = ['O', 'H', 'L', 'C', 'V', 'AdjClose']
-    insert_cols = ['Ticker', 'Date', 'O', 'H', 'L', 'C', 'V', 'AdjClose', 'SrcId', 'Src']
+    insert_cols = [
+        'Ticker',
+        'Date',
+        'O',
+        'H',
+        'L',
+        'C',
+        'V',
+        'AdjClose',
+        'SrcId',
+        'Src',
+    ]
     on_clause = ' AND '.join(f't.{c} = s.{c}' for c in key_cols)
     update_set = ', '.join(f'{c} = s.{c}' for c in update_cols)
     insert_cols_sql = ', '.join(insert_cols)
@@ -235,7 +274,9 @@ def _store_prices_simfin(con: duckdb.DuckDBPyConnection) -> None:
                O, H, L, C, V, AdjClose, SrcId, Src
         FROM read_csv_auto('{src}')
     """
-    con.execute(f"CREATE TABLE IF NOT EXISTS prices AS SELECT * FROM ({src_sql}) LIMIT 0")
+    con.execute(
+        f'CREATE TABLE IF NOT EXISTS prices AS SELECT * FROM ({src_sql}) LIMIT 0'
+    )
     con.execute(f"""
         MERGE INTO prices t
         USING (SELECT DISTINCT ON ({', '.join(key_cols)}) * FROM ({src_sql})) s
@@ -250,7 +291,9 @@ def _store_dividends(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'prices_dividends.csv'
     if not src.exists():
         return
-    con.execute(f"CREATE TABLE IF NOT EXISTS dividends AS SELECT * FROM read_csv_auto('{src}') LIMIT 0")
+    con.execute(
+        f"CREATE TABLE IF NOT EXISTS dividends AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
+    )
     con.execute(f"""
         DELETE FROM dividends
         WHERE (SrcId, Date) IN (SELECT DISTINCT SrcId, Date FROM read_csv_auto('{src}'))
@@ -263,36 +306,25 @@ def _store_companies(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'companies.csv'
     if not src.exists():
         return
-    con.execute(f"CREATE TABLE IF NOT EXISTS companies AS SELECT * FROM read_csv_auto('{src}') LIMIT 0")
-    con.execute(f"DELETE FROM companies WHERE SrcId IN (SELECT DISTINCT SrcId FROM read_csv_auto('{src}'))")
+    con.execute(
+        f"CREATE TABLE IF NOT EXISTS companies AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
+    )
+    con.execute(
+        f"DELETE FROM companies WHERE SrcId IN (SELECT DISTINCT SrcId FROM read_csv_auto('{src}'))"
+    )
     con.execute(f"INSERT INTO companies SELECT * FROM read_csv_auto('{src}')")
     logger.debug('Stored companies')
 
 
 class SimFinSource:
     def fetch_bulk(self) -> None:
-        sf.set_api_key(simfin_cfg.api_key)
-        sf.set_data_dir(str(raw_dir))
-
+        _configure_sf()
         before = {f: f.stat().st_mtime for f in raw_dir.glob('*.csv')}
 
         for dataset in BULK_DATASETS:
             logger.debug(f'Fetching {dataset.name}/{dataset.variant}/{dataset.market}')
-            try:
-                sf.load(
-                    dataset=dataset.name,
-                    variant=dataset.variant,
-                    market=dataset.market,
-                    refresh_days=dataset.refresh_days,
-                )
-
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429:
-                    logger.error('Rate limit exceeded. Stopping bulk fetch.')
-                else:
-                    logger.error(
-                        f'Error fetching {dataset.name}/{dataset.variant}/{dataset.market}: {e}'
-                    )
+            success = _download_dataset(dataset)
+            if not success:
                 break
 
         after = {f: f.stat().st_mtime for f in raw_dir.glob('*.csv')}
@@ -302,18 +334,34 @@ class SimFinSource:
         else:
             logger.info('fetch: no new data downloaded, skipping marker update')
 
-    def update(self): ...
+    def update(self) -> None:
+        """Only shareprices can be incrementally updated. Downloads latest variant for each market."""
+        _configure_sf()
+        marker = raw_dir / '.fetched_update'
+        before = {f: f.stat().st_mtime for f in raw_dir.glob('*-shareprices-latest.csv')}
+        for market in _MARKETS:
+            if not _download_dataset(SharepricesDataset(variant='latest', market=market, refresh_days=1)):
+                break
+        after = {f: f.stat().st_mtime for f in raw_dir.glob('*-shareprices-latest.csv')}
+        if after != before:
+            marker.touch()
+            logger.debug('SimFin update data downloaded, touching .fetched_update marker.')
+        else:
+            logger.info('update: no new data downloaded, skipping marker update')
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
         marker = raw_dir / f'.transformed_{feed}'
-        upstream = raw_dir / '.fetched'
+        upstream = raw_dir / ('.fetched' if feed == 'bulk' else '.fetched_update')
         if is_fresh(marker, upstream):
             logger.info(f'transform({feed}): already up to date, skipping')
             return
         conn = duckdb.connect()
-        _transform_fundamentals(conn)
-        _transform_prices(conn)
-        _transform_companies(conn)
+        if feed == 'bulk':
+            _transform_fundamentals(conn)
+            _transform_prices(conn, variant='daily')
+            _transform_companies(conn)
+        else:
+            _transform_prices(conn, variant='latest')
         marker.touch()
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
@@ -323,12 +371,13 @@ class SimFinSource:
             logger.info(f'store({feed}): already up to date, skipping')
             return
         with duckdb.connect(config.database.path) as con:
-            _store_fundamentals(con)
+            if feed == 'bulk':
+                _store_fundamentals(con)
+                _store_dividends(con)
+                _store_companies(con)
             _store_prices_simfin(con)
-            _store_dividends(con)
-            _store_companies(con)
         marker.touch()
-        logger.debug('SimFin %s data stored.', feed)
+        logger.debug(f'SimFin {feed} data stored.')
 
     def cleanup(self) -> None:
         processed_targets = [
@@ -343,17 +392,4 @@ class SimFinSource:
             if path.exists():
                 path.unlink()
                 logger.debug(f'Deleted {path}')
-        for path in raw_dir.glob('*.csv'):
-            path.unlink()
-            logger.debug(f'Deleted {path}')
 
-
-def main():
-
-    source = SimFinSource()
-    source.fetch_bulk()
-
-
-if __name__ == '__main__':
-    # main()
-    ...
