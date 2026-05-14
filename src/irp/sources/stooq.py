@@ -38,7 +38,7 @@ def _ensure_files_available(
 
 
 def _unzip_bulk_files() -> None:
-    """Unzips the bulk files in the raw data directory. Uses marker files to avoid re-unzipping files that have already been extracted."""
+    """Extract all configured bulk zips into raw_dir. Caller is responsible for freshness checks."""
     logger.debug('Unzipping bulk files...')
     for fname in stooq_cfg.bulk_files:
         with zipfile.ZipFile(raw_dir / fname) as zf:
@@ -101,8 +101,6 @@ def _build_price_dataset() -> None:
         writer = csv.DictWriter(fh, fieldnames=['ticker', 'market'])
         writer.writeheader()
         writer.writerows(market_rows)
-    # logger.debug(f'Deleting {data_root}...')
-    # shutil.rmtree(data_root)
 
 
 @dataclass(frozen=True)
@@ -111,7 +109,6 @@ class FeedSpec:
     output_path: Path
     input_format: Literal['csv', 'parquet']
     output_format: Literal['csv', 'parquet']
-    header: bool = False
 
 
 FEED_SPECS: dict[str, FeedSpec] = {
@@ -150,7 +147,7 @@ def _transform_prices(conn: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
         )
         TO '{spec.output_path}' ({fmt})
     """)
-    logger.debug('Wrote %s', spec.output_path)
+    logger.debug(f'Wrote {spec.output_path}')
 
 
 def _transform_markets(conn: duckdb.DuckDBPyConnection) -> None:
@@ -167,7 +164,7 @@ def _transform_markets(conn: duckdb.DuckDBPyConnection) -> None:
         )
         TO '{dst}' (FORMAT CSV, HEADER)
     """)
-    logger.debug('Wrote %s', dst)
+    logger.debug(f'Wrote {dst}')
 
 
 def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
@@ -196,7 +193,7 @@ def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
         WHEN NOT MATCHED THEN INSERT ({insert_cols_sql})
         VALUES ({insert_vals_sql});
     """)
-    logger.debug('Stored prices from %s', spec.output_path)
+    logger.debug(f'Stored prices from {spec.output_path}')
 
 
 def _store_markets(con: duckdb.DuckDBPyConnection) -> None:
@@ -216,12 +213,12 @@ def _store_markets(con: duckdb.DuckDBPyConnection) -> None:
         WHEN NOT MATCHED THEN INSERT (Ticker, Market, SrcId, Src)
         VALUES (s.Ticker, s.Market, s.SrcId, s.Src);
     """)
-    logger.debug('Stored markets from %s', markets_file)
+    logger.debug(f'Stored markets from {markets_file}')
 
 
 class StooqSource:
     def fetch_bulk(self) -> None:
-        """Fetches Stooq price data by unzipping bulk files and building a price dataset."""
+        """Stooq bulk zips must be manually downloaded and placed in raw_dir. Unzips and builds the price dataset."""
         marker = raw_dir / '.fetched'
         zip_paths = [raw_dir / f for f in stooq_cfg.bulk_files]
         if is_fresh(marker, *zip_paths):
@@ -239,6 +236,8 @@ class StooqSource:
         logger.debug('Stooq price data fetched successfully.')
 
     def update(self) -> None:
+        """Stooq files cannot be fetched programmatically; they must be manually downloaded.
+        Checks that the update file has been placed in raw_dir before continuing."""
         _ensure_files_available(
             stooq_cfg.update_file,
             error_message='Update file not available.',
@@ -270,7 +269,7 @@ class StooqSource:
             if feed == 'bulk':
                 _store_markets(con)
         marker.touch()
-        logger.debug('Stooq %s data stored successfully.', feed)
+        logger.debug(f'Stooq {feed} data stored successfully.')
 
     def cleanup(self) -> None:
         """Delete all intermediate files, keeping zips, markers, and the database."""

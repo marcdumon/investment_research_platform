@@ -3,7 +3,7 @@ import tomllib
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -22,7 +22,7 @@ class ProviderConfig(BaseModel):
 
 
 class SimfinConfig(ProviderConfig):
-    api_key: str = os.environ['SIMFIN_API_KEY']
+    api_key: str = Field(default_factory=lambda: os.environ['SIMFIN_API_KEY'])
     refresh_days_fundamentals: int 
     refresh_days_shareprices: int
     refresh_days_meta: int
