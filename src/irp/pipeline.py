@@ -30,14 +30,14 @@ def main():
     stooq = StooqSource()
     simfin = SimFinSource()
 
-    # load_data(stooq, 'bulk')
-    # load_data(stooq, 'update')
-    # stooq.cleanup()
+    load_data(stooq, 'bulk')
+    load_data(stooq, 'update')
+    stooq.cleanup()
 
-    # load_data(simfin, 'bulk')
+    load_data(simfin, 'bulk')
     load_data(simfin, 'update')
-
     # simfin.cleanup()
+
 
 
 if __name__ == '__main__':
