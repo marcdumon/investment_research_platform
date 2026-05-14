@@ -1,5 +1,6 @@
 from collections import defaultdict
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Sequence
@@ -392,4 +393,8 @@ class SimFinSource:
             if path.exists():
                 path.unlink()
                 logger.debug(f'Deleted {path}')
+        for d in (raw_dir / 'info', raw_dir / 'cache'):
+            if d.exists():
+                shutil.rmtree(d)
+                logger.debug(f'Deleted {d}')
 
