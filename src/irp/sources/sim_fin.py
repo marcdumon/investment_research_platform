@@ -204,12 +204,17 @@ def _store_fundamentals(con: duckdb.DuckDBPyConnection) -> None:
         table = f'fundamentals_{statement}'
         con.execute(f"CREATE TABLE IF NOT EXISTS {table} AS SELECT * FROM read_csv_auto('{src}') LIMIT 0")
         con.execute(f"""
-            DELETE FROM {table}
-            WHERE (SrcId, "Fiscal Year", "Fiscal Period") IN (
-                SELECT DISTINCT SrcId, "Fiscal Year", "Fiscal Period" FROM read_csv_auto('{src}')
-            )
+            MERGE INTO {table} t
+            USING (
+                SELECT DISTINCT ON (SrcId, "Fiscal Year", "Fiscal Period") *
+                FROM read_csv_auto('{src}')
+            ) s
+            ON t.SrcId = s.SrcId
+            AND t."Fiscal Year" = s."Fiscal Year"
+            AND t."Fiscal Period" = s."Fiscal Period"
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
         """)
-        con.execute(f"INSERT INTO {table} SELECT * FROM read_csv_auto('{src}')")
         logger.debug('Stored %s', table)
 
 
@@ -266,7 +271,6 @@ def _store_companies(con: duckdb.DuckDBPyConnection) -> None:
 
 class SimFinSource:
     def fetch_bulk(self) -> None:
-        print(simfin_cfg.api_key)
         sf.set_api_key(simfin_cfg.api_key)
         sf.set_data_dir(str(raw_dir))
 
