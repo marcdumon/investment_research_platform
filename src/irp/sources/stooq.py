@@ -289,16 +289,3 @@ class StooqSource:
             shutil.rmtree(data_dir)
             logger.debug(f'Deleted {data_dir}')
 
-
-def main():
-    provider = StooqSource()
-    provider.fetch_bulk()
-    provider.update()
-    provider.transform('bulk')
-    provider.transform('update')
-    provider.store('bulk')
-    provider.store('update')
-
-
-if __name__ == '__main__':
-    main()

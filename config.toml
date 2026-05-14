@@ -34,7 +34,14 @@ and place them in the raw data directory.
 # Update data download
 update_url = "http://stooq.com/db/"
 update_file = "data_d.txt"
-update_instruction_template = """ # Todo: write the correct instructions.
+update_instruction_template = """ 
 The daily price updates are available for free download on the
-stooq website at {update_url}.      
+stooq website at {update_url}. 
+Manually download:
+- click on `Setting Files Content`:
+    - click `World` and `U.S.` to download all these markets
+    - click `Save configuration` and then `Close`
+- select the update days or the full month by clicking `All days Select` at the left bottom of the table
+- click `N_d` to download the update file named `data_d.txt`
+- place the update file `data_d.txt` in the raw data directory
 """
