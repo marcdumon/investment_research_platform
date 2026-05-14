@@ -2,9 +2,7 @@ from collections import defaultdict
 import logging
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal, Sequence
-import zipfile
 
 import duckdb
 import requests
@@ -328,10 +326,14 @@ class SimFinSource:
             if not success:
                 break
 
+        marker = raw_dir / '.fetched'
         after = {f: f.stat().st_mtime for f in raw_dir.glob('*.csv')}
         if after != before:
-            (raw_dir / '.fetched').touch()
+            marker.touch()
             logger.debug('SimFin data updated, touching .fetched marker.')
+        elif not marker.exists():
+            marker.touch()
+            logger.debug('SimFin data already on disk, creating baseline .fetched marker.')
         else:
             logger.info('fetch: no new data downloaded, skipping marker update')
 
@@ -347,6 +349,9 @@ class SimFinSource:
         if after != before:
             marker.touch()
             logger.debug('SimFin update data downloaded, touching .fetched_update marker.')
+        elif not marker.exists():
+            marker.touch()
+            logger.debug('SimFin update data already on disk, creating baseline .fetched_update marker.')
         else:
             logger.info('update: no new data downloaded, skipping marker update')
 
