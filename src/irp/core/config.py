@@ -60,7 +60,9 @@ class Config(BaseModel):
     providers: ProvidersConfig
 
     @classmethod
-    def load(cls, path: str | Path = 'config.toml') -> 'Config':
+    def load(cls, path: str | Path | None = None) -> 'Config':
+        if path is None:
+            path = Path(__file__).parents[3] / 'config.toml'
         with open(path, 'rb') as f:
             raw = tomllib.load(f)
         return cls.model_validate(raw)

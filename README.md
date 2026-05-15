@@ -11,7 +11,7 @@ DuckDB-backed data pipeline for equity fundamentals and price data. Two provider
 | Dataset | Tables in DB | Variants | Markets |
 |---|---|---|---|
 | Fundamentals | `fundamentals_income`, `fundamentals_balance`, `fundamentals_cashflow` | `annual`, `quarterly` | `us`, `de` |
-| Share prices | `prices` | `daily`, `latest` | `us`, `de` |
+| Share prices (Yahoo Finance) | `prices` | `daily`, `latest` | `us`, `de` |
 | Dividends | `dividends` | — | `us`, `de` |
 | Companies | `companies` | — | `us`, `de` |
 | Meta | — | — | — |
