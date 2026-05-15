@@ -233,12 +233,13 @@ def _store_fundamentals(con: duckdb.DuckDBPyConnection) -> None:
         con.execute(f"""
             MERGE INTO {table} t
             USING (
-                SELECT DISTINCT ON (SrcId, "Fiscal Year", "Fiscal Period") *
+                SELECT DISTINCT ON (SrcId, "Fiscal Year", "Fiscal Period", Period) *
                 FROM read_csv_auto('{src}')
             ) s
             ON t.SrcId = s.SrcId
             AND t."Fiscal Year" = s."Fiscal Year"
             AND t."Fiscal Period" = s."Fiscal Period"
+            AND t.Period = s.Period
             WHEN MATCHED THEN UPDATE SET *
             WHEN NOT MATCHED THEN INSERT *
         """)
