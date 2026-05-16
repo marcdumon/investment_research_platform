@@ -71,7 +71,7 @@ def fundamentals(
     return (
         _db()
         .execute(
-            f'SELECT * FROM fundamentals_{statement} {where} ORDER BY Ticker, "Fiscal Year" DESC',
+            f'SELECT * FROM {statement} {where} ORDER BY Ticker, "Fiscal Year" DESC',
             params,
         )
         .df()
