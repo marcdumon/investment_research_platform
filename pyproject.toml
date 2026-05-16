@@ -45,3 +45,8 @@ include = ["irp*"]
 testpaths = ["tests"]
 addopts   = "-v --tb=short"
 markers   = ["integration: hits real external APIs (requires API keys)"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.13",
+]
