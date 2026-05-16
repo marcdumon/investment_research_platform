@@ -49,9 +49,11 @@ def prices(
         filters.append('Src = ?')
         params.append(src)
     where = f'WHERE {" AND ".join(filters)}' if filters else ''
-    return _db().execute(
-        f'SELECT * FROM prices {where} ORDER BY Ticker, Date', params
-    ).df()
+    return (
+        _db()
+        .execute(f'SELECT * FROM prices {where} ORDER BY Ticker, Date', params)
+        .df()
+    )
 
 
 def fundamentals(
@@ -66,19 +68,23 @@ def fundamentals(
         filters.append(clause)
         params.extend(vals)
     where = f'WHERE {" AND ".join(filters)}'
-    return _db().execute(
-        f'SELECT * FROM fundamentals_{statement} {where} ORDER BY Ticker, "Fiscal Year" DESC',
-        params,
-    ).df()
+    return (
+        _db()
+        .execute(
+            f'SELECT * FROM fundamentals_{statement} {where} ORDER BY Ticker, "Fiscal Year" DESC',
+            params,
+        )
+        .df()
+    )
 
 
 def companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
     """Company metadata: name, sector, industry, market, ISIN."""
     clause, params = _ticker_filter(tickers)
     where = f'WHERE {clause}' if clause else ''
-    return _db().execute(
-        f'SELECT * FROM companies {where} ORDER BY Ticker', params
-    ).df()
+    return (
+        _db().execute(f'SELECT * FROM companies {where} ORDER BY Ticker', params).df()
+    )
 
 
 def universe(
@@ -98,7 +104,11 @@ def universe(
         filters.append('Market = ?')
         params.append(market)
     where = f'WHERE {" AND ".join(filters)}' if filters else ''
-    rows = _db().execute(
-        f'SELECT DISTINCT Ticker FROM companies {where} ORDER BY Ticker', params
-    ).fetchall()
+    rows = (
+        _db()
+        .execute(
+            f'SELECT DISTINCT Ticker FROM companies {where} ORDER BY Ticker', params
+        )
+        .fetchall()
+    )
     return [r[0] for r in rows]
