@@ -140,7 +140,6 @@ def _transform_prices(conn: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
                 t."<LOW>"   AS L,
                 t."<CLOSE>" AS C,
                 t."<VOL>"   AS V,
-                NULL::DOUBLE AS AdjClose,
                 t."<TICKER>" AS SrcId,
                 'stooq'      AS Src
             FROM {source} t
@@ -156,7 +155,7 @@ def _transform_markets(conn: duckdb.DuckDBPyConnection) -> None:
     conn.sql(f"""
         COPY (
             SELECT
-                split_part(lower("ticker"), '.', 1) AS Ticker,
+                split_part(upper("ticker"), '.', 1) AS Ticker,
                 market AS Market,
                 ticker AS SrcId,
                 'stooq' AS Src
@@ -170,8 +169,8 @@ def _transform_markets(conn: duckdb.DuckDBPyConnection) -> None:
 def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
     reader = 'read_parquet' if spec.output_format == 'parquet' else 'read_csv_auto'
     key_cols = ['Ticker', 'SrcId', 'Date', 'Src']
-    update_cols = ['O', 'H', 'L', 'C', 'V', 'AdjClose']
-    insert_cols = ['Ticker', 'Date', 'O', 'H', 'L', 'C', 'V', 'AdjClose', 'SrcId', 'Src']
+    update_cols = ['O', 'H', 'L', 'C', 'V']
+    insert_cols = ['Ticker', 'Date', 'O', 'H', 'L', 'C', 'V', 'SrcId', 'Src']
 
     on_clause = '\nAND '.join(f't.{c} = s.{c}' for c in key_cols)
     update_set = ',\n'.join(f'{c} = s.{c}' for c in update_cols)

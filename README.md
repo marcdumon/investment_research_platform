@@ -11,8 +11,6 @@ DuckDB-backed data pipeline for equity fundamentals and price data. Two provider
 | Dataset | Tables in DB | Variants | Markets |
 |---|---|---|---|
 | Fundamentals | `income`, `balance`, `cashflow` | `annual`, `quarterly` | `us`, `de` |
-| Share prices (Yahoo Finance) | `prices` | `daily`, `latest` | `us`, `de` |
-| Dividends | `dividends` | — | `us`, `de` |
 | Companies | `companies` | — | `us`, `de` |
 | Meta | — | — | — |
 
@@ -60,16 +58,6 @@ src = SimFinSource()
 load_data(src, 'bulk')
 src.cleanup()
 ```
-
-### SimFin — Incremental Update (latest share prices only)
-
-```python
-src = SimFinSource()
-load_data(src, 'update')
-src.cleanup()
-```
-
-Only downloads `shareprices/latest` variant. Fundamentals and company data are refreshed on the `refresh_days` schedule configured in `config.toml` (default: 7 days).
 
 ### Stooq — Initial Bulk Load
 

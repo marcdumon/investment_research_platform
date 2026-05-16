@@ -20,7 +20,6 @@ processed_dir = root_dir / simfin_cfg.processed_dir
 
 FundamentalsNames = Literal['income', 'balance', 'cashflow']
 FundamentalsVariant = Literal['annual', 'quarterly', 'ttm']
-SharepricesVariant = Literal['daily', 'latest']
 Market = Literal['us', 'de', 'ca', 'cn']
 
 
@@ -30,14 +29,6 @@ class FundamentalsDataset:
     variant: FundamentalsVariant
     market: Market
     refresh_days: int = simfin_cfg.refresh_days_fundamentals
-
-
-@dataclass(frozen=True)
-class SharepricesDataset:
-    variant: SharepricesVariant
-    market: Market
-    name: Literal['shareprices'] = 'shareprices'
-    refresh_days: int = simfin_cfg.refresh_days_shareprices
 
 
 @dataclass(frozen=True)
@@ -56,27 +47,19 @@ class MetaDataset:
     refresh_days: int = simfin_cfg.refresh_days_meta
 
 
-SimFinDataset = (
-    FundamentalsDataset | SharepricesDataset | CompaniesDataset | MetaDataset
-)
+SimFinDataset = FundamentalsDataset | CompaniesDataset | MetaDataset
 
 
 _FUNDAMENTALS_NAMES: list[FundamentalsNames] = ['income', 'balance', 'cashflow']
 _FUNDAMENTALS_VARIANTS: list[FundamentalsVariant] = ['annual', 'quarterly']
-_SHAREPRICES_VARIANTS: list[SharepricesVariant] = ['daily']
 _MARKETS: list[Market] = ['us', 'de']
-_META_NAMES: list[Literal['markets', 'industries']] = [ 'industries']
+_META_NAMES: list[Literal['markets', 'industries']] = ['industries']
 
 BULK_DATASETS: Sequence[SimFinDataset] = (
     [
         FundamentalsDataset(name, variant, market)
         for name in _FUNDAMENTALS_NAMES
         for variant in _FUNDAMENTALS_VARIANTS
-        for market in _MARKETS
-    ]
-    + [
-        SharepricesDataset(variant, market)
-        for variant in _SHAREPRICES_VARIANTS
         for market in _MARKETS
     ]
     + [CompaniesDataset(market) for market in _MARKETS]
@@ -142,50 +125,6 @@ def _transform_fundamentals(conn: duckdb.DuckDBPyConnection) -> None:
         logger.debug('Wrote %s', out)
 
 
-def _transform_prices(conn: duckdb.DuckDBPyConnection, variant: str = 'daily') -> None:
-    prices_files = sorted(raw_dir.glob(f'*-shareprices-{variant}.csv'))
-    if not prices_files:
-        return
-
-    src = ' UNION ALL '.join(
-        f"SELECT * FROM read_csv('{f}', delim=';')" for f in prices_files
-    )
-
-    prices_out = processed_dir / 'prices.csv'
-    conn.execute(f"""
-        COPY (
-            SELECT
-                Ticker,
-                Date,
-                Open             AS O,
-                High             AS H,
-                Low              AS L,
-                Close            AS C,
-                Volume           AS V,
-                "Adj. Close"     AS AdjClose,
-                SimFinId         AS SrcId,
-                'simfin'         AS Src
-            FROM ({src})
-        ) TO '{prices_out}' (FORMAT CSV, HEADER)
-    """)
-    logger.debug('Wrote %s', prices_out)
-
-    divs_out = processed_dir / 'prices_dividends.csv'
-    conn.execute(f"""
-        COPY (
-            SELECT
-                Date,
-                Ticker,
-                Dividend,
-                "Shares Outstanding",
-                SimFinId         AS SrcId,
-                'simfin'         AS Src
-            FROM ({src})
-        ) TO '{divs_out}' (FORMAT CSV, HEADER)
-    """)
-    logger.debug('Wrote %s', divs_out)
-
-
 def _transform_companies(conn: duckdb.DuckDBPyConnection) -> None:
     company_files = sorted(raw_dir.glob('*-companies.csv'))
     industries_file = raw_dir / 'industries.csv'
@@ -246,62 +185,6 @@ def _store_fundamentals(con: duckdb.DuckDBPyConnection) -> None:
         logger.debug('Stored %s', table)
 
 
-def _store_prices_simfin(con: duckdb.DuckDBPyConnection) -> None:
-    src = processed_dir / 'prices.csv'
-    if not src.exists():
-        return
-    key_cols = ['Ticker', 'SrcId', 'Date', 'Src']
-    update_cols = ['O', 'H', 'L', 'C', 'V', 'AdjClose']
-    insert_cols = [
-        'Ticker',
-        'Date',
-        'O',
-        'H',
-        'L',
-        'C',
-        'V',
-        'AdjClose',
-        'SrcId',
-        'Src',
-    ]
-    on_clause = ' AND '.join(f't.{c} = s.{c}' for c in key_cols)
-    update_set = ', '.join(f'{c} = s.{c}' for c in update_cols)
-    insert_cols_sql = ', '.join(insert_cols)
-    insert_vals_sql = ', '.join(f's.{c}' for c in insert_cols)
-    # Cast DATE -> INTEGER (YYYYMMDD) to match stooq's prices table schema
-    src_sql = f"""
-        SELECT Ticker, CAST(strftime(Date, '%Y%m%d') AS INTEGER) AS Date,
-               O, H, L, C, V, AdjClose, SrcId, Src
-        FROM read_csv_auto('{src}')
-    """
-    con.execute(
-        f'CREATE TABLE IF NOT EXISTS prices AS SELECT * FROM ({src_sql}) LIMIT 0'
-    )
-    con.execute(f"""
-        MERGE INTO prices t
-        USING (SELECT DISTINCT ON ({', '.join(key_cols)}) * FROM ({src_sql})) s
-        ON {on_clause}
-        WHEN MATCHED THEN UPDATE SET {update_set}
-        WHEN NOT MATCHED THEN INSERT ({insert_cols_sql}) VALUES ({insert_vals_sql})
-    """)
-    logger.debug('Stored prices')
-
-
-def _store_dividends(con: duckdb.DuckDBPyConnection) -> None:
-    src = processed_dir / 'prices_dividends.csv'
-    if not src.exists():
-        return
-    con.execute(
-        f"CREATE TABLE IF NOT EXISTS dividends AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
-    )
-    con.execute(f"""
-        DELETE FROM dividends
-        WHERE (SrcId, Date) IN (SELECT DISTINCT SrcId, Date FROM read_csv_auto('{src}'))
-    """)
-    con.execute(f"INSERT INTO dividends SELECT * FROM read_csv_auto('{src}')")
-    logger.debug('Stored dividends')
-
-
 def _store_companies(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'companies.csv'
     if not src.exists():
@@ -339,60 +222,43 @@ class SimFinSource:
             logger.info('fetch: no new data downloaded, skipping marker update')
 
     def update(self) -> None:
-        """Only shareprices can be incrementally updated. Downloads latest variant for each market."""
-        _configure_sf()
-        marker = raw_dir / '.fetched_update'
-        before = {f: f.stat().st_mtime for f in raw_dir.glob('*-shareprices-latest.csv')}
-        for market in _MARKETS:
-            if not _download_dataset(SharepricesDataset(variant='latest', market=market, refresh_days=1)):
-                break
-        after = {f: f.stat().st_mtime for f in raw_dir.glob('*-shareprices-latest.csv')}
-        if after != before:
-            marker.touch()
-            logger.debug('SimFin update data downloaded, touching .fetched_update marker.')
-        elif not marker.exists():
-            marker.touch()
-            logger.debug('SimFin update data already on disk, creating baseline .fetched_update marker.')
-        else:
-            logger.info('update: no new data downloaded, skipping marker update')
+        """SimFin has no incremental update path without shareprices. No-op."""
+        logger.info('SimFin update: nothing to do (shareprices removed)')
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
-        marker = raw_dir / f'.transformed_{feed}'
-        upstream = raw_dir / ('.fetched' if feed == 'bulk' else '.fetched_update')
+        if feed == 'update':
+            logger.info('transform(update): nothing to do')
+            return
+        marker = raw_dir / '.transformed_bulk'
+        upstream = raw_dir / '.fetched'
         if is_fresh(marker, upstream):
-            logger.info(f'transform({feed}): already up to date, skipping')
+            logger.info('transform(bulk): already up to date, skipping')
             return
         conn = duckdb.connect()
-        if feed == 'bulk':
-            _transform_fundamentals(conn)
-            _transform_prices(conn, variant='daily')
-            _transform_companies(conn)
-        else:
-            _transform_prices(conn, variant='latest')
+        _transform_fundamentals(conn)
+        _transform_companies(conn)
         marker.touch()
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
-        marker = raw_dir / f'.stored_{feed}'
-        upstream = raw_dir / f'.transformed_{feed}'
+        if feed == 'update':
+            logger.info('store(update): nothing to do')
+            return
+        marker = raw_dir / '.stored_bulk'
+        upstream = raw_dir / '.transformed_bulk'
         if is_fresh(marker, upstream):
-            logger.info(f'store({feed}): already up to date, skipping')
+            logger.info('store(bulk): already up to date, skipping')
             return
         with duckdb.connect(config.database.path) as con:
-            if feed == 'bulk':
-                _store_fundamentals(con)
-                _store_dividends(con)
-                _store_companies(con)
-            _store_prices_simfin(con)
+            _store_fundamentals(con)
+            _store_companies(con)
         marker.touch()
-        logger.debug(f'SimFin {feed} data stored.')
+        logger.debug('SimFin bulk data stored.')
 
     def cleanup(self) -> None:
         processed_targets = [
             processed_dir / 'income.csv',
             processed_dir / 'balance.csv',
             processed_dir / 'cashflow.csv',
-            processed_dir / 'prices.csv',
-            processed_dir / 'prices_dividends.csv',
             processed_dir / 'companies.csv',
         ]
         for path in processed_targets:
@@ -403,4 +269,3 @@ class SimFinSource:
             if d.exists():
                 shutil.rmtree(d)
                 logger.debug(f'Deleted {d}')
-

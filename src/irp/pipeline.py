@@ -35,7 +35,6 @@ def main():
     stooq.cleanup()
 
     load_data(simfin, 'bulk')
-    load_data(simfin, 'update')
     # simfin.cleanup()
 
 
