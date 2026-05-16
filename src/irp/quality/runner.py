@@ -57,4 +57,10 @@ def run(tickers: list[str] | None = None, variant: Literal['A', 'Q'] = 'A') -> p
         )
         for c, rdate, p in zip(df['CIK'], df['Report Date'], df['Period'])
     ]
+
+    # Sort so all rule-violations for the same filing sit together
+    df = df.sort_values(
+        ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period', 'Rule'],
+        ascending=[True, False, True, True, True],
+    ).reset_index(drop=True)
     return df
