@@ -128,7 +128,7 @@ def _transform_fundamentals(conn: duckdb.DuckDBPyConnection) -> None:
             f"FROM read_csv('{path}', delim=';')"
             for market, variant, path in files
         )
-        out = processed_dir / f'fundamentals_{statement}.csv'
+        out = processed_dir / f'{statement}.csv'
         conn.execute(f"""
             COPY (
                 SELECT
@@ -223,10 +223,10 @@ def _transform_companies(conn: duckdb.DuckDBPyConnection) -> None:
 
 def _store_fundamentals(con: duckdb.DuckDBPyConnection) -> None:
     for statement in ('income', 'balance', 'cashflow'):
-        src = processed_dir / f'fundamentals_{statement}.csv'
+        src = processed_dir / f'{statement}.csv'
         if not src.exists():
             continue
-        table = f'fundamentals_{statement}'
+        table = statement
         con.execute(
             f"CREATE TABLE IF NOT EXISTS {table} AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
         )
@@ -388,9 +388,9 @@ class SimFinSource:
 
     def cleanup(self) -> None:
         processed_targets = [
-            processed_dir / 'fundamentals_income.csv',
-            processed_dir / 'fundamentals_balance.csv',
-            processed_dir / 'fundamentals_cashflow.csv',
+            processed_dir / 'income.csv',
+            processed_dir / 'balance.csv',
+            processed_dir / 'cashflow.csv',
             processed_dir / 'prices.csv',
             processed_dir / 'prices_dividends.csv',
             processed_dir / 'companies.csv',
