@@ -6,6 +6,7 @@ import pandas as pd
 from irp.core.config import config
 from irp.data import fundamentals
 from irp.quality.edgar import filing_url
+from irp.quality.reviews import load_reviews, period_str
 from irp.quality.rules import REGISTRY
 
 _KEY = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period']
@@ -23,8 +24,14 @@ def _cik_map(tickers: list[str]) -> dict[str, int]:
     return {t: int(c) for t, c in rows}
 
 
-def run(tickers: list[str] | None = None, variant: Literal['A', 'Q'] = 'A') -> pd.DataFrame:
-    """Run all registered quality rules. Returns violations enriched with CIK + EDGAR link."""
+def run(
+    tickers: list[str] | None = None,
+    variant: Literal['A', 'Q'] = 'A',
+    skip_reviewed: bool = True,
+) -> pd.DataFrame:
+    """Run all registered quality rules. Returns violations enriched with
+    Period_str, CIK, EDGAR. When skip_reviewed=True, filters out items
+    already in the anomaly_reviews.toml."""
     data = {
         'income':   fundamentals(tickers, 'income',   variant),
         'balance':  fundamentals(tickers, 'balance',  variant),
@@ -42,11 +49,24 @@ def run(tickers: list[str] | None = None, variant: Literal['A', 'Q'] = 'A') -> p
         return pd.DataFrame()
     df = pd.concat(findings, ignore_index=True)
 
-    # Attach Report Date (from income — most reliable cross-statement)
+    df['Period_str'] = [
+        period_str(int(fy), str(fp), str(p))
+        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+    ]
+
+    if skip_reviewed:
+        reviewed = load_reviews()
+        mask = [
+            (t, ps, r) not in reviewed
+            for t, ps, r in zip(df['Ticker'], df['Period_str'], df['Rule'])
+        ]
+        df = df[mask].reset_index(drop=True)
+        if df.empty:
+            return df
+
     rd = data['income'][_KEY + ['Report Date']].drop_duplicates(_KEY)
     df = df.merge(rd, on=_KEY, how='left')
 
-    # Attach CIK + EDGAR URL
     cik = _cik_map(df['Ticker'].unique().tolist())
     df['CIK'] = df['Ticker'].map(cik)
     df['EDGAR'] = [
@@ -58,7 +78,6 @@ def run(tickers: list[str] | None = None, variant: Literal['A', 'Q'] = 'A') -> p
         for c, rdate, p in zip(df['CIK'], df['Report Date'], df['Period'])
     ]
 
-    # Sort so all rule-violations for the same filing sit together
     df = df.sort_values(
         ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period', 'Rule'],
         ascending=[True, False, True, True, True],
