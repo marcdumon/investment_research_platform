@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import pandas as pd
@@ -11,6 +11,7 @@ class Rule:
     lhs: str
     rhs: str
     fn: Callable[[dict[str, pd.DataFrame]], pd.DataFrame]
+    columns: tuple[str, ...] = field(default_factory=tuple)
 
 
 REGISTRY: list[Rule] = []
@@ -18,20 +19,19 @@ REGISTRY: list[Rule] = []
 _KEY = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period']
 
 
-def register(name: str, statement: str, lhs: str, rhs: str):
+def register(name: str, statement: str, lhs: str, rhs: str, columns: tuple[str, ...] = ()):
     def deco(fn: Callable[[dict[str, pd.DataFrame]], pd.DataFrame]):
-        REGISTRY.append(Rule(name, statement, lhs, rhs, fn))
+        REGISTRY.append(Rule(name, statement, lhs, rhs, fn, columns))
         return fn
     return deco
 
 
 def violations(df: pd.DataFrame, lhs_col: str, rhs_col: str, tol: float = 0.005) -> pd.DataFrame:
-    """Return rows where |lhs - rhs| / max(|lhs|, |rhs|) > tol. Skips NaN."""
     lhs, rhs = df[lhs_col], df[rhs_col]
     diff = lhs - rhs
     denom = pd.concat([lhs.abs(), rhs.abs()], axis=1).max(axis=1).replace(0, 1)
     rel = diff.abs() / denom
-    mask = rel > tol  # NaN > tol is False, so NaN rows are skipped
+    mask = rel > tol
     return df.loc[mask, _KEY].assign(
         LHS_value=lhs[mask],
         RHS_value=rhs[mask],
@@ -43,7 +43,8 @@ def violations(df: pd.DataFrame, lhs_col: str, rhs_col: str, tol: float = 0.005)
 # ─── Balance sheet ────────────────────────────────────────────────────
 
 @register('assets_split', 'balance',
-          'Total Assets', 'Total Current Assets + Total Noncurrent Assets')
+          'Total Assets', 'Total Current Assets + Total Noncurrent Assets',
+          columns=('Total Assets', 'Total Current Assets', 'Total Noncurrent Assets'))
 def _assets_split(data):
     df = data['balance'].copy()
     df['_rhs'] = df['Total Current Assets'] + df['Total Noncurrent Assets']
@@ -51,7 +52,8 @@ def _assets_split(data):
 
 
 @register('liab_split', 'balance',
-          'Total Liabilities', 'Total Current Liabilities + Total Noncurrent Liabilities')
+          'Total Liabilities', 'Total Current Liabilities + Total Noncurrent Liabilities',
+          columns=('Total Liabilities', 'Total Current Liabilities', 'Total Noncurrent Liabilities'))
 def _liab_split(data):
     df = data['balance'].copy()
     df['_rhs'] = df['Total Current Liabilities'] + df['Total Noncurrent Liabilities']
@@ -59,7 +61,8 @@ def _liab_split(data):
 
 
 @register('liab_equity_split', 'balance',
-          'Total Liabilities & Equity', 'Total Liabilities + Total Equity')
+          'Total Liabilities & Equity', 'Total Liabilities + Total Equity',
+          columns=('Total Liabilities & Equity', 'Total Liabilities', 'Total Equity'))
 def _liab_equity_split(data):
     df = data['balance'].copy()
     df['_rhs'] = df['Total Liabilities'] + df['Total Equity']
@@ -67,7 +70,8 @@ def _liab_equity_split(data):
 
 
 @register('accounting_equation', 'balance',
-          'Total Assets', 'Total Liabilities & Equity')
+          'Total Assets', 'Total Liabilities & Equity',
+          columns=('Total Assets', 'Total Liabilities & Equity', 'Total Liabilities', 'Total Equity'))
 def _accounting_equation(data):
     df = data['balance']
     return violations(df, 'Total Assets', 'Total Liabilities & Equity')
@@ -76,18 +80,18 @@ def _accounting_equation(data):
 # ─── Income statement ─────────────────────────────────────────────────
 
 @register('gross_profit', 'income',
-          'Gross Profit', 'Revenue + Cost of Revenue')
+          'Gross Profit', 'Revenue + Cost of Revenue',
+          columns=('Revenue', 'Cost of Revenue', 'Gross Profit'))
 def _gross_profit(data):
-    # SimFin stores Cost of Revenue as a negative number, so we ADD.
     df = data['income'].copy()
     df['_rhs'] = df['Revenue'] + df['Cost of Revenue']
     return violations(df, 'Gross Profit', '_rhs')
 
 
 @register('operating_income', 'income',
-          'Operating Income (Loss)', 'Gross Profit + Operating Expenses')
+          'Operating Income (Loss)', 'Gross Profit + Operating Expenses',
+          columns=('Gross Profit', 'Operating Expenses', 'Operating Income (Loss)'))
 def _operating_income(data):
-    # SimFin stores Operating Expenses as a negative number, so we ADD.
     df = data['income'].copy()
     df['_rhs'] = df['Gross Profit'] + df['Operating Expenses']
     return violations(df, 'Operating Income (Loss)', '_rhs')
@@ -95,9 +99,9 @@ def _operating_income(data):
 
 @register('continuing_ops', 'income',
           'Income (Loss) from Continuing Operations',
-          'Pretax Income (Loss) + Income Tax (Expense) Benefit, Net')
+          'Pretax Income (Loss) + Income Tax (Expense) Benefit, Net',
+          columns=('Pretax Income (Loss)', 'Income Tax (Expense) Benefit, Net', 'Income (Loss) from Continuing Operations'))
 def _continuing_ops(data):
-    # SimFin convention: tax is stored signed (negative when expense), so ADD.
     df = data['income'].copy()
     df['_rhs'] = df['Pretax Income (Loss)'] + df['Income Tax (Expense) Benefit, Net']
     return violations(df, 'Income (Loss) from Continuing Operations', '_rhs')
@@ -105,7 +109,8 @@ def _continuing_ops(data):
 
 @register('net_income_split', 'income',
           'Net Income',
-          'Income (Loss) from Continuing Operations + Net Extraordinary Gains (Losses)')
+          'Income (Loss) from Continuing Operations + Net Extraordinary Gains (Losses)',
+          columns=('Income (Loss) from Continuing Operations', 'Net Extraordinary Gains (Losses)', 'Net Income'))
 def _net_income_split(data):
     df = data['income'].copy()
     df['_rhs'] = (
@@ -118,7 +123,9 @@ def _net_income_split(data):
 # ─── Cashflow statement ───────────────────────────────────────────────
 
 @register('cash_chain', 'cashflow',
-          'Net Change in Cash', 'CFO + CFI + CFF')
+          'Net Change in Cash', 'CFO + CFI + CFF',
+          columns=('Net Cash from Operating Activities', 'Net Cash from Investing Activities',
+                   'Net Cash from Financing Activities', 'Net Change in Cash'))
 def _cash_chain(data):
     df = data['cashflow'].copy()
     df['_rhs'] = (
@@ -132,7 +139,8 @@ def _cash_chain(data):
 # ─── Cross-statement ──────────────────────────────────────────────────
 
 @register('ni_income_vs_cashflow', 'cross',
-          'Net Income (income)', 'Net Income/Starting Line (cashflow)')
+          'Net Income (income)', 'Net Income/Starting Line (cashflow)',
+          columns=('Net Income', 'Net Income/Starting Line'))
 def _ni_income_vs_cashflow(data):
     inc = data['income'][_KEY + ['Net Income']]
     cf = data['cashflow'][_KEY + ['Net Income/Starting Line']]
@@ -142,10 +150,9 @@ def _ni_income_vs_cashflow(data):
 
 @register('da_income_vs_cashflow', 'cross',
           '|Depreciation & Amortization| income',
-          '|Depreciation & Amortization| cashflow')
+          '|Depreciation & Amortization| cashflow',
+          columns=('Depreciation & Amortization',))
 def _da_income_vs_cashflow(data):
-    # Income stores D&A as expense (negative). Cashflow stores it as positive
-    # (add-back in operating activities). Compare magnitudes.
     inc = data['income'][_KEY + ['Depreciation & Amortization']].rename(
         columns={'Depreciation & Amortization': 'DA_income'}
     )
@@ -159,7 +166,8 @@ def _da_income_vs_cashflow(data):
 
 
 @register('shares_basic_cross', 'cross',
-          'Shares (Basic) income', 'Shares (Basic) balance')
+          'Shares (Basic) income', 'Shares (Basic) balance',
+          columns=('Shares (Basic)',))
 def _shares_basic_cross(data):
     inc = data['income'][_KEY + ['Shares (Basic)']].rename(
         columns={'Shares (Basic)': 'Shares_income'}
