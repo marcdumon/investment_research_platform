@@ -1,13 +1,14 @@
 import pandas as pd
 
 from irp.data import fundamentals
-from irp.quality.rules import REGISTRY
+from irp.quality.simfin_rules import REGISTRY
 
 _BASE = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period', 'Report Date']
 
 
 def inspect(rule_name: str, ticker: str, fy: int, fp: str, period: str) -> pd.DataFrame:
     """Return rule-relevant SimFin columns for a (ticker, fy, fp, period).
+
     For cross-statement rules, returns rows from each statement with a _stmt label.
     """
     rule = next((r for r in REGISTRY if r.name == rule_name), None)

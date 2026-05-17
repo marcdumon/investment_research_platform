@@ -6,8 +6,8 @@ import pandas as pd
 from irp.core.config import config
 from irp.data import fundamentals
 from irp.quality.edgar import filing_url
-from irp.quality.reviews import load_reviews, period_str
-from irp.quality.rules import REGISTRY
+from irp.quality.simfin_reviews import load_reviews, period_str
+from irp.quality.simfin_rules import REGISTRY
 
 _KEY = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period']
 

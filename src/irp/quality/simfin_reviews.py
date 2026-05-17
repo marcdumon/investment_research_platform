@@ -5,7 +5,7 @@ import pandas as pd
 
 from irp.core.config import config
 
-REVIEWS_PATH = config.data.root_dir / 'data_quality' / 'anomaly_reviews.toml'
+REVIEWS_PATH = config.data.root_dir / 'data_quality' / 'simfin_anomaly_reviews.toml'
 VALID_STATUS = ('ok', 'data_error', 'to_check')
 MANUAL_RULE = 'manual'
 
