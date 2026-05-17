@@ -13,24 +13,72 @@ EDGAR_DOC_URL = 'https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{
 CACHE_TTL_SECONDS = 86400 * 7
 
 
-def _fetch_submissions(cik: int) -> dict:
-    cik_str = f'{cik:010d}'
-    cache = CACHE_DIR / f'{cik_str}.json'
+def _fetch_chunk(filename: str) -> dict:
+    """Fetch one older-filings chunk listed in `filings.files[]`.
+
+    SEC partitions per-CIK filings: the master JSON's `filings.recent`
+    holds ~1000 most-recent filings, with everything older referenced
+    in `filings.files[]` as additional chunk file names (e.g.
+    `CIK0001326801-submissions-001.json`). Each chunk has the same
+    parallel-arrays schema as `recent` (no nesting). Disk-cached for
+    `CACHE_TTL_SECONDS`.
+    """
+    cache = CACHE_DIR / filename
     if cache.exists() and (time.time() - cache.stat().st_mtime) < CACHE_TTL_SECONDS:
         return json.loads(cache.read_text())
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     r = requests.get(
-        f'https://data.sec.gov/submissions/CIK{cik_str}.json',
+        f'https://data.sec.gov/submissions/{filename}',
         headers=HEADERS,
         timeout=10,
     )
     r.raise_for_status()
     cache.write_text(r.text)
-    time.sleep(0.11)  # SEC limit: 10 req/sec
+    time.sleep(0.11)
     return r.json()
 
 
+def _fetch_submissions(cik: int) -> dict:
+    """Fetch the SEC submissions JSON for a CIK with full history.
+
+    Hits `https://data.sec.gov/submissions/CIK{cik:010d}.json` for the
+    master JSON, then iterates `filings.files[]` to fetch every older
+    chunk and `list.extend()`-merges them into `filings.recent`. After
+    return, `data['filings']['recent']` spans the full filing history
+    for the company, exposed via the same parallel-arrays schema.
+
+    Both master and chunk files are disk-cached. Subsequent calls within
+    `CACHE_TTL_SECONDS` issue zero SEC requests.
+    """
+    cik_str = f'{cik:010d}'
+    cache = CACHE_DIR / f'{cik_str}.json'
+    if cache.exists() and (time.time() - cache.stat().st_mtime) < CACHE_TTL_SECONDS:
+        data = json.loads(cache.read_text())
+    else:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        r = requests.get(
+            f'https://data.sec.gov/submissions/CIK{cik_str}.json',
+            headers=HEADERS,
+            timeout=10,
+        )
+        r.raise_for_status()
+        cache.write_text(r.text)
+        time.sleep(0.11)  # SEC limit: 10 req/sec
+        data = r.json()
+
+    filings = data.get('filings', {})
+    recent = {k: list(v) for k, v in filings.get('recent', {}).items()}
+    for finfo in filings.get('files', []):
+        chunk = _fetch_chunk(finfo['name'])
+        for key in recent:
+            if key in chunk:
+                recent[key].extend(chunk[key])
+    data['filings']['recent'] = recent
+    return data
+
+
 def _parse(d: str) -> date | None:
+    """Parse an ISO date string to `date`, return None on bad input."""
     try:
         return date.fromisoformat(d)
     except (TypeError, ValueError):
@@ -39,9 +87,22 @@ def _parse(d: str) -> date | None:
 
 @lru_cache(maxsize=10000)
 def filing_url(cik: int | None, report_date: str | None, period: str, tol_days: int = 10) -> str | None:
-    """Resolve EDGAR URL by Report Date match with +/- tol_days tolerance
-    (SimFin uses 09-30, SEC has actual fiscal end e.g. 09-28).
-    period='A' -> 10-K, 'Q' -> 10-Q. report_date format 'YYYY-MM-DD'.
+    """Build the direct EDGAR document URL for one (cik, report_date, period).
+
+    Picks the form by period ('A' -> 10-K, 'Q' -> 10-Q) and scans the
+    SEC submissions JSON for a filing whose `reportDate` is within
+    `tol_days` of `report_date`, returning the row with the smallest
+    delta. The tolerance handles SimFin's month-end normalisation
+    (e.g. 2024-09-30) versus SEC's actual fiscal end (e.g. 2024-09-28).
+
+    Returns a URL of the form
+        https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{primary_doc}
+    or None if the CIK/report_date is missing, the fetch fails, or no
+    filing matches within the tolerance.
+
+    `report_date` must be 'YYYY-MM-DD'. Memoised per (cik, report_date,
+    period, tol_days) for the process lifetime; the underlying submissions
+    JSON is disk-cached separately by `_fetch_submissions`.
     """
     target = _parse(report_date) if report_date else None
     if not cik or target is None:
