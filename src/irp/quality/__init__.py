@@ -1,12 +1,15 @@
-from irp.quality.edgar import filing_url
-from irp.quality.inspect import inspect
-from irp.quality.reviews import add_flag, add_review, load_flags_df, load_reviews, load_reviews_df, period_str
-from irp.quality.rules import REGISTRY, Rule, register, violations
-from irp.quality import rules as _rules  # noqa: F401  triggers rule registration
-from irp.quality.runner import run
+"""Data-quality module: separate simfin/ and stooq/ submodules.
 
-__all__ = [
-    'REGISTRY', 'Rule', 'register', 'violations', 'run', 'filing_url',
-    'inspect', 'add_review', 'add_flag', 'load_reviews', 'load_reviews_df',
-    'load_flags_df', 'period_str',
-]
+Each domain follows the same shape:
+    {domain}_rules.py    @register + REGISTRY of Rule dataclass instances
+    {domain}_runner.py   run(skip_reviewed=True) -> findings DataFrame
+    {domain}_inspect.py  inspect(...) -> renderable artefact (DataFrame / Figure)
+    {domain}_reviews.py  add_review, load_reviews, load_reviews_df + TOML I/O
+
+Import from the submodule explicitly:
+    from irp.quality.simfin_runner import run
+    from irp.quality.stooq_runner  import run as stooq_run
+"""
+from irp.quality.edgar import filing_url
+
+__all__ = ['filing_url']
