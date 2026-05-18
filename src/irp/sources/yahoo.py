@@ -34,23 +34,25 @@ _ERRORS = JsonSet(raw_dir / 'error_tickers.json')
 _ACTIONS_COLS = ['Ticker', 'Date', 'Type', 'Value']
 
 
-def _load_target_tickers() -> list[str]:
-    """Tickers from the `markets` table, excluding configured Market types.
+def _load_yahoo_tickers() -> dict[str, str]:
+    """Canonical->yahoo_ticker map from `markets`, excluding configured Market types.
 
-    Uses a short-lived local connection (not the global db() singleton) so
-    the read-only singleton is never created in the CLI process before store()
-    opens its read-write connection — DuckDB disallows mixing both in one process.
+    Filters to rows where yahoo_ticker IS NOT NULL (instruments with no Yahoo
+    equivalent are excluded automatically). Uses a short-lived local connection
+    so the read-only singleton is never created before store() opens its
+    read-write connection — DuckDB disallows mixing both in one process.
     """
     excludes = [m.lower() for m in yahoo_cfg.markets_exclude]
     placeholders = ', '.join(['?' for _ in excludes])
     with duckdb.connect(str(config.database.path), read_only=True) as con:
         df = con.execute(
-            f'SELECT DISTINCT Ticker FROM markets '
-            f'WHERE LOWER(Market) NOT IN ({placeholders}) '
+            f'SELECT Ticker, yahoo_ticker FROM markets '
+            f'WHERE yahoo_ticker IS NOT NULL '
+            f'AND LOWER(Market) NOT IN ({placeholders}) '
             f'ORDER BY Ticker',
             excludes,
         ).df()
-    return df['Ticker'].tolist()
+    return dict(zip(df['Ticker'], df['yahoo_ticker']))
 
 
 def _load_last_prices_dates() -> dict[str, date]:
@@ -112,18 +114,19 @@ def _append_csv(df: pd.DataFrame, path: Path, has_header: bool) -> bool:
 
 def _fetch_actions_per_ticker(
     yf,
-    tickers: list[str],
+    ticker_map: dict[str, str],
     queried: set[str],
     known_errors: set[str],
     new_errors: set[str],
     has_header: bool,
 ) -> bool:
-    todo = [t for t in tickers if t not in known_errors and t not in queried]
+    todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo actions: {len(todo)} tickers')
     for ticker in todo:
-        logger.debug(f'Actions: {ticker}')
+        yahoo = ticker_map[ticker]
+        logger.debug(f'Actions: {ticker} (yahoo={yahoo})')
         try:
-            actions = yf.Ticker(ticker).actions
+            actions = yf.Ticker(yahoo).actions
         except Exception as e:
             logger.warning(f'{ticker}: {type(e).__name__}: {e}')
             new_errors.add(ticker)
@@ -142,17 +145,18 @@ def _fetch_actions_per_ticker(
 
 def _fetch_prices_per_ticker(
     yf,
-    tickers: list[str],
+    ticker_map: dict[str, str],
     queried: set[str],
     known_errors: set[str],
     new_errors: set[str],
     has_header: bool,
     last_dates: dict[str, date] | None = None,
 ) -> bool:
-    todo = [t for t in tickers if t not in known_errors and t not in queried]
+    todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
     for ticker in todo:
-        logger.debug(f'Prices: {ticker}')
+        yahoo = ticker_map[ticker]
+        logger.debug(f'Prices: {ticker} (yahoo={yahoo})')
         last = last_dates.get(ticker) if last_dates is not None else None
         kwargs = (
             {'start': (last + timedelta(days=1)).isoformat(), 'auto_adjust': True}
@@ -160,7 +164,7 @@ def _fetch_prices_per_ticker(
             else {'period': 'max', 'auto_adjust': True}
         )
         try:
-            hist = yf.Ticker(ticker).history(**kwargs)
+            hist = yf.Ticker(yahoo).history(**kwargs)
         except Exception as e:
             logger.warning(f'{ticker}: {type(e).__name__}: {e}')
             new_errors.add(ticker)
@@ -178,7 +182,7 @@ def _fetch_prices_per_ticker(
 
 def _fetch_prices_batched(
     yf,
-    tickers: list[str],
+    ticker_map: dict[str, str],
     queried: set[str],
     known_errors: set[str],
     new_errors: set[str],
@@ -190,14 +194,19 @@ def _fetch_prices_batched(
     failures), so per-ticker success is detected by checking the Close column.
     Whole-batch failures (rate-limit, network) are retried on next run.
 
+    ticker_map keys are canonical Stooq tickers; values are Yahoo Finance
+    symbols. yf.download uses the Yahoo symbols; data is stored under
+    canonical tickers so all DB tables share the same key.
+
     When `last_dates` is provided, each batch uses the minimum last_date of
     the group as the shared start date (incremental update). Batches containing
     any ticker absent from `last_dates` fall back to `period='max'`."""
-    todo = [t for t in tickers if t not in known_errors and t not in queried]
+    todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     bsize = yahoo_cfg.prices_batch_size
     logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers')
     for i in range(0, len(todo), bsize):
         batch = todo[i : i + bsize]
+        batch_yahoo = [ticker_map[t] for t in batch]
         batch_starts = [last_dates.get(t) for t in batch] if last_dates is not None else []
         min_start = min(batch_starts, default=None) if batch_starts else None
         if min_start is not None and all(s is not None for s in batch_starts):
@@ -207,7 +216,7 @@ def _fetch_prices_batched(
         logger.debug(f'Batch {i // bsize + 1}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}')
         try:
             raw = yf.download(
-                batch,
+                batch_yahoo,
                 **dl_kwargs,
                 auto_adjust=True,
                 threads=False,
@@ -226,12 +235,13 @@ def _fetch_prices_batched(
             _ERRORS.save(known_errors | new_errors)
             continue
         for ticker in batch:
-            df = _extract_batch_slice(raw, ticker, single_ticker=(len(batch) == 1))
+            yahoo = ticker_map[ticker]
+            df = _extract_batch_slice(raw, yahoo, single_ticker=(len(batch) == 1))
             if df is None or df.empty:
                 new_errors.add(ticker)
                 _ERRORS.save(known_errors | new_errors)
                 continue
-            rows_df = _prices_to_long(ticker, df)
+            rows_df = _prices_to_long(ticker, df)  # store under canonical ticker
             has_header = _append_csv(rows_df, _PRICES_FILE, has_header)
             queried.add(ticker)
             _QUERIED_PRICES.save(queried)
@@ -281,7 +291,7 @@ def _fetch_ticker_data(
     import yfinance as yf
 
     raw_dir.mkdir(parents=True, exist_ok=True)
-    tickers = _load_target_tickers()
+    ticker_map = _load_yahoo_tickers()
     known_errors = _ERRORS.load() if skip_errors else set()
     queried_actions = _QUERIED_ACTIONS.load() if skip_queried else set()
     queried_prices = _QUERIED_PRICES.load() if skip_queried else set()
@@ -293,7 +303,7 @@ def _fetch_ticker_data(
     if fetch_actions:
         actions_has_header = _fetch_actions_per_ticker(
             yf,
-            tickers,
+            ticker_map,
             queried_actions,
             known_errors,
             new_errors,
@@ -308,7 +318,7 @@ def _fetch_ticker_data(
         )
         prices_has_header = fn(
             yf,
-            tickers,
+            ticker_map,
             queried_prices,
             known_errors,
             new_errors,

@@ -63,6 +63,7 @@ def main() -> None:
             Choice('transform', checked=True),
             Choice('store', checked=True),
             Choice('cleanup', checked=False),
+            Choice('markets', checked=False),
             Choice('catalog', checked=False),
         ],
         style=STYLE,
@@ -99,6 +100,12 @@ def main() -> None:
             src.store(feed)
         if 'cleanup' in steps:
             src.cleanup()
+
+    if 'markets' in steps:
+        from irp.data.markets import refresh as _refresh_markets
+        print('── markets ──')
+        n = _refresh_markets()
+        print(f'  {n:,} tickers')
 
     if 'catalog' in steps:
         from irp.data.catalog import refresh as _refresh_catalog
