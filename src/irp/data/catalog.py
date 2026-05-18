@@ -1,10 +1,20 @@
 """Data catalog: one-row-per-ticker coverage summary across all data sources.
 
-`refresh()` rebuilds the `catalog` table from current DB state + Yahoo fetch
-JSON files. Run via `uv run irp-catalog` or call directly.
+The `catalog` table has one row per ticker (from `markets`) with columns
+for every data source: Stooq price range, Yahoo price range, dividend and
+split counts, SimFin fundamental period counts, company metadata flag, and
+Yahoo fetch status (queried / errored).
 
-`catalog()` returns the current snapshot as a DataFrame (read-only accessor,
-same pattern as irp.data.stooq / irp.data.yahoo).
+Yahoo fetch status columns (`yahoo_prices_queried`, `yahoo_prices_error`,
+`yahoo_actions_queried`, `yahoo_actions_error`) are derived from the JSON
+files in `data/yahoo/raw/`. Those JSON files are the live source of truth
+for the fetch pipeline; the catalog columns are a snapshot for analysis only.
+
+`refresh()` rebuilds the table from current DB state + the JSON files.
+Trigger via `uv run irp` → Steps → catalog.
+
+`catalog()` is a read-only accessor (uses the db() singleton), consistent
+with irp.data.stooq / irp.data.yahoo.
 """
 import json
 import logging
@@ -49,7 +59,15 @@ def _empty_cte(cols: str) -> str:
 
 
 def refresh() -> int:
-    """Rebuild the `catalog` table from current DB + Yahoo JSON files.
+    """Rebuild the `catalog` table from current DB state + Yahoo JSON files.
+
+    Reads queried_prices.json, queried_actions.json, and error_tickers.json
+    from the Yahoo raw_dir (config.providers.yahoo.raw_dir) and registers them
+    as in-memory views before running the JOIN. These files are the source of
+    truth for fetch status; the resulting catalog columns are a snapshot.
+
+    Gracefully skips any of the 8 optional source tables that do not yet exist
+    (useful when the DB is only partially populated).
 
     Opens a short-lived read-write connection (does not use the db() singleton).
     Returns the row count of the rebuilt table.

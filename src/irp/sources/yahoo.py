@@ -21,6 +21,13 @@ processed_dir = root_dir / yahoo_cfg.processed_dir
 
 _ACTIONS_FILE = raw_dir / 'actions.csv'
 _PRICES_FILE = raw_dir / 'prices.csv'
+# Resume-state JSON sets (sorted string arrays on disk):
+#   queried_actions.json — tickers whose actions (dividends + splits) have been fetched
+#   queried_prices.json  — tickers whose OHLCV history has been fetched
+#   error_tickers.json   — tickers that raised an exception during any yfinance call
+#                          (shared across both feeds; a failing ticker is skipped for both)
+# These are the source of truth for fetch progress. The `catalog` table in DuckDB
+# mirrors them as BOOLEAN columns but is a derived snapshot, not live state.
 _QUERIED_ACTIONS = JsonSet(raw_dir / 'queried_actions.json')
 _QUERIED_PRICES = JsonSet(raw_dir / 'queried_prices.json')
 _ERRORS = JsonSet(raw_dir / 'error_tickers.json')
@@ -432,8 +439,9 @@ class YahooSource:
     def fetch_bulk(self) -> None:
         """Pull dividends, splits, and/or OHLCV prices for every eligible ticker.
 
-        Resume-safe via `queried_tickers.json` and `error_tickers.json` in raw_dir.
-        Interrupt with kernel signal at any time; rerun continues."""
+        Resume-safe: progress is tracked in `queried_actions.json`,
+        `queried_prices.json`, and `error_tickers.json` under raw_dir. Interrupt
+        any time with Ctrl-C; rerun skips already-fetched and known-error tickers."""
         marker = raw_dir / '.fetched'
         actions_fresh = not self._fetch_actions or (
             is_fresh(marker, _QUERIED_ACTIONS.path) and _ACTIONS_FILE.exists()
