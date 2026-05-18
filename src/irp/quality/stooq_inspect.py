@@ -10,6 +10,7 @@ Staleness check:
                        equity tickers at several historical dates; high ratio
                        means Stooq is missing post-snapshot dividend adjustments
 """
+import logging
 import time
 from pathlib import Path
 
@@ -19,6 +20,8 @@ import plotly.graph_objects as go
 
 from irp.core.config import config
 from irp.core.jsonset import JsonSet
+
+logger = logging.getLogger(__name__)
 
 _YAHOO_ERRORS = JsonSet(config.data.root_dir / 'data_quality' / 'stooq_yahoo_error_tickers.json')
 _STALENESS_FILE = config.data.root_dir / 'data_quality' / 'stooq_staleness.csv'
@@ -93,124 +96,57 @@ def staleness_scan(
     """
     try:
         import yfinance as yf
-    except ImportError:
-        raise ImportError("yfinance required: uv pip install yfinance")
+    except ImportError as e:
+        raise ImportError('yfinance required: uv pip install yfinance') from e
 
     if market_patterns is None:
         market_patterns = ['%stock%', '%etf%']
     if years_back is None:
         years_back = [1, 3, 5]
 
-    like_clause = ' OR '.join(['LOWER(m.Market) LIKE ?' for _ in market_patterns])
     lower_pats = [p.lower() for p in market_patterns]
-
     known_errors = load_yahoo_errors() if skip_yahoo_errors else set()
     new_errors: set[str] = set()
-
-    # resume: skip (ticker, yr) pairs already written to file
-    if results_file.exists():
-        _existing = pd.read_csv(results_file)
-        checked: set[tuple[str, int]] = {
-            (t, int(y)) for t, y in zip(_existing['Ticker'], _existing['Years_back'])
-        } if skip_scanned else set()
-        _file_has_header = True
-    else:
-        checked = set()
-        _file_has_header = False
-
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        all_tickers = con.execute(
-            f"SELECT DISTINCT p.Ticker FROM prices p "
-            f"JOIN markets m ON m.Ticker = p.Ticker "
-            f"WHERE {like_clause} ORDER BY p.Ticker",
-            lower_pats,
-        ).df()['Ticker'].tolist()
-
+    checked, file_has_header = _load_checked_pairs(results_file, skip_scanned)
     today = pd.Timestamp.today().normalize()
 
     for yr in years_back:
-        anchor_int = int((today - pd.DateOffset(years=yr)).strftime('%Y%m%d'))
-
-        with duckdb.connect(str(config.database.path), read_only=True) as con:
-            row = con.execute(
-                "SELECT MAX(Date) FROM prices WHERE Date <= ?", [anchor_int]
-            ).fetchone()
-        if not row or row[0] is None:
+        trade_date = _trading_date_for_year_offset(today, yr)
+        if trade_date is None:
             continue
-        trade_date = int(row[0])
-        trade_dt = pd.Timestamp(str(trade_date))
-        date_str = trade_dt.strftime('%Y-%m-%d')
-
-        with duckdb.connect(str(config.database.path), read_only=True) as con:
-            stooq_df = con.execute(
-                f"SELECT DISTINCT p.Ticker, p.C AS Stooq_C FROM prices p "
-                f"JOIN markets m ON m.Ticker = p.Ticker "
-                f"WHERE p.Date = ? AND ({like_clause})",
-                [trade_date] + lower_pats,
-            ).df()
-
+        date_str = pd.Timestamp(str(trade_date)).strftime('%Y-%m-%d')
+        stooq_df = _stooq_close_at(trade_date, lower_pats)
         if stooq_df.empty:
             continue
-
         stooq_map = dict(zip(stooq_df['Ticker'], stooq_df['Stooq_C']))
         batch_tickers = [
             t for t in stooq_df['Ticker'].tolist()
             if t not in known_errors and (t, yr) not in checked
         ]
+        trade_dt = pd.Timestamp(str(trade_date))
         ystart = (trade_dt - pd.Timedelta(days=4)).date()
         yend = (trade_dt + pd.Timedelta(days=4)).date()
 
         for i in range(0, len(batch_tickers), batch_size):
             batch = batch_tickers[i : i + batch_size]
-            try:
-                raw = yf.download(
-                    batch, start=ystart, end=yend,
-                    auto_adjust=True, progress=False, threads=False,
-                )
-            except Exception:
-                # network / rate-limit failure — don't skip, retry next run
-                time.sleep(batch_sleep)
+            raw = _yf_batch_close(yf, batch, ystart, yend, batch_sleep)
+            if raw is None:
                 continue
-            time.sleep(batch_sleep)
-            if raw is None or raw.empty:
+            if raw.empty:
                 new_errors.update(batch)
                 save_yahoo_errors(known_errors | new_errors)
                 continue
-            raw.index = pd.to_datetime(raw.index)
-            day = raw[raw.index.strftime('%Y-%m-%d') == date_str]
-            if day.empty:
+            close = _close_on_date(raw, date_str, batch)
+            if close is None:
                 continue
-            if isinstance(raw.columns, pd.MultiIndex):
-                close = day['Close']
-            else:
-                close = day[['Close']]
-                close.columns = batch
-            found: set[str] = set()
-            batch_rows: list[dict] = []
-            for ticker in close.columns:
-                val = close[ticker].iloc[0]
-                if pd.notna(val) and val > 0:
-                    found.add(str(ticker))
-                    stooq_c = stooq_map.get(str(ticker))
-                    if stooq_c is not None:
-                        batch_rows.append({
-                            'Ticker': str(ticker),
-                            'Date': date_str,
-                            'Years_back': yr,
-                            'Stooq_C': float(stooq_c),
-                            'Yahoo_C': float(val),
-                            'Ratio': float(stooq_c) / float(val),
-                        })
-            batch_unknown = {t for t in batch if t not in found}
-            if batch_unknown:
-                new_errors.update(batch_unknown)
+            batch_rows, found = _ratios_from_close(close, stooq_map, date_str, yr)
+            unknown = {t for t in batch if t not in found}
+            if unknown:
+                new_errors.update(unknown)
                 save_yahoo_errors(known_errors | new_errors)
             if batch_rows:
-                results_file.parent.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame(batch_rows, columns=_STALENESS_COLS).to_csv(
-                    results_file, mode='a', header=not _file_has_header, index=False,
-                )
-                _file_has_header = True
+                _append_results(results_file, batch_rows, file_has_header)
+                file_has_header = True
 
     if new_errors:
         save_yahoo_errors(known_errors | new_errors)
@@ -218,15 +154,118 @@ def staleness_scan(
     return load_staleness_results(results_file, threshold=threshold)
 
 
+def _load_checked_pairs(results_file: Path, skip_scanned: bool) -> tuple[set[tuple[str, int]], bool]:
+    """Resume state: (ticker, years_back) pairs already in results_file, plus
+    whether the file already has a header row."""
+    if not results_file.exists():
+        return set(), False
+    existing = pd.read_csv(results_file)
+    if not skip_scanned:
+        return set(), True
+    return (
+        {(t, int(y)) for t, y in zip(existing['Ticker'], existing['Years_back'])},
+        True,
+    )
+
+
+def _trading_date_for_year_offset(today: pd.Timestamp, years_back: int) -> int | None:
+    """Latest Stooq trading date at or before today - years_back."""
+    anchor_int = int((today - pd.DateOffset(years=years_back)).strftime('%Y%m%d'))
+    with duckdb.connect(str(config.database.path), read_only=True) as con:
+        row = con.execute(
+            'SELECT MAX(Date) FROM prices WHERE Date <= ?', [anchor_int]
+        ).fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def _stooq_close_at(trade_date: int, lower_pats: list[str]) -> pd.DataFrame:
+    """Stooq closes for all tickers whose market matches one of `lower_pats`."""
+    like_clause = ' OR '.join(['LOWER(m.Market) LIKE ?' for _ in lower_pats])
+    with duckdb.connect(str(config.database.path), read_only=True) as con:
+        return con.execute(
+            f'SELECT DISTINCT p.Ticker, p.C AS Stooq_C FROM prices p '
+            f'JOIN markets m ON m.Ticker = p.Ticker '
+            f'WHERE p.Date = ? AND ({like_clause})',
+            [trade_date] + lower_pats,
+        ).df()
+
+
+def _yf_batch_close(yf, batch: list[str], ystart, yend, batch_sleep: float) -> pd.DataFrame | None:
+    """One yfinance batch download. Returns None on network/rate-limit failure
+    (caller retries next run); empty DataFrame if Yahoo returned nothing
+    (caller treats as unknown tickers)."""
+    try:
+        raw = yf.download(
+            batch, start=ystart, end=yend,
+            auto_adjust=True, progress=False, threads=False,
+        )
+    except Exception as e:
+        logger.debug(f'yf.download batch failed: {type(e).__name__}: {e}')
+        time.sleep(batch_sleep)
+        return None
+    time.sleep(batch_sleep)
+    if raw is None:
+        return pd.DataFrame()
+    raw.index = pd.to_datetime(raw.index)
+    return raw
+
+
+def _close_on_date(raw: pd.DataFrame, date_str: str, batch: list[str]) -> pd.DataFrame | None:
+    """Single-row DataFrame of Close prices for `date_str`. Handles both
+    single-ticker (flat columns) and multi-ticker (MultiIndex) shapes."""
+    day = raw[raw.index.strftime('%Y-%m-%d') == date_str]
+    if day.empty:
+        return None
+    if isinstance(raw.columns, pd.MultiIndex):
+        return day['Close']
+    close = day[['Close']].copy()
+    close.columns = batch
+    return close
+
+
+def _ratios_from_close(
+    close: pd.DataFrame, stooq_map: dict, date_str: str, yr: int,
+) -> tuple[list[dict], set[str]]:
+    """Per-ticker Stooq/Yahoo ratio rows. `found` is the set of tickers with a
+    usable Yahoo close (so the caller can flag the rest as unknown)."""
+    rows: list[dict] = []
+    found: set[str] = set()
+    for ticker in close.columns:
+        val = close[ticker].iloc[0]
+        if not (pd.notna(val) and val > 0):
+            continue
+        found.add(str(ticker))
+        stooq_c = stooq_map.get(str(ticker))
+        if stooq_c is None:
+            continue
+        rows.append({
+            'Ticker': str(ticker),
+            'Date': date_str,
+            'Years_back': yr,
+            'Stooq_C': float(stooq_c),
+            'Yahoo_C': float(val),
+            'Ratio': float(stooq_c) / float(val),
+        })
+    return rows, found
+
+
+def _append_results(path: Path, rows: list[dict], has_header: bool) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=_STALENESS_COLS).to_csv(
+        path, mode='a', header=not has_header, index=False,
+    )
+
+
 def _query_bars(ticker: str, dates: list[int]) -> pd.DataFrame:
     if not dates:
         return pd.DataFrame()
-    placeholders = ','.join(str(d) for d in sorted(dates))
+    placeholders = ', '.join('?' * len(dates))
+    sorted_dates = sorted(dates)
     with duckdb.connect(str(config.database.path), read_only=True) as con:
         return con.execute(
-            f"SELECT Date, O, H, L, C, V FROM prices "
-            f"WHERE Ticker = ? AND Date IN ({placeholders}) ORDER BY Date",
-            [ticker],
+            f'SELECT Date, O, H, L, C, V FROM prices '
+            f'WHERE Ticker = ? AND Date IN ({placeholders}) ORDER BY Date',
+            [ticker, *sorted_dates],
         ).df()
 
 
@@ -273,7 +312,8 @@ def yahoo_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:
     # matching Stooq's adjusted feed for a meaningful side-by-side comparison.
     try:
         df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
-    except Exception:
+    except Exception as e:
+        logger.debug(f'yf.download({ticker}) failed: {type(e).__name__}: {e}')
         return pd.DataFrame()
     if df is None or df.empty:
         return pd.DataFrame()

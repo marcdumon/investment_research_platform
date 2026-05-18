@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from irp.core.config import config
+from irp.core.duckdb_merge import merge_csv
 from irp.core.freshness import is_fresh
 
 logger = logging.getLogger(__name__)
@@ -167,51 +168,22 @@ def _transform_markets(conn: duckdb.DuckDBPyConnection) -> None:
 
 
 def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
-    reader = 'read_parquet' if spec.output_format == 'parquet' else 'read_csv_auto'
-    key_cols = ['Ticker', 'SrcId', 'Date', 'Src']
-    update_cols = ['O', 'H', 'L', 'C', 'V']
-    insert_cols = ['Ticker', 'Date', 'O', 'H', 'L', 'C', 'V', 'SrcId', 'Src']
-
-    on_clause = '\nAND '.join(f't.{c} = s.{c}' for c in key_cols)
-    update_set = ',\n'.join(f'{c} = s.{c}' for c in update_cols)
-    insert_cols_sql = ', '.join(insert_cols)
-    insert_vals_sql = ', '.join(f's.{c}' for c in insert_cols)
-
-    con.execute(f"""
-        CREATE TABLE IF NOT EXISTS prices AS
-        SELECT * FROM {reader}('{spec.output_path}') LIMIT 0
-    """)
-    con.execute(f"""
-        MERGE INTO prices t
-        USING (
-            SELECT DISTINCT ON ({', '.join(key_cols)}) *
-            FROM {reader}('{spec.output_path}')
-        ) s
-        ON {on_clause}
-        WHEN MATCHED THEN UPDATE SET {update_set}
-        WHEN NOT MATCHED THEN INSERT ({insert_cols_sql})
-        VALUES ({insert_vals_sql});
-    """)
+    merge_csv(
+        con, 'prices', spec.output_path,
+        key_cols=['Ticker', 'SrcId', 'Date', 'Src'],
+        value_cols=['O', 'H', 'L', 'C', 'V'],
+    )
     logger.debug(f'Stored prices from {spec.output_path}')
 
 
 def _store_markets(con: duckdb.DuckDBPyConnection) -> None:
     markets_file = processed_dir / 'markets.csv'
-    con.execute(f"""
-        CREATE TABLE IF NOT EXISTS markets AS
-        SELECT * FROM read_csv_auto('{markets_file}') LIMIT 0
-    """)
-    con.execute(f"""
-        MERGE INTO markets t
-        USING (
-            SELECT DISTINCT ON (SrcId) *
-            FROM read_csv_auto('{markets_file}')
-        ) s
-        ON t.SrcId = s.SrcId
-        WHEN MATCHED THEN UPDATE SET Market = s.Market
-        WHEN NOT MATCHED THEN INSERT (Ticker, Market, SrcId, Src)
-        VALUES (s.Ticker, s.Market, s.SrcId, s.Src);
-    """)
+    merge_csv(
+        con, 'markets', markets_file,
+        key_cols=['SrcId'],
+        value_cols=['Market'],
+        extra_insert_cols=['Ticker', 'Src'],
+    )
     logger.debug(f'Stored markets from {markets_file}')
 
 
