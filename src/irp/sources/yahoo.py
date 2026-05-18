@@ -449,6 +449,11 @@ class YahooSource:
     def fetch_bulk(self) -> None:
         """Pull dividends, splits, and/or OHLCV prices for every eligible ticker.
 
+        Target tickers come from markets.yahoo_ticker (NOT NULL, Market NOT IN
+        markets_exclude). yfinance is called with the yahoo_ticker value; data
+        is stored under the canonical Ticker key so all DB tables share the same
+        primary key.
+
         Resume-safe: progress is tracked in `queried_actions.json`,
         `queried_prices.json`, and `error_tickers.json` under raw_dir. Interrupt
         any time with Ctrl-C; rerun skips already-fetched and known-error tickers."""

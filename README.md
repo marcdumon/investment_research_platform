@@ -21,7 +21,6 @@ Fundamentals follow **SEC period convention**: annual periods named by the calen
 | Dataset | Table in DB | Notes |
 |---|---|---|
 | Bulk historical prices | `prices` | Daily OHLCV for US + World markets |
-| Markets | `markets` | Ticker → market mapping |
 | Daily update | `prices` | Incremental OHLCV update (upserted) |
 
 ### Yahoo
@@ -34,7 +33,7 @@ Fundamentals follow **SEC period convention**: annual periods named by the calen
 
 All `Date` columns across `prices`, `dividends`, `splits`, and `yahoo_prices` are stored as DuckDB `DATE` type (`YYYY-MM-DD`). SimFin date columns (`Report Date`, `Publish Date`, `Restated Date`) are also `DATE`.
 
-Source filter: `markets` table minus `config.providers.yahoo.markets_exclude` (default: cryptocurrencies, money market, bonds → ~14k tickers).
+Source filter: `markets.yahoo_ticker IS NOT NULL` and `Market NOT IN config.providers.yahoo.markets_exclude` (default excludes: cryptocurrencies, money market, bonds → ~14k tickers). The `yahoo_ticker` column holds the yfinance-compatible symbol (e.g. `EURUSD=X` for currencies, `RNR-PF` for preferred shares); instruments with no Yahoo equivalent have `yahoo_ticker = NULL` and are skipped automatically.
 
 ---
 
@@ -118,7 +117,7 @@ src.cleanup()
 
 ### Yahoo — Initial Bulk Load
 
-Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from the `markets` table (run Stooq bulk first to populate it).
+Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from the `markets` table via the `yahoo_ticker` column — run the `markets` CLI step first to populate it (requires Stooq bulk to have been fetched).
 
 `YahooSource` fetches two feeds per ticker (both default on):
 - **actions** — dividends + splits via `yf.Ticker(t).actions` (full history per ticker)
@@ -160,6 +159,28 @@ src.store('update')
 `update()` is **incremental**: it queries `yahoo_prices` for the last stored date per ticker and only fetches rows after that date. New tickers (not yet in the DB) get full history. Batches use the minimum last date of the group as the shared start date.
 
 Actions (dividends + splits) always re-fetch full history — yfinance has no incremental endpoint for these, but the volume is small and the merge deduplicates on `(Ticker, Date)`.
+
+---
+
+## Ticker Universe (markets table)
+
+The `markets` table is provider-agnostic — it is **not** a Stooq output. It holds one row per instrument with a `yahoo_ticker` column pre-translated for yfinance:
+
+| Translation rule | Example |
+|---|---|
+| Currencies, 6-char alpha | `EURUSD` → `EURUSD=X` |
+| Currencies, non-standard (`NOK_I`, `EUR_I`) | `NULL` — Stooq-specific, no Yahoo equivalent |
+| Stooq stocks indices (`^_UK`, `^_US`) | `NULL` — Stooq-proprietary basket indices |
+| Preferred/series shares `BASE_X` | `RNR_F` → `RNR-PF` |
+| All others | unchanged |
+
+Build or rebuild via `uv run irp` → Steps → `markets` (requires Stooq bulk fetch to have run). Primary source is `data/stooq/raw/markets.csv`; falls back to the existing DB table if the CSV has been cleaned up.
+
+```python
+from irp.data.markets import markets
+df = markets()                 # all tickers
+df = markets('AAPL')           # single ticker
+```
 
 ---
 
