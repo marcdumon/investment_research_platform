@@ -63,6 +63,7 @@ def main() -> None:
             Choice('transform', checked=True),
             Choice('store', checked=True),
             Choice('cleanup', checked=False),
+            Choice('catalog', checked=False),
         ],
         style=STYLE,
     ).ask()
@@ -98,6 +99,12 @@ def main() -> None:
             src.store(feed)
         if 'cleanup' in steps:
             src.cleanup()
+
+    if 'catalog' in steps:
+        from irp.data.catalog import refresh as _refresh_catalog
+        print('── catalog ──')
+        n = _refresh_catalog()
+        print(f'  {n:,} tickers')
 
 
 def _delete_markers(name: str, feed: str) -> None:
