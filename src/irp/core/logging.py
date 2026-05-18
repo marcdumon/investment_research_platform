@@ -2,6 +2,8 @@ import logging
 
 logging.getLogger('urllib3').setLevel(logging.INFO)
 logging.getLogger('requests').setLevel(logging.INFO)
+logging.getLogger('yfinance').setLevel(logging.WARNING)
+logging.getLogger('peewee').setLevel(logging.WARNING)
 
 _COLORS = {
     logging.DEBUG: '\033[37m',  # white
