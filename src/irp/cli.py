@@ -1,11 +1,10 @@
+import logging
+
 import questionary
 from questionary import Choice, Style
 
 from irp.core.config import config
 from irp.core.logging import configure_logging
-import logging
-
-configure_logging(level=logging.DEBUG)
 
 STYLE = Style([
     ('question',    'bold'),
@@ -18,6 +17,7 @@ STYLE = Style([
 
 
 def main() -> None:
+    configure_logging(level=logging.DEBUG)
     providers = questionary.checkbox(
         'Providers:',
         choices=[Choice('simfin', checked=True), Choice('stooq', checked=True), Choice('yahoo', checked=False)],

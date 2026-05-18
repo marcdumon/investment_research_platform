@@ -1,7 +1,5 @@
-import json
 import logging
 import time
-from pathlib import Path
 from typing import Literal
 
 import duckdb
@@ -9,6 +7,7 @@ import pandas as pd
 
 from irp.core.config import config
 from irp.core.freshness import is_fresh
+from irp.core.jsonset import JsonSet
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +18,10 @@ processed_dir = root_dir / yahoo_cfg.processed_dir
 
 _ACTIONS_FILE = raw_dir / 'actions.csv'
 _PRICES_FILE = raw_dir / 'prices.csv'
-_QUERIED_ACTIONS_FILE = raw_dir / 'queried_actions.json'
-_QUERIED_PRICES_FILE = raw_dir / 'queried_prices.json'
-_ERROR_FILE = raw_dir / 'error_tickers.json'
+_QUERIED_ACTIONS = JsonSet(raw_dir / 'queried_actions.json')
+_QUERIED_PRICES = JsonSet(raw_dir / 'queried_prices.json')
+_ERRORS = JsonSet(raw_dir / 'error_tickers.json')
 _ACTIONS_COLS = ['Ticker', 'Date', 'Type', 'Value']
-_PRICES_COLS = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
 
 
 def _load_target_tickers() -> list[str]:
@@ -40,26 +38,21 @@ def _load_target_tickers() -> list[str]:
     return df['Ticker'].tolist()
 
 
-def _load_queried(path: Path) -> set[str]:
-    if path.exists():
-        return set(json.loads(path.read_text()))
-    return set()
-
-
-def _save_queried(queried: set[str], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sorted(queried), indent=2))
-
-
-def _load_errors() -> set[str]:
-    if _ERROR_FILE.exists():
-        return set(json.loads(_ERROR_FILE.read_text()))
-    return set()
-
-
-def _save_errors(errors: set[str]) -> None:
-    _ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _ERROR_FILE.write_text(json.dumps(sorted(errors), indent=2))
+def _actions_to_long(ticker: str, actions: pd.DataFrame) -> pd.DataFrame:
+    """Vectorized melt of yfinance `.actions` (cols Dividends + Stock Splits,
+    DatetimeIndex) into long-form `(Ticker, Date, Type, Value)` rows where
+    Value > 0."""
+    df = actions.reset_index().rename(columns={'index': 'Date', 'Stock Splits': 'split'})
+    df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+    div = df.loc[df['Dividends'] > 0, ['Date', 'Dividends']].rename(columns={'Dividends': 'Value'})
+    div['Type'] = 'dividend'
+    spl = df.loc[df['split'] > 0, ['Date', 'split']].rename(columns={'split': 'Value'})
+    spl['Type'] = 'split'
+    out = pd.concat([div, spl], ignore_index=True)
+    if out.empty:
+        return pd.DataFrame(columns=_ACTIONS_COLS)
+    out.insert(0, 'Ticker', ticker)
+    return out[_ACTIONS_COLS]
 
 
 def _fetch_ticker_data(
@@ -77,9 +70,9 @@ def _fetch_ticker_data(
 
     raw_dir.mkdir(parents=True, exist_ok=True)
     tickers = _load_target_tickers()
-    known_errors = _load_errors() if skip_errors else set()
-    queried_actions = _load_queried(_QUERIED_ACTIONS_FILE) if skip_queried else set()
-    queried_prices = _load_queried(_QUERIED_PRICES_FILE) if skip_queried else set()
+    known_errors = _ERRORS.load() if skip_errors else set()
+    queried_actions = _QUERIED_ACTIONS.load() if skip_queried else set()
+    queried_prices = _QUERIED_PRICES.load() if skip_queried else set()
     new_errors: set[str] = set()
 
     todo = [
@@ -105,7 +98,7 @@ def _fetch_ticker_data(
         except Exception as e:
             logger.warning(f'{ticker}: {e}')
             new_errors.add(ticker)
-            _save_errors(known_errors | new_errors)
+            _ERRORS.save(known_errors | new_errors)
             time.sleep(yahoo_cfg.batch_sleep)
             continue
         time.sleep(yahoo_cfg.batch_sleep)
@@ -113,22 +106,14 @@ def _fetch_ticker_data(
         # --- actions ---
         if need_actions:
             if actions is not None and not actions.empty:
-                rows: list[dict] = []
-                for date, row in actions.iterrows():
-                    d = pd.Timestamp(date).strftime('%Y-%m-%d')
-                    div = float(row.get('Dividends', 0) or 0)
-                    sp = float(row.get('Stock Splits', 0) or 0)
-                    if div > 0:
-                        rows.append({'Ticker': ticker, 'Date': d, 'Type': 'dividend', 'Value': div})
-                    if sp > 0:
-                        rows.append({'Ticker': ticker, 'Date': d, 'Type': 'split', 'Value': sp})
-                if rows:
-                    pd.DataFrame(rows, columns=_ACTIONS_COLS).to_csv(
+                rows_df = _actions_to_long(ticker, actions)
+                if not rows_df.empty:
+                    rows_df.to_csv(
                         _ACTIONS_FILE, mode='a', header=not actions_has_header, index=False,
                     )
                     actions_has_header = True
             queried_actions.add(ticker)
-            _save_queried(queried_actions, _QUERIED_ACTIONS_FILE)
+            _QUERIED_ACTIONS.save(queried_actions)
 
         # --- prices ---
         if need_prices:
@@ -142,7 +127,7 @@ def _fetch_ticker_data(
                 )
                 prices_has_header = True
             queried_prices.add(ticker)
-            _save_queried(queried_prices, _QUERIED_PRICES_FILE)
+            _QUERIED_PRICES.save(queried_prices)
 
 
 def _transform_actions(conn: duckdb.DuckDBPyConnection) -> None:
@@ -284,10 +269,10 @@ class YahooSource:
         Interrupt with kernel signal at any time; rerun continues."""
         marker = raw_dir / '.fetched'
         actions_fresh = not self._fetch_actions or (
-            is_fresh(marker, _QUERIED_ACTIONS_FILE) and _ACTIONS_FILE.exists()
+            is_fresh(marker, _QUERIED_ACTIONS.path) and _ACTIONS_FILE.exists()
         )
         prices_fresh = not self._fetch_prices or (
-            is_fresh(marker, _QUERIED_PRICES_FILE) and _PRICES_FILE.exists()
+            is_fresh(marker, _QUERIED_PRICES.path) and _PRICES_FILE.exists()
         )
         if actions_fresh and prices_fresh:
             logger.info('fetch: already up to date, skipping')
