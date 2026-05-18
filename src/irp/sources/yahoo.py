@@ -31,12 +31,16 @@ def _load_target_tickers() -> list[str]:
     """Tickers from the `markets` table, excluding configured Market types."""
     excludes = [m.lower() for m in yahoo_cfg.markets_exclude]
     placeholders = ', '.join(['?' for _ in excludes])
-    df = db().execute(
-        f'SELECT DISTINCT Ticker FROM markets '
-        f'WHERE LOWER(Market) NOT IN ({placeholders}) '
-        f'ORDER BY Ticker',
-        excludes,
-    ).df()
+    df = (
+        db()
+        .execute(
+            f'SELECT DISTINCT Ticker FROM markets '
+            f'WHERE LOWER(Market) NOT IN ({placeholders}) '
+            f'ORDER BY Ticker',
+            excludes,
+        )
+        .df()
+    )
     return df['Ticker'].tolist()
 
 
@@ -49,11 +53,15 @@ def _actions_to_long(ticker: str, actions: pd.DataFrame) -> pd.DataFrame:
     df['Date'] = pd.to_datetime(df[date_col]).dt.strftime('%Y-%m-%d')
     parts: list[pd.DataFrame] = []
     if 'Dividends' in df.columns:
-        div = df.loc[df['Dividends'] > 0, ['Date', 'Dividends']].rename(columns={'Dividends': 'Value'})
+        div = df.loc[df['Dividends'] > 0, ['Date', 'Dividends']].rename(
+            columns={'Dividends': 'Value'}
+        )
         div['Type'] = 'dividend'
         parts.append(div)
     if 'Stock Splits' in df.columns:
-        spl = df.loc[df['Stock Splits'] > 0, ['Date', 'Stock Splits']].rename(columns={'Stock Splits': 'Value'})
+        spl = df.loc[df['Stock Splits'] > 0, ['Date', 'Stock Splits']].rename(
+            columns={'Stock Splits': 'Value'}
+        )
         spl['Type'] = 'split'
         parts.append(spl)
     if not parts:
@@ -82,8 +90,12 @@ def _append_csv(df: pd.DataFrame, path: Path, has_header: bool) -> bool:
 
 
 def _fetch_actions_per_ticker(
-    yf, tickers: list[str], queried: set[str],
-    known_errors: set[str], new_errors: set[str], has_header: bool,
+    yf,
+    tickers: list[str],
+    queried: set[str],
+    known_errors: set[str],
+    new_errors: set[str],
+    has_header: bool,
 ) -> bool:
     todo = [t for t in tickers if t not in known_errors and t not in queried]
     logger.info(f'Yahoo actions: {len(todo)} tickers')
@@ -108,8 +120,12 @@ def _fetch_actions_per_ticker(
 
 
 def _fetch_prices_per_ticker(
-    yf, tickers: list[str], queried: set[str],
-    known_errors: set[str], new_errors: set[str], has_header: bool,
+    yf,
+    tickers: list[str],
+    queried: set[str],
+    known_errors: set[str],
+    new_errors: set[str],
+    has_header: bool,
 ) -> bool:
     todo = [t for t in tickers if t not in known_errors and t not in queried]
     logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
@@ -133,8 +149,12 @@ def _fetch_prices_per_ticker(
 
 
 def _fetch_prices_batched(
-    yf, tickers: list[str], queried: set[str],
-    known_errors: set[str], new_errors: set[str], has_header: bool,
+    yf,
+    tickers: list[str],
+    queried: set[str],
+    known_errors: set[str],
+    new_errors: set[str],
+    has_header: bool,
 ) -> bool:
     """Batch download via yf.download. Each batch is one HTTP request to
     Yahoo's chart API; invalid tickers come back as all-NaN columns (not
@@ -149,11 +169,17 @@ def _fetch_prices_batched(
         logger.debug(f'Batch {i // bsize + 1}: {len(batch)} tickers')
         try:
             raw = yf.download(
-                batch, period='max', auto_adjust=True,
-                threads=False, progress=False, group_by='ticker',
+                batch,
+                period='max',
+                auto_adjust=True,
+                threads=False,
+                progress=False,
+                group_by='ticker',
             )
         except Exception as e:
-            logger.warning(f'batch [{i}:{i+len(batch)}] failed: {type(e).__name__}: {e}')
+            logger.warning(
+                f'batch [{i}:{i + len(batch)}] failed: {type(e).__name__}: {e}'
+            )
             time.sleep(yahoo_cfg.batch_sleep)
             continue
         time.sleep(yahoo_cfg.batch_sleep)
@@ -174,7 +200,9 @@ def _fetch_prices_batched(
     return has_header
 
 
-def _extract_batch_slice(raw: pd.DataFrame, ticker: str, single_ticker: bool) -> pd.DataFrame | None:
+def _extract_batch_slice(
+    raw: pd.DataFrame, ticker: str, single_ticker: bool
+) -> pd.DataFrame | None:
     """Pull one ticker's OHLCV out of yf.download's result. With multiple
     tickers + group_by='ticker', columns are MultiIndex ('ticker', field).
     With a single ticker the result is flat-columned."""
@@ -184,7 +212,7 @@ def _extract_batch_slice(raw: pd.DataFrame, ticker: str, single_ticker: bool) ->
         return None
     if df.empty or 'Close' not in df.columns:
         return None
-    df = df.dropna(subset=['Close'])
+    df = df.dropna(subset=['Close']) # type: ignore (pandas typing issue)
     return df if not df.empty else None
 
 
@@ -220,13 +248,27 @@ def _fetch_ticker_data(
 
     if fetch_actions:
         actions_has_header = _fetch_actions_per_ticker(
-            yf, tickers, queried_actions, known_errors, new_errors, actions_has_header,
+            yf,
+            tickers,
+            queried_actions,
+            known_errors,
+            new_errors,
+            actions_has_header,
         )
 
     if fetch_prices:
-        fn = _fetch_prices_batched if prices_mode == 'batch' else _fetch_prices_per_ticker
+        fn = (
+            _fetch_prices_batched
+            if prices_mode == 'batch'
+            else _fetch_prices_per_ticker
+        )
         prices_has_header = fn(
-            yf, tickers, queried_prices, known_errors, new_errors, prices_has_header,
+            yf,
+            tickers,
+            queried_prices,
+            known_errors,
+            new_errors,
+            prices_has_header,
         )
 
 
@@ -296,9 +338,14 @@ def _store_dividends(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'dividends.csv'
     if not src.exists():
         return
-    merge_csv(con, 'dividends', src,
-              key_cols=['Ticker', 'Date'], value_cols=['Amount'],
-              extra_insert_cols=['SrcId', 'Src'])
+    merge_csv(
+        con,
+        'dividends',
+        src,
+        key_cols=['Ticker', 'Date'],
+        value_cols=['Amount'],
+        extra_insert_cols=['SrcId', 'Src'],
+    )
     logger.debug('Stored dividends')
 
 
@@ -306,9 +353,14 @@ def _store_splits(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'splits.csv'
     if not src.exists():
         return
-    merge_csv(con, 'splits', src,
-              key_cols=['Ticker', 'Date'], value_cols=['Ratio'],
-              extra_insert_cols=['SrcId', 'Src'])
+    merge_csv(
+        con,
+        'splits',
+        src,
+        key_cols=['Ticker', 'Date'],
+        value_cols=['Ratio'],
+        extra_insert_cols=['SrcId', 'Src'],
+    )
     logger.debug('Stored splits')
 
 
@@ -316,9 +368,13 @@ def _store_prices(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'prices.csv'
     if not src.exists():
         return
-    merge_csv(con, 'yahoo_prices', src,
-              key_cols=['Ticker', 'Date'],
-              value_cols=['Open', 'High', 'Low', 'Close', 'Volume'])
+    merge_csv(
+        con,
+        'yahoo_prices',
+        src,
+        key_cols=['Ticker', 'Date'],
+        value_cols=['Open', 'High', 'Low', 'Close', 'Volume'],
+    )
     logger.debug('Stored yahoo_prices')
 
 
@@ -354,7 +410,7 @@ class YahooSource:
         _fetch_ticker_data(
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
-            prices_mode=self._prices_mode,
+            prices_mode=self._prices_mode, # type: ignore (pylance widens instance attribute type)
         )
         marker.touch()
         logger.debug('Yahoo ticker data fetched.')
@@ -368,7 +424,7 @@ class YahooSource:
             skip_queried=False,
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
-            prices_mode=self._prices_mode,
+            prices_mode=self._prices_mode, # type: ignore (pylance widens instance attribute type)
         )
         (raw_dir / '.fetched').touch()
 
