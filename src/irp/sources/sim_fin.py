@@ -72,7 +72,13 @@ def _configure_sf() -> None:
     sf.set_data_dir(str(raw_dir))
 
 
+class RateLimitError(Exception):
+    """SimFin returned HTTP 429 — caller must stop the bulk loop."""
+
+
 def _download_dataset(dataset: SimFinDataset) -> bool:
+    """Return True on success, False on per-dataset failure (caller continues).
+    Raises RateLimitError on HTTP 429 (caller must abort the loop)."""
     try:
         sf.load(
             dataset=dataset.name,
@@ -83,11 +89,10 @@ def _download_dataset(dataset: SimFinDataset) -> bool:
         return True
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 429:
-            logger.error('Rate limit exceeded. Stopping bulk fetch.')
-        else:
-            logger.error(
-                f'Error fetching {dataset.name}/{dataset.variant}/{dataset.market}: {e}'
-            )
+            raise RateLimitError('SimFin rate limit (HTTP 429)') from e
+        logger.error(
+            f'Error fetching {dataset.name}/{dataset.variant}/{dataset.market}: {e}'
+        )
         return False
 
 
@@ -200,15 +205,25 @@ def _store_companies(con: duckdb.DuckDBPyConnection) -> None:
 
 
 class SimFinSource:
+    SUPPORTED_FEEDS = frozenset({'bulk'})
+
     def fetch_bulk(self) -> None:
         _configure_sf()
         before = {f: f.stat().st_mtime for f in raw_dir.glob('*.csv')}
+        failures: list[SimFinDataset] = []
 
         for dataset in BULK_DATASETS:
             logger.debug(f'Fetching {dataset.name}/{dataset.variant}/{dataset.market}')
-            success = _download_dataset(dataset)
-            if not success:
+            try:
+                if not _download_dataset(dataset):
+                    failures.append(dataset)
+            except RateLimitError as e:
+                logger.error(f'{e} — aborting remaining datasets')
+                failures.extend(BULK_DATASETS[BULK_DATASETS.index(dataset):])
                 break
+
+        if failures:
+            logger.warning(f'SimFin fetch: {len(failures)} of {len(BULK_DATASETS)} datasets failed')
 
         marker = raw_dir / '.fetched'
         after = {f: f.stat().st_mtime for f in raw_dir.glob('*.csv')}
@@ -222,13 +237,10 @@ class SimFinSource:
             logger.info('fetch: no new data downloaded, skipping marker update')
 
     def update(self) -> None:
-        """SimFin has no incremental update path without shareprices. No-op."""
-        logger.info('SimFin update: nothing to do (shareprices removed)')
+        """Not supported — SimFin has no incremental update path."""
+        raise NotImplementedError('SimFin does not support incremental update')
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
-        if feed == 'update':
-            logger.info('transform(update): nothing to do')
-            return
         marker = raw_dir / '.transformed_bulk'
         upstream = raw_dir / '.fetched'
         if is_fresh(marker, upstream):
@@ -240,9 +252,6 @@ class SimFinSource:
         marker.touch()
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
-        if feed == 'update':
-            logger.info('store(update): nothing to do')
-            return
         marker = raw_dir / '.stored_bulk'
         upstream = raw_dir / '.transformed_bulk'
         if is_fresh(marker, upstream):

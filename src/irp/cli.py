@@ -5,7 +5,7 @@ from questionary import Choice, Style
 
 from irp.core.config import config
 from irp.core.logging import configure_logging
-from irp.pipeline import DataProvider
+from irp.runner import DataProvider
 
 STYLE = Style([
     ('question',    'bold'),
@@ -77,6 +77,9 @@ def main() -> None:
     for name in providers:
         src = _make_source(name, yahoo_content=yahoo_content)
         print(f'── {name} ──')
+        if feed not in src.SUPPORTED_FEEDS:
+            print(f'  feed {feed!r} not supported by {name}, skipping')
+            continue
         if 'fetch' in steps:
             src.fetch_bulk() if feed == 'bulk' else src.update()
         if 'transform' in steps:
@@ -102,6 +105,9 @@ def _make_source(name: str, yahoo_content: list[str] | None = None) -> DataProvi
     if name == 'simfin':
         from irp.sources.sim_fin import SimFinSource
         return SimFinSource()
+    if name == 'stooq':
+        from irp.sources.stooq import StooqSource
+        return StooqSource()
     if name == 'yahoo':
         from irp.sources.yahoo import YahooSource
         content = yahoo_content or ['actions', 'prices']
@@ -109,8 +115,7 @@ def _make_source(name: str, yahoo_content: list[str] | None = None) -> DataProvi
             fetch_actions='actions' in content,
             fetch_prices='prices' in content,
         )
-    from irp.sources.stooq import StooqSource
-    return StooqSource()
+    raise ValueError(f'unknown provider: {name!r}')
 
 
 if __name__ == '__main__':

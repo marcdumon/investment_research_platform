@@ -1,9 +1,8 @@
 from typing import Literal
 
-import duckdb
 import pandas as pd
 
-from irp.core.config import config
+from irp.core.db import db
 from irp.data.simfin import fundamentals
 from irp.quality.edgar import filing_url
 from irp.quality.simfin_reviews import load_reviews, period_str
@@ -16,11 +15,10 @@ def _cik_map(tickers: list[str]) -> dict[str, int]:
     if not tickers:
         return {}
     placeholders = ','.join(['?'] * len(tickers))
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        rows = con.execute(
-            f'SELECT Ticker, CIK FROM companies WHERE Ticker IN ({placeholders}) AND CIK IS NOT NULL',
-            tickers,
-        ).fetchall()
+    rows = db().execute(
+        f'SELECT Ticker, CIK FROM companies WHERE Ticker IN ({placeholders}) AND CIK IS NOT NULL',
+        tickers,
+    ).fetchall()
     return {t: int(c) for t, c in rows}
 
 

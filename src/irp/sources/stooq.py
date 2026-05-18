@@ -65,7 +65,13 @@ def _category_of(leaf: Path, data_root: Path) -> Path:
 
 
 def _build_price_dataset() -> None:
-    """Read extracted ticker CSVs, write bulk_prices.parquet + markets.csv, delete data/."""
+    """Read extracted ticker CSVs, write bulk_prices.parquet + markets.csv.
+
+    Incremental parquet write: a crash mid-loop leaves a partial parquet.
+    Safe to rerun because the `.fetched` marker is only touched by the
+    caller after this function returns, so a partial file is overwritten
+    on the next fetch_bulk(). No cleanup needed.
+    """
     logger.debug('Building price dataset...')
     parquet_file = raw_dir / 'bulk_prices.parquet'
     data_root = raw_dir / 'data'
@@ -188,6 +194,8 @@ def _store_markets(con: duckdb.DuckDBPyConnection) -> None:
 
 
 class StooqSource:
+    SUPPORTED_FEEDS = frozenset({'bulk', 'update'})
+
     def fetch_bulk(self) -> None:
         """Stooq bulk zips must be manually downloaded and placed in raw_dir. Unzips and builds the price dataset."""
         marker = raw_dir / '.fetched'
