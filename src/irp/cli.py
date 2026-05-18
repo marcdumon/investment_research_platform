@@ -26,6 +26,17 @@ def main() -> None:
     if not providers:
         return
 
+    yahoo_content = ['actions', 'prices']
+    if 'yahoo' in providers:
+        yahoo_content = questionary.checkbox(
+            'Yahoo content:',
+            choices=[
+                Choice('actions  (dividends + splits)', value='actions', checked=True),
+                Choice('prices   (OHLCV)', value='prices', checked=True),
+            ],
+            style=STYLE,
+        ).ask() or yahoo_content
+
     feed = questionary.select(
         'Feed:',
         choices=['bulk', 'update'],
@@ -63,7 +74,7 @@ def main() -> None:
         print()
 
     for name in providers:
-        src = _make_source(name)
+        src = _make_source(name, yahoo_content=yahoo_content)
         print(f'── {name} ──')
         if 'fetch' in steps:
             src.fetch_bulk() if feed == 'bulk' else src.update()
@@ -86,13 +97,17 @@ def _delete_markers(name: str, feed: str) -> None:
             print(f'  deleted {name}/{m.name}')
 
 
-def _make_source(name: str):
+def _make_source(name: str, yahoo_content: list[str] | None = None):
     if name == 'simfin':
         from irp.sources.sim_fin import SimFinSource
         return SimFinSource()
     if name == 'yahoo':
         from irp.sources.yahoo import YahooSource
-        return YahooSource()
+        content = yahoo_content or ['actions', 'prices']
+        return YahooSource(
+            fetch_actions='actions' in content,
+            fetch_prices='prices' in content,
+        )
     from irp.sources.stooq import StooqSource
     return StooqSource()
 
