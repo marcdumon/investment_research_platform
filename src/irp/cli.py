@@ -20,7 +20,7 @@ STYLE = Style([
 def main() -> None:
     providers = questionary.checkbox(
         'Providers:',
-        choices=[Choice('simfin', checked=True), Choice('stooq', checked=True)],
+        choices=[Choice('simfin', checked=True), Choice('stooq', checked=True), Choice('yahoo', checked=False)],
         style=STYLE,
     ).ask()
     if not providers:
@@ -76,7 +76,7 @@ def main() -> None:
 
 
 def _delete_markers(name: str, feed: str) -> None:
-    cfg = config.providers.simfin if name == 'simfin' else config.providers.stooq
+    cfg = getattr(config.providers, name)
     raw_dir = config.data.root_dir / cfg.raw_dir
     fetch_marker = raw_dir / ('.fetched_update' if feed == 'update' else '.fetched')
     markers = [fetch_marker, raw_dir / f'.transformed_{feed}', raw_dir / f'.stored_{feed}']
@@ -90,6 +90,9 @@ def _make_source(name: str):
     if name == 'simfin':
         from irp.sources.sim_fin import SimFinSource
         return SimFinSource()
+    if name == 'yahoo':
+        from irp.sources.yahoo import YahooSource
+        return YahooSource()
     from irp.sources.stooq import StooqSource
     return StooqSource()
 

@@ -13,6 +13,13 @@ refresh_days_fundamentals = 7
 refresh_days_meta = 7
 
 
+[providers.yahoo]
+raw_dir = "yahoo/raw"
+processed_dir = "yahoo/processed"
+batch_sleep = 1.5
+markets_exclude = ["cryptocurrencies", "money market", "bonds"]
+
+
 [providers.stooq]
 raw_dir = "stooq/raw"
 processed_dir = "stooq/processed"
