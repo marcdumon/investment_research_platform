@@ -183,7 +183,7 @@ def _stooq_close_at(trade_date: int, lower_pats: list[str]) -> pd.DataFrame:
     like_clause = ' OR '.join(['LOWER(m.Market) LIKE ?' for _ in lower_pats])
     return db().execute(
         f'SELECT DISTINCT p.Ticker, p.C AS Stooq_C FROM prices p '
-        f'JOIN markets m ON m.Ticker = p.Ticker '
+        f'JOIN universe m ON m.Ticker = p.Ticker '
         f'WHERE p.Date = ? AND ({like_clause})',
         [trade_date] + lower_pats,
     ).df()

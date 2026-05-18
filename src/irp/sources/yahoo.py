@@ -35,7 +35,7 @@ _ACTIONS_COLS = ['Ticker', 'Date', 'Type', 'Value']
 
 
 def _load_yahoo_tickers() -> dict[str, str]:
-    """Canonical->yahoo_ticker map from `markets`, excluding configured Market types.
+    """Canonical->yahoo_ticker map from `universe`, excluding configured Market types.
 
     Filters to rows where yahoo_ticker IS NOT NULL (instruments with no Yahoo
     equivalent are excluded automatically). Uses a short-lived local connection
@@ -46,7 +46,7 @@ def _load_yahoo_tickers() -> dict[str, str]:
     placeholders = ', '.join(['?' for _ in excludes])
     with duckdb.connect(str(config.database.path), read_only=True) as con:
         df = con.execute(
-            f'SELECT Ticker, yahoo_ticker FROM markets '
+            f'SELECT Ticker, yahoo_ticker FROM universe '
             f'WHERE yahoo_ticker IS NOT NULL '
             f'AND LOWER(Market) NOT IN ({placeholders}) '
             f'ORDER BY Ticker',
@@ -449,7 +449,7 @@ class YahooSource:
     def fetch_bulk(self) -> None:
         """Pull dividends, splits, and/or OHLCV prices for every eligible ticker.
 
-        Target tickers come from markets.yahoo_ticker (NOT NULL, Market NOT IN
+        Target tickers come from universe.yahoo_ticker (NOT NULL, Market NOT IN
         markets_exclude). yfinance is called with the yahoo_ticker value; data
         is stored under the canonical Ticker key so all DB tables share the same
         primary key.

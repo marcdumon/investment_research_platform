@@ -55,24 +55,11 @@ def test_store_bulk_creates_prices_table(store_env):
     assert "prices" in _tables(db_path)
 
 
-def test_store_bulk_creates_markets_table(store_env):
-    _, db_path = store_env
-    StooqSource().store(feed="bulk")
-    assert "markets" in _tables(db_path)
-
-
 def test_store_bulk_prices_row_count(store_env):
     _, db_path = store_env
     StooqSource().store(feed="bulk")
     count = _query(db_path, "SELECT COUNT(*) AS n FROM prices")["n"][0]
     assert count == len(_BULK_PRICES)
-
-
-def test_store_bulk_markets_row_count(store_env):
-    _, db_path = store_env
-    StooqSource().store(feed="bulk")
-    count = _query(db_path, "SELECT COUNT(*) AS n FROM markets")["n"][0]
-    assert count == len(_MARKETS)
 
 
 def test_store_bulk_idempotent(store_env):

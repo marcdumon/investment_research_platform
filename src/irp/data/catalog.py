@@ -1,6 +1,6 @@
 """Data catalog: one-row-per-ticker coverage summary across all data sources.
 
-The `catalog` table has one row per ticker (from `markets`) with columns
+The `catalog` table has one row per ticker (from `universe`) with columns
 for every data source: Stooq price range, Yahoo price range, dividend and
 split counts, SimFin fundamental period counts, company metadata flag, and
 Yahoo fetch status (queried / errored).
@@ -178,7 +178,7 @@ def refresh() -> int:
                 COALESCE(c.cashflow_Q, 0)         AS cashflow_Q,
                 (comp.Ticker IS NOT NULL)         AS in_companies,
                 CURRENT_TIMESTAMP                 AS catalog_updated_at
-            FROM (SELECT DISTINCT Ticker, Market FROM markets) b
+            FROM (SELECT DISTINCT Ticker, Market FROM universe) b
             LEFT JOIN stooq s  ON b.Ticker = s.Ticker
             LEFT JOIN yp       ON b.Ticker = yp.Ticker
             LEFT JOIN _yp_q q1 ON b.Ticker = q1.Ticker

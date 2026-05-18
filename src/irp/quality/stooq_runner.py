@@ -30,7 +30,7 @@ def run(skip_reviewed: bool = True) -> pd.DataFrame:
 
     market_rows = con.execute("""
         SELECT Ticker, STRING_AGG(DISTINCT Market, ' / ') AS Market
-        FROM markets
+        FROM universe
         GROUP BY Ticker
     """).fetchall()
     market_map = {t: m for t, m in market_rows}

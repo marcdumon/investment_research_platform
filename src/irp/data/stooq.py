@@ -1,4 +1,4 @@
-"""Row accessors for Stooq tables (`prices`, `markets`)."""
+"""Row accessors for Stooq tables (`prices`)."""
 import pandas as pd
 
 from irp.data._common import db, ticker_filter
@@ -29,16 +29,5 @@ def prices(
     return (
         db()
         .execute(f'SELECT * FROM prices {where} ORDER BY Ticker, Date', params)
-        .df()
-    )
-
-
-def markets(tickers: str | list[str] | None = None) -> pd.DataFrame:
-    """Ticker → market mapping. `Market` is Stooq's lowercase category folder."""
-    clause, params = ticker_filter(tickers)
-    where = f'WHERE {clause}' if clause else ''
-    return (
-        db()
-        .execute(f'SELECT * FROM markets {where} ORDER BY Ticker', params)
         .df()
     )
