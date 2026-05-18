@@ -1,6 +1,6 @@
 # Investment Research Platform
 
-DuckDB-backed data pipeline for equity fundamentals and price data. Two providers: **SimFin** (fundamentals, prices, company metadata) and **Stooq** (historical OHLCV prices).
+DuckDB-backed data pipeline for equity fundamentals and price data. Three providers: **SimFin** (fundamentals, company metadata), **Stooq** (historical OHLCV prices), **Yahoo** (corporate actions: dividends + splits).
 
 ---
 
@@ -23,6 +23,15 @@ Fundamentals follow **SEC period convention**: annual periods named by the calen
 | Bulk historical prices | `prices` | Daily OHLCV for US + World markets |
 | Markets | `markets` | Ticker → market mapping |
 | Daily update | `prices` | Incremental OHLCV update (upserted) |
+
+### Yahoo
+
+| Dataset | Table in DB | Notes |
+|---|---|---|
+| Dividends | `dividends` | Per-ticker cash dividend events `(Ticker, Date, Amount)` |
+| Splits | `splits` | Per-ticker stock-split events `(Ticker, Date, Ratio)` |
+
+Source filter: `markets` table minus `config.providers.yahoo.markets_exclude` (default: cryptocurrencies, money market, bonds → ~14k tickers).
 
 ---
 
@@ -104,6 +113,30 @@ load_data(src, 'update')
 src.cleanup()
 ```
 
+### Yahoo — Initial Bulk Load
+
+Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from the `markets` table (run Stooq bulk first to populate it).
+
+**Slow:** ~14k tickers × 1.5s = ~6h end-to-end. **Resume-safe** — stop with Ctrl-C any time, rerun continues.
+
+```python
+from irp.sources.yahoo import YahooSource
+
+src = YahooSource()
+src.fetch_bulk()
+src.transform('bulk')
+src.store('bulk')
+```
+
+Or via the interactive CLI: `uv run irp` → tick `yahoo`.
+
+Resume state lives in `data/yahoo/raw/`:
+- `queried_tickers.json` — every successfully called ticker (incl. empty results)
+- `error_tickers.json` — tickers that errored on the yfinance call
+- `actions.csv` — long-format dividend + split rows
+
+To re-probe known errors or force a full refresh, see `_fetch_actions(skip_errors=False, skip_queried=False)`.
+
 ---
 
 ## Pipeline Internals
@@ -122,7 +155,8 @@ Steps are **idempotent**: freshness markers (`.fetched`, `.transformed_bulk`, et
 |---|---|
 | `src/irp/sources/sim_fin.py` | SimFin fetch, transform, store, update, cleanup |
 | `src/irp/sources/stooq.py` | Stooq unzip, transform, store, cleanup |
-| `src/irp/pipeline.py` | Orchestrates both providers via `DataProvider` protocol |
+| `src/irp/sources/yahoo.py` | Yahoo per-ticker dividends + splits via yfinance, resume-safe |
+| `src/irp/pipeline.py` | Orchestrates providers via `DataProvider` protocol |
 | `src/irp/core/freshness.py` | `is_fresh(marker, *inputs)` — skip logic |
 | `src/irp/core/config.py` | Loads `config.toml` via Pydantic |
 
@@ -138,6 +172,9 @@ data/
   stooq/
     raw/                  # Stooq zips + extracted data + freshness markers
     processed/            # intermediate files (deleted by cleanup)
+  yahoo/
+    raw/                  # actions.csv + queried_tickers.json + error_tickers.json
+    processed/            # dividends.csv + splits.csv (deleted by cleanup)
 ```
 
 ---

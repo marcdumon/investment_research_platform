@@ -28,6 +28,11 @@ class SimfinConfig(ProviderConfig):
 
 
 
+class YahooConfig(ProviderConfig):
+    batch_sleep: float
+    markets_exclude: list[str]
+
+
 class StooqConfig(ProviderConfig):
     bulk_url: str
     bulk_files: list[str]
@@ -51,6 +56,7 @@ class StooqConfig(ProviderConfig):
 class ProvidersConfig(BaseModel):
     simfin: SimfinConfig
     stooq: StooqConfig
+    yahoo: YahooConfig
 
 
 class Config(BaseModel):
