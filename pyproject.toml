@@ -31,8 +31,7 @@ dev = [
 ]
 
 [project.scripts]
-irp         = "irp.cli:main"
-irp-catalog = "irp.data.catalog:main"
+irp = "irp.cli:main"
 
 [build-system]
 requires = ["setuptools>=61"]
