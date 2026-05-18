@@ -285,7 +285,7 @@ def _transform_actions(conn: duckdb.DuckDBPyConnection) -> None:
         COPY (
             SELECT
                 Ticker,
-                CAST(REPLACE(Date, '-', '') AS INTEGER) AS Date,
+                CAST(REPLACE(CAST(Date AS VARCHAR), '-', '') AS INTEGER) AS Date,
                 Value AS Amount,
                 Ticker AS SrcId,
                 'yahoo' AS Src
@@ -300,7 +300,7 @@ def _transform_actions(conn: duckdb.DuckDBPyConnection) -> None:
         COPY (
             SELECT
                 Ticker,
-                CAST(REPLACE(Date, '-', '') AS INTEGER) AS Date,
+                CAST(REPLACE(CAST(Date AS VARCHAR), '-', '') AS INTEGER) AS Date,
                 Value AS Ratio,
                 Ticker AS SrcId,
                 'yahoo' AS Src
@@ -324,7 +324,7 @@ def _transform_prices(conn: duckdb.DuckDBPyConnection) -> None:
         COPY (
             SELECT
                 Ticker,
-                CAST(REPLACE(Date, '-', '') AS INTEGER) AS Date,
+                CAST(REPLACE(CAST(Date AS VARCHAR), '-', '') AS INTEGER) AS Date,
                 Open, High, Low, Close,
                 CAST(Volume AS BIGINT) AS Volume
             FROM read_csv_auto('{src}')
