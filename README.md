@@ -140,9 +140,11 @@ Or via the interactive CLI: `uv run irp` → tick `yahoo`.
 Resume state lives in `data/yahoo/raw/`:
 - `queried_actions.json` — tickers whose dividends/splits have been pulled
 - `queried_prices.json` — tickers whose OHLCV history has been pulled (separate so partial runs resume only what is missing)
-- `error_tickers.json` — tickers that errored (shared across feeds)
+- `error_tickers.json` — tickers that errored (shared across feeds; a failing ticker is skipped for both feeds on the next run)
 - `actions.csv` — long-format dividend + split rows
 - `prices.csv` — long-format OHLCV rows
+
+These JSON files are the **live source of truth** for fetch progress. The `catalog` table in DuckDB mirrors them as `yahoo_prices_queried`, `yahoo_prices_error`, `yahoo_actions_queried`, `yahoo_actions_error` boolean columns, but those are a snapshot written at catalog rebuild time, not live state.
 
 To re-probe known errors or force a full refresh: `_fetch_ticker_data(skip_errors=False, skip_queried=False)`.
 
@@ -158,6 +160,31 @@ src.store('update')
 `update()` is **incremental**: it queries `yahoo_prices` for the last stored date per ticker and only fetches rows after that date. New tickers (not yet in the DB) get full history. Batches use the minimum last date of the group as the shared start date.
 
 Actions (dividends + splits) always re-fetch full history — yfinance has no incremental endpoint for these, but the volume is small and the merge deduplicates on `(Ticker, Date)`.
+
+---
+
+## Data Catalog
+
+`irp.data.catalog.catalog()` returns a single DataFrame with one row per ticker and columns covering every data source:
+
+| Column group | Source |
+|---|---|
+| `stooq_first/last/rows` | `prices` table |
+| `yahoo_first/last/rows` | `yahoo_prices` table |
+| `yahoo_prices_queried/error` | `queried_prices.json` / `error_tickers.json` |
+| `yahoo_actions_queried/error` | `queried_actions.json` / `error_tickers.json` |
+| `div_count/first/last`, `split_count` | `dividends`, `splits` tables |
+| `income_A/Q`, `balance_A/Q`, `cashflow_A/Q` | SimFin fundamental tables |
+| `in_companies` | `companies` table |
+
+Rebuild via `uv run irp` → Steps → `catalog`. This reads the JSON files from `data/yahoo/raw/` and joins them with the current DB state; the resulting boolean columns are a snapshot, not live state.
+
+```python
+from irp.data.catalog import catalog
+df = catalog()                 # all tickers
+df = catalog('AAPL')           # single ticker
+df = catalog(['AAPL', 'MSFT']) # subset
+```
 
 ---
 
