@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +44,18 @@ def _load_target_tickers() -> list[str]:
             excludes,
         ).df()
     return df['Ticker'].tolist()
+
+
+def _load_last_prices_dates() -> dict[str, date]:
+    """Per-ticker last stored date in yahoo_prices. Returns {} if table absent."""
+    try:
+        with duckdb.connect(str(config.database.path), read_only=True) as con:
+            rows = con.execute(
+                'SELECT Ticker, MAX(Date) FROM yahoo_prices GROUP BY Ticker'
+            ).fetchall()
+        return {ticker: d for ticker, d in rows}
+    except Exception:
+        return {}
 
 
 def _actions_to_long(ticker: str, actions: pd.DataFrame) -> pd.DataFrame:
@@ -127,13 +140,20 @@ def _fetch_prices_per_ticker(
     known_errors: set[str],
     new_errors: set[str],
     has_header: bool,
+    last_dates: dict[str, date] | None = None,
 ) -> bool:
     todo = [t for t in tickers if t not in known_errors and t not in queried]
     logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
     for ticker in todo:
         logger.debug(f'Prices: {ticker}')
+        last = last_dates.get(ticker) if last_dates is not None else None
+        kwargs = (
+            {'start': (last + timedelta(days=1)).isoformat(), 'auto_adjust': True}
+            if last is not None
+            else {'period': 'max', 'auto_adjust': True}
+        )
         try:
-            hist = yf.Ticker(ticker).history(period='max', auto_adjust=True)
+            hist = yf.Ticker(ticker).history(**kwargs)
         except Exception as e:
             logger.warning(f'{ticker}: {type(e).__name__}: {e}')
             new_errors.add(ticker)
@@ -156,6 +176,7 @@ def _fetch_prices_batched(
     known_errors: set[str],
     new_errors: set[str],
     has_header: bool,
+    last_dates: dict[str, date] | None = None,
 ) -> bool:
     """Batch download via yf.download. Each batch is one HTTP request to
     Yahoo's chart API; invalid tickers come back as all-NaN columns (not
@@ -167,11 +188,17 @@ def _fetch_prices_batched(
     logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers')
     for i in range(0, len(todo), bsize):
         batch = todo[i : i + bsize]
-        logger.debug(f'Batch {i // bsize + 1}: {len(batch)} tickers')
+        batch_starts = [last_dates.get(t) for t in batch] if last_dates is not None else []
+        min_start = min(batch_starts, default=None) if batch_starts else None
+        if min_start is not None and all(s is not None for s in batch_starts):
+            dl_kwargs: dict = {'start': (min_start + timedelta(days=1)).isoformat()}
+        else:
+            dl_kwargs = {'period': 'max'}
+        logger.debug(f'Batch {i // bsize + 1}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}')
         try:
             raw = yf.download(
                 batch,
-                period='max',
+                **dl_kwargs,
                 auto_adjust=True,
                 threads=False,
                 progress=False,
@@ -223,6 +250,7 @@ def _fetch_ticker_data(
     fetch_actions: bool = True,
     fetch_prices: bool = True,
     prices_mode: Literal['batch', 'ticker'] = 'batch',
+    last_dates: dict[str, date] | None = None,
 ) -> None:
     """Pull dividends, splits, and/or OHLCV prices from yfinance.
 
@@ -231,6 +259,11 @@ def _fetch_ticker_data(
     to per-ticker yf.Ticker.history (slower, finer error attribution).
 
     Actions always go per-ticker (no batch endpoint).
+
+    `last_dates` maps Ticker -> last stored date in yahoo_prices. When set,
+    prices are fetched from last_date+1 day instead of full history. Tickers
+    absent from the map get full history. Batched mode uses the minimum
+    last_date across the batch as the shared start.
 
     Resume-safe: skips tickers already in queried_actions.json /
     queried_prices.json / error_tickers.json.
@@ -270,6 +303,7 @@ def _fetch_ticker_data(
             known_errors,
             new_errors,
             prices_has_header,
+            last_dates=last_dates,
         )
 
 
@@ -417,15 +451,19 @@ class YahooSource:
         logger.debug('Yahoo ticker data fetched.')
 
     def update(self) -> None:
-        """Re-fetch for all eligible tickers (forces re-query).
+        """Incremental refresh: fetches only dates after the last stored date per ticker.
 
-        yfinance has no incremental endpoint; full per-ticker refresh is the
-        only safe path. Merge dedupes on (Ticker, Date) so reruns are idempotent."""
+        Prices use per-ticker or batched start dates from yahoo_prices. Batches
+        use the minimum last_date of the group, so new tickers in a batch pull
+        full history. Actions always re-fetch full history (no incremental API).
+        Merge dedupes on (Ticker, Date) so reruns are idempotent."""
+        last_dates = _load_last_prices_dates() if self._fetch_prices else None
         _fetch_ticker_data(
             skip_queried=False,
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
             prices_mode=self._prices_mode, # type: ignore (pylance widens instance attribute type)
+            last_dates=last_dates,
         )
         (raw_dir / '.fetched').touch()
 
