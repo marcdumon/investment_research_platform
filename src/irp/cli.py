@@ -63,7 +63,7 @@ def main() -> None:
             Choice('transform', checked=True),
             Choice('store', checked=True),
             Choice('cleanup', checked=False),
-            Choice('markets', checked=False),
+            Choice('universe', checked=False),
             Choice('catalog', checked=False),
         ],
         style=STYLE,
@@ -101,10 +101,10 @@ def main() -> None:
         if 'cleanup' in steps:
             src.cleanup()
 
-    if 'markets' in steps:
-        from irp.data.markets import refresh as _refresh_markets
-        print('── markets ──')
-        n = _refresh_markets()
+    if 'universe' in steps:
+        from irp.data.universe import refresh as _refresh_universe
+        print('── universe ──')
+        n = _refresh_universe()
         print(f'  {n:,} tickers')
 
     if 'catalog' in steps:

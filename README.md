@@ -33,7 +33,7 @@ Fundamentals follow **SEC period convention**: annual periods named by the calen
 
 All `Date` columns across `prices`, `dividends`, `splits`, and `yahoo_prices` are stored as DuckDB `DATE` type (`YYYY-MM-DD`). SimFin date columns (`Report Date`, `Publish Date`, `Restated Date`) are also `DATE`.
 
-Source filter: `markets.yahoo_ticker IS NOT NULL` and `Market NOT IN config.providers.yahoo.markets_exclude` (default excludes: cryptocurrencies, money market, bonds → ~14k tickers). The `yahoo_ticker` column holds the yfinance-compatible symbol (e.g. `EURUSD=X` for currencies, `RNR-PF` for preferred shares); instruments with no Yahoo equivalent have `yahoo_ticker = NULL` and are skipped automatically.
+Source filter: `universe.yahoo_ticker IS NOT NULL` and `Market NOT IN config.providers.yahoo.markets_exclude` (default excludes: cryptocurrencies, money market, bonds → ~14k tickers). The `yahoo_ticker` column holds the yfinance-compatible symbol (e.g. `EURUSD=X` for currencies, `RNR-PF` for preferred shares); instruments with no Yahoo equivalent have `yahoo_ticker = NULL` and are skipped automatically.
 
 ---
 
@@ -117,7 +117,7 @@ src.cleanup()
 
 ### Yahoo — Initial Bulk Load
 
-Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from the `markets` table via the `yahoo_ticker` column — run the `markets` CLI step first to populate it (requires Stooq bulk to have been fetched).
+Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from the `universe` table via the `yahoo_ticker` column — run the `universe` CLI step first to populate it (requires Stooq bulk to have been fetched).
 
 `YahooSource` fetches two feeds per ticker (both default on):
 - **actions** — dividends + splits via `yf.Ticker(t).actions` (full history per ticker)
@@ -162,9 +162,9 @@ Actions (dividends + splits) always re-fetch full history — yfinance has no in
 
 ---
 
-## Ticker Universe (markets table)
+## Ticker Universe (universe table)
 
-The `markets` table is provider-agnostic — it is **not** a Stooq output. It holds one row per instrument with a `yahoo_ticker` column pre-translated for yfinance:
+The `universe` table is provider-agnostic — it is **not** a Stooq output. It holds one row per instrument with a `yahoo_ticker` column pre-translated for yfinance:
 
 | Translation rule | Example |
 |---|---|
@@ -174,12 +174,12 @@ The `markets` table is provider-agnostic — it is **not** a Stooq output. It ho
 | Preferred/series shares `BASE_X` | `RNR_F` → `RNR-PF` |
 | All others | unchanged |
 
-Build or rebuild via `uv run irp` → Steps → `markets` (requires Stooq bulk fetch to have run). Primary source is `data/stooq/raw/markets.csv`; falls back to the existing DB table if the CSV has been cleaned up.
+Build or rebuild via `uv run irp` → Steps → `universe` (requires Stooq bulk fetch to have run). Primary source is `data/stooq/raw/markets.csv`; falls back to the existing DB table if the CSV has been cleaned up.
 
 ```python
-from irp.data.markets import markets
-df = markets()                 # all tickers
-df = markets('AAPL')           # single ticker
+from irp.data.universe import universe
+df = universe()                 # all tickers
+df = universe('AAPL')           # single ticker
 ```
 
 ---

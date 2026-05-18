@@ -63,7 +63,7 @@ def _negative_price_non_bond(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             COUNT(*) AS count,
             LIST(p.Date ORDER BY p.Date)[1:5] AS sample_dates
         FROM prices p
-        JOIN markets m ON p.SrcId = m.SrcId
+        JOIN universe m ON p.Ticker = m.Ticker
         WHERE (p.O < 0 OR p.H < 0 OR p.L < 0 OR p.C < 0)
           AND m.Market NOT IN ('bonds', 'money market')
         GROUP BY p.Ticker, Year
@@ -84,7 +84,7 @@ def _zero_volume_trading_day(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             COUNT(*) AS count,
             LIST(p.Date ORDER BY p.Date)[1:5] AS sample_dates
         FROM prices p
-        JOIN markets m ON p.SrcId = m.SrcId
+        JOIN universe m ON p.Ticker = m.Ticker
         WHERE p.V = 0
           AND (m.Market LIKE '%stocks%' OR m.Market LIKE '%etfs%')
           AND dayname(strptime(CAST(p.Date AS VARCHAR), '%Y%m%d'))
