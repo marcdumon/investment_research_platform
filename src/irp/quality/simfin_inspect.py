@@ -1,6 +1,6 @@
 import pandas as pd
 
-from irp.data import fundamentals
+from irp.data.simfin import fundamentals
 from irp.quality.simfin_rules import REGISTRY
 
 _BASE = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period', 'Report Date']

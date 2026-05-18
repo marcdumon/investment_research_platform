@@ -1,59 +1,9 @@
-import duckdb
-import pandas as pd
+"""Row accessors for SimFin tables (`income`, `balance`, `cashflow`, `companies`)."""
 from typing import Literal
 
-from irp.core.config import config
+import pandas as pd
 
-_con: duckdb.DuckDBPyConnection | None = None
-
-
-def _db() -> duckdb.DuckDBPyConnection:
-    global _con
-    if _con is None:
-        _con = duckdb.connect(str(config.database.path), read_only=True)
-    return _con
-
-
-def _ticker_filter(tickers: str | list[str] | None) -> tuple[str, list]:
-    if tickers is None:
-        return '', []
-    if isinstance(tickers, str):
-        tickers = [tickers]
-    placeholders = ', '.join('?' * len(tickers))
-    return f'Ticker IN ({placeholders})', list(tickers)
-
-
-def _date_int(date: str) -> int:
-    return int(date.replace('-', ''))
-
-
-def prices(
-    tickers: str | list[str] | None = None,
-    start: str | None = None,
-    end: str | None = None,
-    src: str | None = None,
-) -> pd.DataFrame:
-    """OHLCV prices. start/end as 'YYYY-MM-DD'."""
-    filters, params = [], []
-    clause, vals = _ticker_filter(tickers)
-    if clause:
-        filters.append(clause)
-        params.extend(vals)
-    if start is not None:
-        filters.append('Date >= ?')
-        params.append(_date_int(start))
-    if end is not None:
-        filters.append('Date <= ?')
-        params.append(_date_int(end))
-    if src is not None:
-        filters.append('Src = ?')
-        params.append(src)
-    where = f'WHERE {" AND ".join(filters)}' if filters else ''
-    return (
-        _db()
-        .execute(f'SELECT * FROM prices {where} ORDER BY Ticker, Date', params)
-        .df()
-    )
+from irp.data._common import db, ticker_filter
 
 
 def fundamentals(
@@ -63,13 +13,13 @@ def fundamentals(
 ) -> pd.DataFrame:
     """Financial statement data. variant: 'A' annual, 'Q' quarterly."""
     filters, params = ['Period = ?'], [variant]
-    clause, vals = _ticker_filter(tickers)
+    clause, vals = ticker_filter(tickers)
     if clause:
         filters.append(clause)
         params.extend(vals)
     where = f'WHERE {" AND ".join(filters)}'
     return (
-        _db()
+        db()
         .execute(
             f'SELECT * FROM {statement} {where} ORDER BY Ticker, "Fiscal Year" DESC',
             params,
@@ -116,7 +66,7 @@ def statement(
     if df.empty:
         return pd.DataFrame()
 
-    # Normalize: balance stores annual rows with Fiscal Period='Q4'. Force 'FY' when Period='A'.
+    # Balance stores annual rows with Fiscal Period='Q4'. Force 'FY' when Period='A'.
     df = df.copy()
     df.loc[df['Period'] == 'A', 'Fiscal Period'] = 'FY'
 
@@ -150,10 +100,10 @@ def statement(
 
 def companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
     """Company metadata: name, sector, industry, market, ISIN."""
-    clause, params = _ticker_filter(tickers)
+    clause, params = ticker_filter(tickers)
     where = f'WHERE {clause}' if clause else ''
     return (
-        _db().execute(f'SELECT * FROM companies {where} ORDER BY Ticker', params).df()
+        db().execute(f'SELECT * FROM companies {where} ORDER BY Ticker', params).df()
     )
 
 
@@ -175,7 +125,7 @@ def universe(
         params.append(market)
     where = f'WHERE {" AND ".join(filters)}' if filters else ''
     rows = (
-        _db()
+        db()
         .execute(
             f'SELECT DISTINCT Ticker FROM companies {where} ORDER BY Ticker', params
         )
