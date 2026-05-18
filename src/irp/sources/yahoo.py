@@ -180,9 +180,12 @@ def _fetch_prices_batched(
 ) -> bool:
     """Batch download via yf.download. Each batch is one HTTP request to
     Yahoo's chart API; invalid tickers come back as all-NaN columns (not
-    failures), so per-ticker success is detected by checking the Close
-    column. Whole-batch failures (rate-limit, network) are retried on next
-    run."""
+    failures), so per-ticker success is detected by checking the Close column.
+    Whole-batch failures (rate-limit, network) are retried on next run.
+
+    When `last_dates` is provided, each batch uses the minimum last_date of
+    the group as the shared start date (incremental update). Batches containing
+    any ticker absent from `last_dates` fall back to `period='max'`."""
     todo = [t for t in tickers if t not in known_errors and t not in queried]
     bsize = yahoo_cfg.prices_batch_size
     logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers')
