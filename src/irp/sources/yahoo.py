@@ -81,25 +81,111 @@ def _append_csv(df: pd.DataFrame, path: Path, has_header: bool) -> bool:
     return True
 
 
-def _pull_ticker(yf, ticker: str, need_actions: bool, need_prices: bool
-                 ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-    """Build a yf.Ticker once, pull whichever feeds are needed. Raises on yfinance error."""
-    obj = yf.Ticker(ticker)
-    actions = obj.actions if need_actions else None
-    hist = obj.history(period='max', auto_adjust=True) if need_prices else None
-    return actions, hist
+def _fetch_actions_per_ticker(
+    yf, tickers: list[str], queried: set[str],
+    known_errors: set[str], new_errors: set[str], has_header: bool,
+) -> bool:
+    todo = [t for t in tickers if t not in known_errors and t not in queried]
+    logger.info(f'Yahoo actions: {len(todo)} tickers')
+    for ticker in todo:
+        logger.debug(f'Actions: {ticker}')
+        try:
+            actions = yf.Ticker(ticker).actions
+        except Exception as e:
+            logger.warning(f'{ticker}: {type(e).__name__}: {e}')
+            new_errors.add(ticker)
+            _ERRORS.save(known_errors | new_errors)
+            time.sleep(yahoo_cfg.batch_sleep)
+            continue
+        time.sleep(yahoo_cfg.batch_sleep)
+        if actions is not None and not actions.empty:
+            rows_df = _actions_to_long(ticker, actions)
+            if not rows_df.empty:
+                has_header = _append_csv(rows_df, _ACTIONS_FILE, has_header)
+        queried.add(ticker)
+        _QUERIED_ACTIONS.save(queried)
+    return has_header
 
 
-def _build_todo(tickers: list[str], known_errors: set[str],
-                queried_actions: set[str], queried_prices: set[str],
-                fetch_actions: bool, fetch_prices: bool) -> list[str]:
-    return [
-        t for t in tickers
-        if t not in known_errors and (
-            (fetch_actions and t not in queried_actions) or
-            (fetch_prices and t not in queried_prices)
-        )
-    ]
+def _fetch_prices_per_ticker(
+    yf, tickers: list[str], queried: set[str],
+    known_errors: set[str], new_errors: set[str], has_header: bool,
+) -> bool:
+    todo = [t for t in tickers if t not in known_errors and t not in queried]
+    logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
+    for ticker in todo:
+        logger.debug(f'Prices: {ticker}')
+        try:
+            hist = yf.Ticker(ticker).history(period='max', auto_adjust=True)
+        except Exception as e:
+            logger.warning(f'{ticker}: {type(e).__name__}: {e}')
+            new_errors.add(ticker)
+            _ERRORS.save(known_errors | new_errors)
+            time.sleep(yahoo_cfg.batch_sleep)
+            continue
+        time.sleep(yahoo_cfg.batch_sleep)
+        if hist is not None and not hist.empty:
+            rows_df = _prices_to_long(ticker, hist)
+            has_header = _append_csv(rows_df, _PRICES_FILE, has_header)
+        queried.add(ticker)
+        _QUERIED_PRICES.save(queried)
+    return has_header
+
+
+def _fetch_prices_batched(
+    yf, tickers: list[str], queried: set[str],
+    known_errors: set[str], new_errors: set[str], has_header: bool,
+) -> bool:
+    """Batch download via yf.download. Each batch is one HTTP request to
+    Yahoo's chart API; invalid tickers come back as all-NaN columns (not
+    failures), so per-ticker success is detected by checking the Close
+    column. Whole-batch failures (rate-limit, network) are retried on next
+    run."""
+    todo = [t for t in tickers if t not in known_errors and t not in queried]
+    bsize = yahoo_cfg.prices_batch_size
+    logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers')
+    for i in range(0, len(todo), bsize):
+        batch = todo[i : i + bsize]
+        logger.debug(f'Batch {i // bsize + 1}: {len(batch)} tickers')
+        try:
+            raw = yf.download(
+                batch, period='max', auto_adjust=True,
+                threads=False, progress=False, group_by='ticker',
+            )
+        except Exception as e:
+            logger.warning(f'batch [{i}:{i+len(batch)}] failed: {type(e).__name__}: {e}')
+            time.sleep(yahoo_cfg.batch_sleep)
+            continue
+        time.sleep(yahoo_cfg.batch_sleep)
+        if raw is None or raw.empty:
+            new_errors.update(batch)
+            _ERRORS.save(known_errors | new_errors)
+            continue
+        for ticker in batch:
+            df = _extract_batch_slice(raw, ticker, single_ticker=(len(batch) == 1))
+            if df is None or df.empty:
+                new_errors.add(ticker)
+                _ERRORS.save(known_errors | new_errors)
+                continue
+            rows_df = _prices_to_long(ticker, df)
+            has_header = _append_csv(rows_df, _PRICES_FILE, has_header)
+            queried.add(ticker)
+            _QUERIED_PRICES.save(queried)
+    return has_header
+
+
+def _extract_batch_slice(raw: pd.DataFrame, ticker: str, single_ticker: bool) -> pd.DataFrame | None:
+    """Pull one ticker's OHLCV out of yf.download's result. With multiple
+    tickers + group_by='ticker', columns are MultiIndex ('ticker', field).
+    With a single ticker the result is flat-columned."""
+    try:
+        df = raw if single_ticker else raw[ticker]
+    except KeyError:
+        return None
+    if df.empty or 'Close' not in df.columns:
+        return None
+    df = df.dropna(subset=['Close'])
+    return df if not df.empty else None
 
 
 def _fetch_ticker_data(
@@ -107,12 +193,18 @@ def _fetch_ticker_data(
     skip_queried: bool = True,
     fetch_actions: bool = True,
     fetch_prices: bool = True,
+    prices_mode: Literal['batch', 'ticker'] = 'batch',
 ) -> None:
-    """Pull dividends, splits, and/or OHLCV prices per ticker from yfinance.
+    """Pull dividends, splits, and/or OHLCV prices from yfinance.
 
-    Resume-safe: tickers already in `queried_actions.json` / `queried_prices.json`
-    or `error_tickers.json` are skipped on rerun. Interrupt with kernel signal
-    at any time.
+    `prices_mode='batch'` (default) uses yf.download with batch_size from
+    config — ~10x faster than per-ticker. `prices_mode='ticker'` falls back
+    to per-ticker yf.Ticker.history (slower, finer error attribution).
+
+    Actions always go per-ticker (no batch endpoint).
+
+    Resume-safe: skips tickers already in queried_actions.json /
+    queried_prices.json / error_tickers.json.
     """
     import yfinance as yf
 
@@ -123,41 +215,19 @@ def _fetch_ticker_data(
     queried_prices = _QUERIED_PRICES.load() if skip_queried else set()
     new_errors: set[str] = set()
 
-    todo = _build_todo(tickers, known_errors, queried_actions, queried_prices,
-                       fetch_actions, fetch_prices)
-    logger.info(f'Yahoo fetch: {len(todo)} of {len(tickers)} tickers to process')
-
     actions_has_header = _ACTIONS_FILE.exists()
     prices_has_header = _PRICES_FILE.exists()
 
-    for ticker in todo:
-        need_actions = fetch_actions and ticker not in queried_actions
-        need_prices = fetch_prices and ticker not in queried_prices
-        logger.debug(f'Fetching {ticker}')
-        try:
-            actions, hist = _pull_ticker(yf, ticker, need_actions, need_prices)
-        except Exception as e:
-            logger.warning(f'{ticker}: {type(e).__name__}: {e}')
-            new_errors.add(ticker)
-            _ERRORS.save(known_errors | new_errors)
-            time.sleep(yahoo_cfg.batch_sleep)
-            continue
-        time.sleep(yahoo_cfg.batch_sleep)
+    if fetch_actions:
+        actions_has_header = _fetch_actions_per_ticker(
+            yf, tickers, queried_actions, known_errors, new_errors, actions_has_header,
+        )
 
-        if need_actions:
-            if actions is not None and not actions.empty:
-                rows_df = _actions_to_long(ticker, actions)
-                if not rows_df.empty:
-                    actions_has_header = _append_csv(rows_df, _ACTIONS_FILE, actions_has_header)
-            queried_actions.add(ticker)
-            _QUERIED_ACTIONS.save(queried_actions)
-
-        if need_prices:
-            if hist is not None and not hist.empty:
-                rows_df = _prices_to_long(ticker, hist)
-                prices_has_header = _append_csv(rows_df, _PRICES_FILE, prices_has_header)
-            queried_prices.add(ticker)
-            _QUERIED_PRICES.save(queried_prices)
+    if fetch_prices:
+        fn = _fetch_prices_batched if prices_mode == 'batch' else _fetch_prices_per_ticker
+        prices_has_header = fn(
+            yf, tickers, queried_prices, known_errors, new_errors, prices_has_header,
+        )
 
 
 def _transform_actions(conn: duckdb.DuckDBPyConnection) -> None:
@@ -255,9 +325,15 @@ def _store_prices(con: duckdb.DuckDBPyConnection) -> None:
 class YahooSource:
     SUPPORTED_FEEDS = frozenset({'bulk', 'update'})
 
-    def __init__(self, fetch_actions: bool = True, fetch_prices: bool = True) -> None:
+    def __init__(
+        self,
+        fetch_actions: bool = True,
+        fetch_prices: bool = True,
+        prices_mode: Literal['batch', 'ticker'] = 'batch',
+    ) -> None:
         self._fetch_actions = fetch_actions
         self._fetch_prices = fetch_prices
+        self._prices_mode = prices_mode
 
     def fetch_bulk(self) -> None:
         """Pull dividends, splits, and/or OHLCV prices for every eligible ticker.
@@ -275,7 +351,11 @@ class YahooSource:
             logger.info('fetch: already up to date, skipping')
             return
         logger.debug('Fetching Yahoo ticker data...')
-        _fetch_ticker_data(fetch_actions=self._fetch_actions, fetch_prices=self._fetch_prices)
+        _fetch_ticker_data(
+            fetch_actions=self._fetch_actions,
+            fetch_prices=self._fetch_prices,
+            prices_mode=self._prices_mode,
+        )
         marker.touch()
         logger.debug('Yahoo ticker data fetched.')
 
@@ -288,6 +368,7 @@ class YahooSource:
             skip_queried=False,
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
+            prices_mode=self._prices_mode,
         )
         (raw_dir / '.fetched').touch()
 

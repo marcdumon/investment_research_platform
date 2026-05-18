@@ -28,6 +28,7 @@ def main() -> None:
         return
 
     yahoo_content = ['actions', 'prices']
+    yahoo_prices_mode = 'batch'
     if 'yahoo' in providers:
         yahoo_content = questionary.checkbox(
             'Yahoo content:',
@@ -37,6 +38,15 @@ def main() -> None:
             ],
             style=STYLE,
         ).ask() or yahoo_content
+        if 'prices' in yahoo_content:
+            yahoo_prices_mode = questionary.select(
+                'Yahoo prices mode:',
+                choices=[
+                    Choice('batch   (yf.download in batches, ~10x faster)', value='batch'),
+                    Choice('ticker  (one yf.Ticker.history per ticker)', value='ticker'),
+                ],
+                style=STYLE,
+            ).ask() or 'batch'
 
     feed = questionary.select(
         'Feed:',
@@ -75,7 +85,7 @@ def main() -> None:
         print()
 
     for name in providers:
-        src = _make_source(name, yahoo_content=yahoo_content)
+        src = _make_source(name, yahoo_content=yahoo_content, yahoo_prices_mode=yahoo_prices_mode)
         print(f'── {name} ──')
         if feed not in src.SUPPORTED_FEEDS:
             print(f'  feed {feed!r} not supported by {name}, skipping')
@@ -101,7 +111,11 @@ def _delete_markers(name: str, feed: str) -> None:
             print(f'  deleted {name}/{m.name}')
 
 
-def _make_source(name: str, yahoo_content: list[str] | None = None) -> DataProvider:
+def _make_source(
+    name: str,
+    yahoo_content: list[str] | None = None,
+    yahoo_prices_mode: str = 'batch',
+) -> DataProvider:
     if name == 'simfin':
         from irp.sources.sim_fin import SimFinSource
         return SimFinSource()
@@ -114,6 +128,7 @@ def _make_source(name: str, yahoo_content: list[str] | None = None) -> DataProvi
         return YahooSource(
             fetch_actions='actions' in content,
             fetch_prices='prices' in content,
+            prices_mode=yahoo_prices_mode,  # type: ignore[arg-type]
         )
     raise ValueError(f'unknown provider: {name!r}')
 
