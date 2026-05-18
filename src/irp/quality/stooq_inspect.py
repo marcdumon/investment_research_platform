@@ -10,7 +10,6 @@ Staleness check:
                        equity tickers at several historical dates; high ratio
                        means Stooq is missing post-snapshot dividend adjustments
 """
-import json
 import time
 from pathlib import Path
 
@@ -19,22 +18,20 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from irp.core.config import config
+from irp.core.jsonset import JsonSet
 
-_YAHOO_ERROR_FILE = config.data.root_dir / 'data_quality' / 'stooq_yahoo_error_tickers.json'
+_YAHOO_ERRORS = JsonSet(config.data.root_dir / 'data_quality' / 'stooq_yahoo_error_tickers.json')
 _STALENESS_FILE = config.data.root_dir / 'data_quality' / 'stooq_staleness.csv'
 
 
 def load_yahoo_errors() -> set[str]:
     """Load tickers Yahoo Finance couldn't resolve (persistent error list)."""
-    if _YAHOO_ERROR_FILE.exists():
-        return set(json.loads(_YAHOO_ERROR_FILE.read_text()))
-    return set()
+    return _YAHOO_ERRORS.load()
 
 
 def save_yahoo_errors(errors: set[str]) -> None:
     """Persist unresolvable Yahoo tickers."""
-    _YAHOO_ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _YAHOO_ERROR_FILE.write_text(json.dumps(sorted(errors), indent=2))
+    _YAHOO_ERRORS.save(errors)
 
 
 _STALENESS_COLS = ['Ticker', 'Date', 'Years_back', 'Stooq_C', 'Yahoo_C', 'Ratio']
