@@ -1,7 +1,7 @@
 """Row accessors for Stooq tables (`prices`, `markets`)."""
 import pandas as pd
 
-from irp.data._common import db, date_int, ticker_filter
+from irp.data._common import db, ticker_filter
 
 
 def prices(
@@ -18,10 +18,10 @@ def prices(
         params.extend(vals)
     if start is not None:
         filters.append('Date >= ?')
-        params.append(date_int(start))
+        params.append(start)
     if end is not None:
         filters.append('Date <= ?')
-        params.append(date_int(end))
+        params.append(end)
     if src is not None:
         filters.append('Src = ?')
         params.append(src)
