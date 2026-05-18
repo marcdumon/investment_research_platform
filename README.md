@@ -53,7 +53,7 @@ SIMFIN_API_KEY=your_key_here
 SimFin data is fetched via the SimFin API (requires API key in `.env`).
 
 ```bash
-uv run python -m irp.pipeline
+uv run python -m irp.runner
 ```
 
 This runs the full pipeline: fetch → transform → store → cleanup for both providers.
@@ -62,7 +62,7 @@ To run SimFin only:
 
 ```python
 from irp.sources.sim_fin import SimFinSource
-from irp.pipeline import load_data
+from irp.runner import load_data
 
 src = SimFinSource()
 load_data(src, 'bulk')
@@ -82,14 +82,14 @@ Place both files in `data/stooq/raw/`.
 **Step 2 — Run bulk load:**
 
 ```bash
-uv run python -m irp.pipeline
+uv run python -m irp.runner
 ```
 
 Or Stooq only:
 
 ```python
 from irp.sources.stooq import StooqSource
-from irp.pipeline import load_data
+from irp.runner import load_data
 
 src = StooqSource()
 load_data(src, 'bulk')
@@ -166,7 +166,7 @@ Steps are **idempotent**: freshness markers (`.fetched`, `.transformed_bulk`, et
 | `src/irp/sources/sim_fin.py` | SimFin fetch, transform, store, update, cleanup |
 | `src/irp/sources/stooq.py` | Stooq unzip, transform, store, cleanup |
 | `src/irp/sources/yahoo.py` | Yahoo per-ticker dividends + splits + OHLCV via yfinance, resume-safe |
-| `src/irp/pipeline.py` | Orchestrates providers via `DataProvider` protocol |
+| `src/irp/runner.py` | Orchestrates providers via `DataProvider` protocol |
 | `src/irp/core/freshness.py` | `is_fresh(marker, *inputs)` — skip logic |
 | `src/irp/core/config.py` | Loads `config.toml` via Pydantic |
 

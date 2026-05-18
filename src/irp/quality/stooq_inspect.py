@@ -19,6 +19,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from irp.core.config import config
+from irp.core.db import db
 from irp.core.jsonset import JsonSet
 
 logger = logging.getLogger(__name__)
@@ -171,23 +172,21 @@ def _load_checked_pairs(results_file: Path, skip_scanned: bool) -> tuple[set[tup
 def _trading_date_for_year_offset(today: pd.Timestamp, years_back: int) -> int | None:
     """Latest Stooq trading date at or before today - years_back."""
     anchor_int = int((today - pd.DateOffset(years=years_back)).strftime('%Y%m%d'))
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        row = con.execute(
-            'SELECT MAX(Date) FROM prices WHERE Date <= ?', [anchor_int]
-        ).fetchone()
+    row = db().execute(
+        'SELECT MAX(Date) FROM prices WHERE Date <= ?', [anchor_int]
+    ).fetchone()
     return int(row[0]) if row and row[0] is not None else None
 
 
 def _stooq_close_at(trade_date: int, lower_pats: list[str]) -> pd.DataFrame:
     """Stooq closes for all tickers whose market matches one of `lower_pats`."""
     like_clause = ' OR '.join(['LOWER(m.Market) LIKE ?' for _ in lower_pats])
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        return con.execute(
-            f'SELECT DISTINCT p.Ticker, p.C AS Stooq_C FROM prices p '
-            f'JOIN markets m ON m.Ticker = p.Ticker '
-            f'WHERE p.Date = ? AND ({like_clause})',
-            [trade_date] + lower_pats,
-        ).df()
+    return db().execute(
+        f'SELECT DISTINCT p.Ticker, p.C AS Stooq_C FROM prices p '
+        f'JOIN markets m ON m.Ticker = p.Ticker '
+        f'WHERE p.Date = ? AND ({like_clause})',
+        [trade_date] + lower_pats,
+    ).df()
 
 
 def _yf_batch_close(yf, batch: list[str], ystart, yend, batch_sleep: float) -> pd.DataFrame | None:
@@ -261,21 +260,19 @@ def _query_bars(ticker: str, dates: list[int]) -> pd.DataFrame:
         return pd.DataFrame()
     placeholders = ', '.join('?' * len(dates))
     sorted_dates = sorted(dates)
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        return con.execute(
-            f'SELECT Date, O, H, L, C, V FROM prices '
-            f'WHERE Ticker = ? AND Date IN ({placeholders}) ORDER BY Date',
-            [ticker, *sorted_dates],
-        ).df()
+    return db().execute(
+        f'SELECT Date, O, H, L, C, V FROM prices '
+        f'WHERE Ticker = ? AND Date IN ({placeholders}) ORDER BY Date',
+        [ticker, *sorted_dates],
+    ).df()
 
 
 def _query_range(ticker: str, start: int, end: int) -> pd.DataFrame:
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        return con.execute(
-            "SELECT Date, O, H, L, C, V FROM prices "
-            "WHERE Ticker = ? AND Date >= ? AND Date <= ? ORDER BY Date",
-            [ticker, start, end],
-        ).df()
+    return db().execute(
+        'SELECT Date, O, H, L, C, V FROM prices '
+        'WHERE Ticker = ? AND Date >= ? AND Date <= ? ORDER BY Date',
+        [ticker, start, end],
+    ).df()
 
 
 def flagged_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:

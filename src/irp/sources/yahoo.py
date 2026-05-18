@@ -7,6 +7,7 @@ import duckdb
 import pandas as pd
 
 from irp.core.config import config
+from irp.core.db import db
 from irp.core.duckdb_merge import merge_csv
 from irp.core.freshness import is_fresh
 from irp.core.jsonset import JsonSet
@@ -30,13 +31,12 @@ def _load_target_tickers() -> list[str]:
     """Tickers from the `markets` table, excluding configured Market types."""
     excludes = [m.lower() for m in yahoo_cfg.markets_exclude]
     placeholders = ', '.join(['?' for _ in excludes])
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        df = con.execute(
-            f"SELECT DISTINCT Ticker FROM markets "
-            f"WHERE LOWER(Market) NOT IN ({placeholders}) "
-            f"ORDER BY Ticker",
-            excludes,
-        ).df()
+    df = db().execute(
+        f'SELECT DISTINCT Ticker FROM markets '
+        f'WHERE LOWER(Market) NOT IN ({placeholders}) '
+        f'ORDER BY Ticker',
+        excludes,
+    ).df()
     return df['Ticker'].tolist()
 
 
@@ -245,6 +245,8 @@ def _store_prices(con: duckdb.DuckDBPyConnection) -> None:
 
 
 class YahooSource:
+    SUPPORTED_FEEDS = frozenset({'bulk', 'update'})
+
     def __init__(self, fetch_actions: bool = True, fetch_prices: bool = True) -> None:
         self._fetch_actions = fetch_actions
         self._fetch_prices = fetch_prices

@@ -1,16 +1,7 @@
 """Shared helpers for `irp.data.simfin` and `irp.data.stooq` accessors."""
-import duckdb
+from irp.core.db import db
 
-from irp.core.config import config
-
-_con: duckdb.DuckDBPyConnection | None = None
-
-
-def db() -> duckdb.DuckDBPyConnection:
-    global _con
-    if _con is None:
-        _con = duckdb.connect(str(config.database.path), read_only=True)
-    return _con
+__all__ = ['db', 'ticker_filter', 'date_int']
 
 
 def ticker_filter(tickers: str | list[str] | None) -> tuple[str, list[str]]:
