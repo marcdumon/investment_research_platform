@@ -33,6 +33,7 @@ dev = [
 [project.scripts]
 irp         = "irp.cli:main"
 irp-catalog = "irp.data.catalog:main"
+irp-migrate = "irp.data.migrations:main"
 
 [build-system]
 requires = ["setuptools>=61"]

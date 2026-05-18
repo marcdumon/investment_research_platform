@@ -1,16 +1,12 @@
-"""One-time migration: convert BIGINT YYYYMMDD Date columns to DATE type.
-
-Tables affected: prices, dividends, splits, yahoo_prices.
-Safe to re-run — skips tables where Date is already DATE.
-"""
+"""One-time DB migrations. Run via `uv run irp-migrate`."""
 import duckdb
 
 from irp.core.config import config
 
-_COLUMNS = {
-    'prices':      'Ticker, Date, O, H, L, C, V, SrcId, Src',
-    'dividends':   'Ticker, Date, Amount, SrcId, Src',
-    'splits':      'Ticker, Date, Ratio, SrcId, Src',
+_DATE_COLUMNS = {
+    'prices':       'Ticker, Date, O, H, L, C, V, SrcId, Src',
+    'dividends':    'Ticker, Date, Amount, SrcId, Src',
+    'splits':       'Ticker, Date, Ratio, SrcId, Src',
     'yahoo_prices': 'Ticker, Date, Open, High, Low, Close, Volume',
 }
 
@@ -24,8 +20,9 @@ def _current_type(con: duckdb.DuckDBPyConnection, table: str) -> str | None:
     return row[0] if row else None
 
 
-def migrate(con: duckdb.DuckDBPyConnection) -> None:
-    for table, cols in _COLUMNS.items():
+def migrate_dates(con: duckdb.DuckDBPyConnection) -> None:
+    """Convert BIGINT YYYYMMDD Date columns to DATE type. Safe to re-run."""
+    for table, cols in _DATE_COLUMNS.items():
         dtype = _current_type(con, table)
         if dtype is None:
             print(f'  {table}: not found, skipping')
@@ -46,7 +43,12 @@ def migrate(con: duckdb.DuckDBPyConnection) -> None:
         print(f'  {table}: done')
 
 
-if __name__ == '__main__':
+def main() -> None:
+    print('Running migrations...')
     with duckdb.connect(config.database.path) as con:
-        migrate(con)
-    print('Migration complete.')
+        migrate_dates(con)
+    print('Done.')
+
+
+if __name__ == '__main__':
+    main()
