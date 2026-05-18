@@ -164,7 +164,16 @@ Actions (dividends + splits) always re-fetch full history — yfinance has no in
 
 ## Ticker Universe (universe table)
 
-The `universe` table is provider-agnostic — it is **not** a Stooq output. It holds one row per instrument with a `yahoo_ticker` column pre-translated for yfinance:
+The `universe` table is provider-agnostic — it is **not** a Stooq output. It holds one row per instrument:
+
+| Column | Notes |
+|---|---|
+| `Ticker` | Canonical key — Stooq SrcId stripped of exchange suffix (e.g. `AAPL`) |
+| `Market` | Market category from Stooq zip structure |
+| `stooq_ticker` | Full Stooq source ticker / SrcId (e.g. `AAPL.US`); NULL if not Stooq-sourced |
+| `yahoo_ticker` | yfinance symbol (e.g. `EURUSD=X`); NULL if no Yahoo equivalent |
+
+`yahoo_ticker` translation rules applied at seed time:
 
 | Translation rule | Example |
 |---|---|
@@ -174,12 +183,19 @@ The `universe` table is provider-agnostic — it is **not** a Stooq output. It h
 | Preferred/series shares `BASE_X` | `RNR_F` → `RNR-PF` |
 | All others | unchanged |
 
-Build or rebuild via `uv run irp` → Steps → `universe` (requires Stooq bulk fetch to have run). Primary source is `data/stooq/raw/markets.csv`; falls back to the existing DB table if the CSV has been cleaned up.
+Two CLI steps (both require Stooq bulk fetch to have run):
+- `seed-universe` — reads `data/stooq/raw/markets.csv`, applies translations, writes `data/universe.csv`
+- `universe` — reads `data/universe.csv`, writes the DB table
+
+`data/universe.csv` is the editable master file. Edit it to add/remove tickers or fix translations.
+To re-seed from a new Stooq bulk download, tick `seed-universe` again.
 
 ```python
-from irp.data.universe import universe
+from irp.data.universe import universe, seed, refresh
 df = universe()                 # all tickers
 df = universe('AAPL')           # single ticker
+seed()                          # rebuild universe.csv from Stooq markets.csv
+refresh()                       # write DB table from universe.csv
 ```
 
 ---
