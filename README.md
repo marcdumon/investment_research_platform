@@ -1,6 +1,6 @@
 # Investment Research Platform
 
-DuckDB-backed data pipeline for equity fundamentals and price data. Three providers: **SimFin** (fundamentals, company metadata), **Stooq** (historical OHLCV prices), **Yahoo** (corporate actions: dividends + splits).
+DuckDB-backed data pipeline for equity fundamentals and price data. Three providers: **SimFin** (fundamentals, company metadata), **Stooq** (historical OHLCV prices, bulk snapshot), **Yahoo** (corporate actions: dividends + splits, and live-adjusted OHLCV prices).
 
 ---
 
@@ -30,6 +30,7 @@ Fundamentals follow **SEC period convention**: annual periods named by the calen
 |---|---|---|
 | Dividends | `dividends` | Per-ticker cash dividend events `(Ticker, Date, Amount)` |
 | Splits | `splits` | Per-ticker stock-split events `(Ticker, Date, Ratio)` |
+| Prices | `yahoo_prices` | Per-ticker live `auto_adjust=True` OHLCV `(Ticker, Date, Open, High, Low, Close, Volume)` |
 
 Source filter: `markets` table minus `config.providers.yahoo.markets_exclude` (default: cryptocurrencies, money market, bonds → ~14k tickers).
 
@@ -117,25 +118,34 @@ src.cleanup()
 
 Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from the `markets` table (run Stooq bulk first to populate it).
 
-**Slow:** ~14k tickers × 1.5s = ~6h end-to-end. **Resume-safe** — stop with Ctrl-C any time, rerun continues.
+`YahooSource` can fetch two feeds per ticker (both default on):
+- **actions** — dividends + splits via `yf.Ticker(t).actions`
+- **prices** — live `auto_adjust=True` OHLCV via `yf.Ticker(t).history(period='max', auto_adjust=True)`
+
+**Slow:** ~14k tickers × ~2× `batch_sleep` (one call per feed) → ~12h end-to-end for both. **Resume-safe** — stop with Ctrl-C any time, rerun continues.
 
 ```python
 from irp.sources.yahoo import YahooSource
 
+# both feeds (default)
 src = YahooSource()
+# or only one:
+# src = YahooSource(fetch_actions=True, fetch_prices=False)
 src.fetch_bulk()
 src.transform('bulk')
 src.store('bulk')
 ```
 
-Or via the interactive CLI: `uv run irp` → tick `yahoo`.
+Or via the interactive CLI: `uv run irp` → tick `yahoo` → tick which content (actions, prices, or both).
 
 Resume state lives in `data/yahoo/raw/`:
-- `queried_tickers.json` — every successfully called ticker (incl. empty results)
-- `error_tickers.json` — tickers that errored on the yfinance call
+- `queried_actions.json` — tickers whose dividends/splits have been pulled
+- `queried_prices.json` — tickers whose OHLCV history has been pulled (separate so partial runs resume only what is missing)
+- `error_tickers.json` — tickers that errored on the yfinance call (shared: ticker-object failure is an error for both feeds)
 - `actions.csv` — long-format dividend + split rows
+- `prices.csv` — long-format OHLCV rows
 
-To re-probe known errors or force a full refresh, see `_fetch_actions(skip_errors=False, skip_queried=False)`.
+To re-probe known errors or force a full refresh, call `_fetch_ticker_data(skip_errors=False, skip_queried=False)`.
 
 ---
 
@@ -155,7 +165,7 @@ Steps are **idempotent**: freshness markers (`.fetched`, `.transformed_bulk`, et
 |---|---|
 | `src/irp/sources/sim_fin.py` | SimFin fetch, transform, store, update, cleanup |
 | `src/irp/sources/stooq.py` | Stooq unzip, transform, store, cleanup |
-| `src/irp/sources/yahoo.py` | Yahoo per-ticker dividends + splits via yfinance, resume-safe |
+| `src/irp/sources/yahoo.py` | Yahoo per-ticker dividends + splits + OHLCV via yfinance, resume-safe |
 | `src/irp/pipeline.py` | Orchestrates providers via `DataProvider` protocol |
 | `src/irp/core/freshness.py` | `is_fresh(marker, *inputs)` — skip logic |
 | `src/irp/core/config.py` | Loads `config.toml` via Pydantic |
@@ -173,8 +183,8 @@ data/
     raw/                  # Stooq zips + extracted data + freshness markers
     processed/            # intermediate files (deleted by cleanup)
   yahoo/
-    raw/                  # actions.csv + queried_tickers.json + error_tickers.json
-    processed/            # dividends.csv + splits.csv (deleted by cleanup)
+    raw/                  # actions.csv + prices.csv + queried_actions.json + queried_prices.json + error_tickers.json
+    processed/            # dividends.csv + splits.csv + prices.csv (deleted by cleanup)
 ```
 
 ---
