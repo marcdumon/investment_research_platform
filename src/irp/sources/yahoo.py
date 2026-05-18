@@ -44,14 +44,22 @@ def _load_yahoo_tickers() -> dict[str, str]:
     """
     excludes = [m.lower() for m in yahoo_cfg.markets_exclude]
     placeholders = ', '.join(['?' for _ in excludes])
-    with duckdb.connect(str(config.database.path), read_only=True) as con:
-        df = con.execute(
-            f'SELECT Ticker, yahoo_ticker FROM universe '
-            f'WHERE yahoo_ticker IS NOT NULL '
-            f'AND LOWER(Market) NOT IN ({placeholders}) '
-            f'ORDER BY Ticker',
-            excludes,
-        ).df()
+    try:
+        with duckdb.connect(str(config.database.path), read_only=True) as con:
+            df = con.execute(
+                f'SELECT Ticker, yahoo_ticker FROM universe '
+                f'WHERE yahoo_ticker IS NOT NULL '
+                f'AND LOWER(Market) NOT IN ({placeholders}) '
+                f'ORDER BY Ticker',
+                excludes,
+            ).df()
+    except duckdb.CatalogException:
+        logger.error(
+            'universe table not found in DB. '
+            'Run the seed-universe and universe steps first: '
+            'uv run irp -> Steps -> seed-universe, universe'
+        )
+        raise
     return dict(zip(df['Ticker'], df['yahoo_ticker']))
 
 

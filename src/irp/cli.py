@@ -63,6 +63,7 @@ def main() -> None:
             Choice('transform', checked=True),
             Choice('store', checked=True),
             Choice('cleanup', checked=False),
+            Choice('seed-universe', checked=False),
             Choice('universe', checked=False),
             Choice('catalog', checked=False),
         ],
@@ -100,6 +101,12 @@ def main() -> None:
             src.store(feed)
         if 'cleanup' in steps:
             src.cleanup()
+
+    if 'seed-universe' in steps:
+        from irp.data.universe import seed as _seed_universe
+        print('── seed-universe ──')
+        n = _seed_universe()
+        print(f'  {n:,} tickers written to universe.csv')
 
     if 'universe' in steps:
         from irp.data.universe import refresh as _refresh_universe
