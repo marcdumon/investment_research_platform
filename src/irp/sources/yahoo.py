@@ -7,7 +7,6 @@ import duckdb
 import pandas as pd
 
 from irp.core.config import config
-from irp.core.db import db
 from irp.core.duckdb_merge import merge_csv
 from irp.core.freshness import is_fresh
 from irp.core.jsonset import JsonSet
@@ -28,19 +27,21 @@ _ACTIONS_COLS = ['Ticker', 'Date', 'Type', 'Value']
 
 
 def _load_target_tickers() -> list[str]:
-    """Tickers from the `markets` table, excluding configured Market types."""
+    """Tickers from the `markets` table, excluding configured Market types.
+
+    Uses a short-lived local connection (not the global db() singleton) so
+    the read-only singleton is never created in the CLI process before store()
+    opens its read-write connection — DuckDB disallows mixing both in one process.
+    """
     excludes = [m.lower() for m in yahoo_cfg.markets_exclude]
     placeholders = ', '.join(['?' for _ in excludes])
-    df = (
-        db()
-        .execute(
+    with duckdb.connect(str(config.database.path), read_only=True) as con:
+        df = con.execute(
             f'SELECT DISTINCT Ticker FROM markets '
             f'WHERE LOWER(Market) NOT IN ({placeholders}) '
             f'ORDER BY Ticker',
             excludes,
-        )
-        .df()
-    )
+        ).df()
     return df['Ticker'].tolist()
 
 
