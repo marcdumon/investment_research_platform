@@ -1,11 +1,13 @@
 import logging
 import time
+from pathlib import Path
 from typing import Literal
 
 import duckdb
 import pandas as pd
 
 from irp.core.config import config
+from irp.core.duckdb_merge import merge_csv
 from irp.core.freshness import is_fresh
 from irp.core.jsonset import JsonSet
 
@@ -55,6 +57,43 @@ def _actions_to_long(ticker: str, actions: pd.DataFrame) -> pd.DataFrame:
     return out[_ACTIONS_COLS]
 
 
+def _prices_to_long(ticker: str, hist: pd.DataFrame) -> pd.DataFrame:
+    """yfinance `.history()` OHLCV → long-form `(Ticker, Date, Open, High, Low,
+    Close, Volume)` rows."""
+    df = hist[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
+    df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')
+    df.index.name = 'Date'
+    df.insert(0, 'Ticker', ticker)
+    return df.reset_index()
+
+
+def _append_csv(df: pd.DataFrame, path: Path, has_header: bool) -> bool:
+    """Append df to path. Returns updated has_header flag."""
+    df.to_csv(path, mode='a', header=not has_header, index=False)
+    return True
+
+
+def _pull_ticker(yf, ticker: str, need_actions: bool, need_prices: bool
+                 ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """Build a yf.Ticker once, pull whichever feeds are needed. Raises on yfinance error."""
+    obj = yf.Ticker(ticker)
+    actions = obj.actions if need_actions else None
+    hist = obj.history(period='max', auto_adjust=True) if need_prices else None
+    return actions, hist
+
+
+def _build_todo(tickers: list[str], known_errors: set[str],
+                queried_actions: set[str], queried_prices: set[str],
+                fetch_actions: bool, fetch_prices: bool) -> list[str]:
+    return [
+        t for t in tickers
+        if t not in known_errors and (
+            (fetch_actions and t not in queried_actions) or
+            (fetch_prices and t not in queried_prices)
+        )
+    ]
+
+
 def _fetch_ticker_data(
     skip_errors: bool = True,
     skip_queried: bool = True,
@@ -63,8 +102,9 @@ def _fetch_ticker_data(
 ) -> None:
     """Pull dividends, splits, and/or OHLCV prices per ticker from yfinance.
 
-    Resume-safe: tickers already in `queried_tickers.json` or `error_tickers.json`
-    are skipped on rerun. Interrupt with kernel signal at any time.
+    Resume-safe: tickers already in `queried_actions.json` / `queried_prices.json`
+    or `error_tickers.json` are skipped on rerun. Interrupt with kernel signal
+    at any time.
     """
     import yfinance as yf
 
@@ -75,13 +115,8 @@ def _fetch_ticker_data(
     queried_prices = _QUERIED_PRICES.load() if skip_queried else set()
     new_errors: set[str] = set()
 
-    todo = [
-        t for t in tickers
-        if t not in known_errors and (
-            (fetch_actions and t not in queried_actions) or
-            (fetch_prices and t not in queried_prices)
-        )
-    ]
+    todo = _build_todo(tickers, known_errors, queried_actions, queried_prices,
+                       fetch_actions, fetch_prices)
     logger.info(f'Yahoo fetch: {len(todo)} of {len(tickers)} tickers to process')
 
     actions_has_header = _ACTIONS_FILE.exists()
@@ -92,40 +127,27 @@ def _fetch_ticker_data(
         need_prices = fetch_prices and ticker not in queried_prices
         logger.debug(f'Fetching {ticker}')
         try:
-            obj = yf.Ticker(ticker)
-            actions = obj.actions if need_actions else None
-            hist = obj.history(period='max', auto_adjust=True) if need_prices else None
+            actions, hist = _pull_ticker(yf, ticker, need_actions, need_prices)
         except Exception as e:
-            logger.warning(f'{ticker}: {e}')
+            logger.warning(f'{ticker}: {type(e).__name__}: {e}')
             new_errors.add(ticker)
             _ERRORS.save(known_errors | new_errors)
             time.sleep(yahoo_cfg.batch_sleep)
             continue
         time.sleep(yahoo_cfg.batch_sleep)
 
-        # --- actions ---
         if need_actions:
             if actions is not None and not actions.empty:
                 rows_df = _actions_to_long(ticker, actions)
                 if not rows_df.empty:
-                    rows_df.to_csv(
-                        _ACTIONS_FILE, mode='a', header=not actions_has_header, index=False,
-                    )
-                    actions_has_header = True
+                    actions_has_header = _append_csv(rows_df, _ACTIONS_FILE, actions_has_header)
             queried_actions.add(ticker)
             _QUERIED_ACTIONS.save(queried_actions)
 
-        # --- prices ---
         if need_prices:
             if hist is not None and not hist.empty:
-                price_df = hist[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
-                price_df.index = pd.to_datetime(price_df.index).strftime('%Y-%m-%d')
-                price_df.index.name = 'Date'
-                price_df.insert(0, 'Ticker', ticker)
-                price_df.reset_index().to_csv(
-                    _PRICES_FILE, mode='a', header=not prices_has_header, index=False,
-                )
-                prices_has_header = True
+                rows_df = _prices_to_long(ticker, hist)
+                prices_has_header = _append_csv(rows_df, _PRICES_FILE, prices_has_header)
             queried_prices.add(ticker)
             _QUERIED_PRICES.save(queried_prices)
 
@@ -196,20 +218,9 @@ def _store_dividends(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'dividends.csv'
     if not src.exists():
         return
-    con.execute(
-        f"CREATE TABLE IF NOT EXISTS dividends AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
-    )
-    con.execute(f"""
-        MERGE INTO dividends t
-        USING (
-            SELECT DISTINCT ON (Ticker, Date) *
-            FROM read_csv_auto('{src}')
-        ) s
-        ON t.Ticker = s.Ticker AND t.Date = s.Date
-        WHEN MATCHED THEN UPDATE SET Amount = s.Amount
-        WHEN NOT MATCHED THEN INSERT (Ticker, Date, Amount, SrcId, Src)
-        VALUES (s.Ticker, s.Date, s.Amount, s.SrcId, s.Src)
-    """)
+    merge_csv(con, 'dividends', src,
+              key_cols=['Ticker', 'Date'], value_cols=['Amount'],
+              extra_insert_cols=['SrcId', 'Src'])
     logger.debug('Stored dividends')
 
 
@@ -217,20 +228,9 @@ def _store_splits(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'splits.csv'
     if not src.exists():
         return
-    con.execute(
-        f"CREATE TABLE IF NOT EXISTS splits AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
-    )
-    con.execute(f"""
-        MERGE INTO splits t
-        USING (
-            SELECT DISTINCT ON (Ticker, Date) *
-            FROM read_csv_auto('{src}')
-        ) s
-        ON t.Ticker = s.Ticker AND t.Date = s.Date
-        WHEN MATCHED THEN UPDATE SET Ratio = s.Ratio
-        WHEN NOT MATCHED THEN INSERT (Ticker, Date, Ratio, SrcId, Src)
-        VALUES (s.Ticker, s.Date, s.Ratio, s.SrcId, s.Src)
-    """)
+    merge_csv(con, 'splits', src,
+              key_cols=['Ticker', 'Date'], value_cols=['Ratio'],
+              extra_insert_cols=['SrcId', 'Src'])
     logger.debug('Stored splits')
 
 
@@ -238,22 +238,9 @@ def _store_prices(con: duckdb.DuckDBPyConnection) -> None:
     src = processed_dir / 'prices.csv'
     if not src.exists():
         return
-    con.execute(
-        f"CREATE TABLE IF NOT EXISTS yahoo_prices AS SELECT * FROM read_csv_auto('{src}') LIMIT 0"
-    )
-    con.execute(f"""
-        MERGE INTO yahoo_prices t
-        USING (
-            SELECT DISTINCT ON (Ticker, Date) *
-            FROM read_csv_auto('{src}')
-        ) s
-        ON t.Ticker = s.Ticker AND t.Date = s.Date
-        WHEN MATCHED THEN UPDATE SET
-            Open = s.Open, High = s.High, Low = s.Low,
-            Close = s.Close, Volume = s.Volume
-        WHEN NOT MATCHED THEN INSERT (Ticker, Date, Open, High, Low, Close, Volume)
-        VALUES (s.Ticker, s.Date, s.Open, s.High, s.Low, s.Close, s.Volume)
-    """)
+    merge_csv(con, 'yahoo_prices', src,
+              key_cols=['Ticker', 'Date'],
+              value_cols=['Open', 'High', 'Low', 'Close', 'Volume'])
     logger.debug('Stored yahoo_prices')
 
 
