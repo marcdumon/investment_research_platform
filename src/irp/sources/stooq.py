@@ -156,22 +156,6 @@ def _transform_prices(conn: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
     logger.debug(f'Wrote {spec.output_path}')
 
 
-def _transform_markets(conn: duckdb.DuckDBPyConnection) -> None:
-    src = raw_dir / 'markets.csv'
-    dst = processed_dir / 'markets.csv'
-    conn.sql(f"""
-        COPY (
-            SELECT
-                split_part(upper("ticker"), '.', 1) AS Ticker,
-                market AS Market,
-                ticker AS SrcId,
-                'stooq' AS Src
-            FROM read_csv_auto('{src}')
-        )
-        TO '{dst}' (FORMAT CSV, HEADER)
-    """)
-    logger.debug(f'Wrote {dst}')
-
 
 def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
     merge_csv(
@@ -181,16 +165,6 @@ def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
     )
     logger.debug(f'Stored prices from {spec.output_path}')
 
-
-def _store_markets(con: duckdb.DuckDBPyConnection) -> None:
-    markets_file = processed_dir / 'markets.csv'
-    merge_csv(
-        con, 'markets', markets_file,
-        key_cols=['SrcId'],
-        value_cols=['Market'],
-        extra_insert_cols=['Ticker', 'Src'],
-    )
-    logger.debug(f'Stored markets from {markets_file}')
 
 
 class StooqSource:
@@ -232,8 +206,6 @@ class StooqSource:
             return
         conn = duckdb.connect()
         _transform_prices(conn, spec)
-        if feed == 'bulk':
-            _transform_markets(conn)
         marker.touch()
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
@@ -245,8 +217,6 @@ class StooqSource:
         spec = FEED_SPECS[feed]
         with duckdb.connect(config.database.path) as con:
             _store_prices(con, spec)
-            if feed == 'bulk':
-                _store_markets(con)
         marker.touch()
         logger.debug(f'Stooq {feed} data stored successfully.')
 
@@ -254,9 +224,7 @@ class StooqSource:
         """Delete all intermediate files, keeping zips, markers, and the database."""
         targets = [
             raw_dir / 'bulk_prices.parquet',
-            raw_dir / 'markets.csv',
             processed_dir / 'bulk_prices.parquet',
-            processed_dir / 'markets.csv',
             processed_dir / 'update_prices.csv',
         ]
         for path in targets:
