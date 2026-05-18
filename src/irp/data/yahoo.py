@@ -1,7 +1,7 @@
 """Row accessors for Yahoo tables (`yahoo_prices`, `dividends`, `splits`)."""
 import pandas as pd
 
-from irp.data._common import db, date_int, ticker_filter
+from irp.data._common import db, ticker_filter
 
 
 def prices(
@@ -17,10 +17,10 @@ def prices(
         params.extend(vals)
     if start is not None:
         filters.append('Date >= ?')
-        params.append(date_int(start))
+        params.append(start)
     if end is not None:
         filters.append('Date <= ?')
-        params.append(date_int(end))
+        params.append(end)
     where = f'WHERE {" AND ".join(filters)}' if filters else ''
     return (
         db()
@@ -42,10 +42,10 @@ def dividends(
         params.extend(vals)
     if start is not None:
         filters.append('Date >= ?')
-        params.append(date_int(start))
+        params.append(start)
     if end is not None:
         filters.append('Date <= ?')
-        params.append(date_int(end))
+        params.append(end)
     where = f'WHERE {" AND ".join(filters)}' if filters else ''
     return (
         db()
@@ -67,10 +67,10 @@ def splits(
         params.extend(vals)
     if start is not None:
         filters.append('Date >= ?')
-        params.append(date_int(start))
+        params.append(start)
     if end is not None:
         filters.append('Date <= ?')
-        params.append(date_int(end))
+        params.append(end)
     where = f'WHERE {" AND ".join(filters)}' if filters else ''
     return (
         db()

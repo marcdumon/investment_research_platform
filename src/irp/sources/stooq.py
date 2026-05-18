@@ -141,7 +141,7 @@ def _transform_prices(conn: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
         COPY (
             SELECT
                 split_part(upper(t."<TICKER>"), '.', 1) AS Ticker,
-                t."<DATE>"  AS Date,
+                STRPTIME(CAST(t."<DATE>" AS VARCHAR), '%Y%m%d')::DATE AS Date,
                 t."<OPEN>"  AS O,
                 t."<HIGH>"  AS H,
                 t."<LOW>"   AS L,
