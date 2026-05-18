@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from datetime import date
 from functools import lru_cache
@@ -6,6 +7,8 @@ from functools import lru_cache
 import requests
 
 from irp.core.config import config
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = config.data.root_dir / 'sec' / 'submissions'
 HEADERS = {'User-Agent': 'irp data-quality (admin@local)'}
@@ -110,7 +113,8 @@ def filing_url(cik: int | None, report_date: str | None, period: str, tol_days: 
     form = '10-K' if period == 'A' else '10-Q'
     try:
         data = _fetch_submissions(int(cik))
-    except Exception:
+    except (requests.RequestException, ValueError) as e:
+        logger.debug(f'EDGAR fetch failed for CIK {cik}: {type(e).__name__}: {e}')
         return None
     recent = data.get('filings', {}).get('recent', {})
     rows = list(zip(
