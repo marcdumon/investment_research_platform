@@ -41,16 +41,24 @@ def _load_target_tickers() -> list[str]:
 
 
 def _actions_to_long(ticker: str, actions: pd.DataFrame) -> pd.DataFrame:
-    """Vectorized melt of yfinance `.actions` (cols Dividends + Stock Splits,
-    DatetimeIndex) into long-form `(Ticker, Date, Type, Value)` rows where
-    Value > 0."""
-    df = actions.reset_index().rename(columns={'index': 'Date', 'Stock Splits': 'split'})
-    df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
-    div = df.loc[df['Dividends'] > 0, ['Date', 'Dividends']].rename(columns={'Dividends': 'Value'})
-    div['Type'] = 'dividend'
-    spl = df.loc[df['split'] > 0, ['Date', 'split']].rename(columns={'split': 'Value'})
-    spl['Type'] = 'split'
-    out = pd.concat([div, spl], ignore_index=True)
+    """Vectorized melt of yfinance `.actions` (DatetimeIndex with Dividends
+    and/or Stock Splits columns — yfinance omits whichever has no events)
+    into long-form `(Ticker, Date, Type, Value)` rows where Value > 0."""
+    df = actions.reset_index()
+    date_col = df.columns[0]
+    df['Date'] = pd.to_datetime(df[date_col]).dt.strftime('%Y-%m-%d')
+    parts: list[pd.DataFrame] = []
+    if 'Dividends' in df.columns:
+        div = df.loc[df['Dividends'] > 0, ['Date', 'Dividends']].rename(columns={'Dividends': 'Value'})
+        div['Type'] = 'dividend'
+        parts.append(div)
+    if 'Stock Splits' in df.columns:
+        spl = df.loc[df['Stock Splits'] > 0, ['Date', 'Stock Splits']].rename(columns={'Stock Splits': 'Value'})
+        spl['Type'] = 'split'
+        parts.append(spl)
+    if not parts:
+        return pd.DataFrame(columns=_ACTIONS_COLS)
+    out = pd.concat(parts, ignore_index=True)
     if out.empty:
         return pd.DataFrame(columns=_ACTIONS_COLS)
     out.insert(0, 'Ticker', ticker)
