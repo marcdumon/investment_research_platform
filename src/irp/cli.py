@@ -5,6 +5,7 @@ from questionary import Choice, Style
 
 from irp.core.config import config
 from irp.core.logging import configure_logging
+from irp.pipeline import DataProvider
 
 STYLE = Style([
     ('question',    'bold'),
@@ -97,7 +98,7 @@ def _delete_markers(name: str, feed: str) -> None:
             print(f'  deleted {name}/{m.name}')
 
 
-def _make_source(name: str, yahoo_content: list[str] | None = None):
+def _make_source(name: str, yahoo_content: list[str] | None = None) -> DataProvider:
     if name == 'simfin':
         from irp.sources.sim_fin import SimFinSource
         return SimFinSource()

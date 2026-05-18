@@ -13,7 +13,7 @@ def db() -> duckdb.DuckDBPyConnection:
     return _con
 
 
-def ticker_filter(tickers: str | list[str] | None) -> tuple[str, list]:
+def ticker_filter(tickers: str | list[str] | None) -> tuple[str, list[str]]:
     if tickers is None:
         return '', []
     if isinstance(tickers, str):
