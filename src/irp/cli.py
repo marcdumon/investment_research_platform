@@ -76,7 +76,7 @@ def main() -> None:
         'Force re-run (delete markers)?', default=False, style=STYLE
     ).ask()
 
-    print(f'\nWill execute:')
+    print('\nWill execute:')
     for name in providers:
         forced = '  [FORCED]' if force else ''
         print(f'  {name}  [{feed}]  →  {", ".join(steps)}{forced}')

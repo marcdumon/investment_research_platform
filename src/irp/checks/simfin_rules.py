@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Literal
 
 import pandas as pd
+
+Statement = Literal['income', 'balance', 'cashflow', 'cross']
 
 
 @dataclass
 class Rule:
     name: str
-    statement: str           # 'income' | 'balance' | 'cashflow' | 'cross'
+    statement: Statement
     lhs: str
     rhs: str
     fn: Callable[[dict[str, pd.DataFrame]], pd.DataFrame]
@@ -19,7 +21,7 @@ REGISTRY: list[Rule] = []
 _KEY = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period']
 
 
-def register(name: str, statement: str, lhs: str, rhs: str, columns: tuple[str, ...] = ()):
+def register(name: str, statement: Statement, lhs: str, rhs: str, columns: tuple[str, ...] = ()):
     def deco(fn: Callable[[dict[str, pd.DataFrame]], pd.DataFrame]):
         REGISTRY.append(Rule(name, statement, lhs, rhs, fn, columns))
         return fn

@@ -46,12 +46,11 @@ def _load_json_set(path: Path) -> set[str]:
 
 
 def _table_exists(con: duckdb.DuckDBPyConnection, table: str) -> bool:
-    return bool(
-        con.execute(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
-            [table],
-        ).fetchone()[0]
-    )
+    row = con.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+        [table],
+    ).fetchone()
+    return bool(row and row[0])
 
 
 def _empty_cte(cols: str) -> str:

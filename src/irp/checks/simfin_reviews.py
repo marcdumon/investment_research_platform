@@ -74,7 +74,8 @@ def _write(ticker: str, period: str, rule: str, status: str, note: str, subject:
             '# subject scope can be a single field, a full statement, or anything in between.\n'
             '# status: ok | data_error | to_check\n'
         )
-    esc = lambda s: s.replace('\\', '\\\\').replace('"', '\\"')
+    def esc(s: str) -> str:
+        return s.replace('\\', '\\\\').replace('"', '\\"')
     block = (
         '\n[[reviews]]\n'
         f'ticker      = "{ticker}"\n'

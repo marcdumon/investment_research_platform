@@ -1,14 +1,17 @@
 """Row accessors for SimFin tables (`income`, `balance`, `cashflow`, `companies`)."""
+
 from typing import Literal
 
 import pandas as pd
 
 from irp.query._common import db, ticker_filter
 
+SimFinStatement = Literal['income', 'balance', 'cashflow']
+
 
 def fundamentals(
     tickers: str | list[str] | None = None,
-    statement: Literal['income', 'balance', 'cashflow'] = 'income',
+    statement: SimFinStatement = 'income',
     variant: Literal['A', 'Q'] = 'A',
 ) -> pd.DataFrame:
     """Financial statement data. variant: 'A' annual, 'Q' quarterly."""
@@ -30,8 +33,17 @@ def fundamentals(
 
 _FP_ORDER = {'FY': 0, 'Q1': 1, 'Q2': 2, 'Q3': 3, 'Q4': 4}
 _META = {
-    'Ticker', 'SrcId', 'Src', 'Currency', 'Fiscal Year', 'Fiscal Period',
-    'Report Date', 'Publish Date', 'Restated Date', 'Market', 'Period',
+    'Ticker',
+    'SrcId',
+    'Src',
+    'Currency',
+    'Fiscal Year',
+    'Fiscal Period',
+    'Report Date',
+    'Publish Date',
+    'Restated Date',
+    'Market',
+    'Period',
 }
 
 
@@ -54,13 +66,13 @@ def statement(
     (most-recent first). `periods` are strings like '2024FY' or '2024Q2'.
     `items` optionally filters which line items to include.
     """
-    if periods is None:
+    parsed = [_parse_period(p) for p in periods] if periods is not None else None
+    if parsed is None:
         df_a = fundamentals(ticker, name, 'A')
         df_q = fundamentals(ticker, name, 'Q')
         df = pd.concat([df_a, df_q], ignore_index=True)
     else:
-        parsed = [_parse_period(p) for p in periods]
-        variants = {p[2] for p in parsed}
+        variants: set[Literal['A', 'Q']] = {p[2] for p in parsed}
         parts = [fundamentals(ticker, name, v) for v in variants]
         df = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     if df.empty:
@@ -70,7 +82,7 @@ def statement(
     df = df.copy()
     df.loc[df['Period'] == 'A', 'Fiscal Period'] = 'FY'
 
-    if periods is not None:
+    if parsed is not None:
         keys = {(fy, fp, v) for fy, fp, v in parsed}
         mask = [
             (int(fy), str(fp), str(p)) in keys
@@ -102,9 +114,7 @@ def companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
     """Company metadata: name, sector, industry, market, ISIN."""
     clause, params = ticker_filter(tickers)
     where = f'WHERE {clause}' if clause else ''
-    return (
-        db().execute(f'SELECT * FROM companies {where} ORDER BY Ticker', params).df()
-    )
+    return db().execute(f'SELECT * FROM companies {where} ORDER BY Ticker', params).df()
 
 
 def universe(

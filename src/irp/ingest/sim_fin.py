@@ -10,6 +10,7 @@ import simfin as sf
 
 from irp.core.config import config
 from irp.core.freshness import is_fresh
+from irp.runner import Feed
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def _store_companies(con: duckdb.DuckDBPyConnection) -> None:
 
 
 class SimFinSource:
-    SUPPORTED_FEEDS = frozenset({'bulk'})
+    SUPPORTED_FEEDS: frozenset[Feed] = frozenset({'bulk'})
 
     def fetch_bulk(self) -> None:
         _configure_sf()

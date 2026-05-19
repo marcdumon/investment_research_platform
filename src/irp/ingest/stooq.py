@@ -14,6 +14,7 @@ import pyarrow.parquet as pq
 
 from irp.core.config import config
 from irp.core.duckdb_merge import merge_csv
+from irp.runner import Feed
 from irp.core.freshness import is_fresh
 
 logger = logging.getLogger(__name__)
@@ -168,7 +169,7 @@ def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
 
 
 class StooqSource:
-    SUPPORTED_FEEDS = frozenset({'bulk', 'update'})
+    SUPPORTED_FEEDS: frozenset[Feed] = frozenset({'bulk', 'update'})
 
     def fetch_bulk(self) -> None:
         """Stooq bulk zips must be manually downloaded and placed in raw_dir. Unzips and builds the price dataset."""
