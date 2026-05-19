@@ -73,7 +73,7 @@ def update_raw(tmp_path, monkeypatch):
             output_path=processed / _UPDATE_FILE,
             input_format="csv",
             output_format="csv",
-            header=True,
+            # header=True,
         ),
     })
     return raw, processed

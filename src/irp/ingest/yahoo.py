@@ -11,6 +11,7 @@ from irp.core.config import config
 from irp.core.duckdb_merge import merge_csv
 from irp.core.freshness import is_fresh
 from irp.core.jsonset import JsonSet
+from irp.runner import Feed
 
 logger = logging.getLogger(__name__)
 
@@ -216,9 +217,9 @@ def _fetch_prices_batched(
         batch = todo[i : i + bsize]
         batch_yahoo = [ticker_map[t] for t in batch]
         batch_starts = [last_dates.get(t) for t in batch] if last_dates is not None else []
-        min_start = min(batch_starts, default=None) if batch_starts else None
-        if min_start is not None and all(s is not None for s in batch_starts):
-            dl_kwargs: dict = {'start': (min_start + timedelta(days=1)).isoformat()}
+        non_null_starts: list[date] = [s for s in batch_starts if s is not None]
+        if non_null_starts and len(non_null_starts) == len(batch_starts):
+            dl_kwargs: dict = {'start': (min(non_null_starts) + timedelta(days=1)).isoformat()}
         else:
             dl_kwargs = {'period': 'max'}
         logger.debug(f'Batch {i // bsize + 1}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}')
@@ -442,7 +443,7 @@ def _store_prices(con: duckdb.DuckDBPyConnection) -> None:
 
 
 class YahooSource:
-    SUPPORTED_FEEDS = frozenset({'bulk', 'update'})
+    SUPPORTED_FEEDS: frozenset[Feed] = frozenset({'bulk', 'update'})
 
     def __init__(
         self,

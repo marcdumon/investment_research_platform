@@ -14,7 +14,6 @@ import logging
 import time
 from pathlib import Path
 
-import duckdb
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -212,11 +211,11 @@ def _yf_batch_close(yf, batch: list[str], ystart, yend, batch_sleep: float) -> p
 def _close_on_date(raw: pd.DataFrame, date_str: str, batch: list[str]) -> pd.DataFrame | None:
     """Single-row DataFrame of Close prices for `date_str`. Handles both
     single-ticker (flat columns) and multi-ticker (MultiIndex) shapes."""
-    day = raw[raw.index.strftime('%Y-%m-%d') == date_str]
+    day = raw[pd.DatetimeIndex(raw.index).strftime('%Y-%m-%d') == date_str]
     if day.empty:
         return None
     if isinstance(raw.columns, pd.MultiIndex):
-        return day['Close']
+        return day['Close']  # type: ignore[return-value]  # MultiIndex df[str] → DataFrame
     close = day[['Close']].copy()
     close.columns = batch
     return close

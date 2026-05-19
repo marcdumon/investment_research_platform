@@ -161,7 +161,7 @@ def main() -> None:
     if null_stooq:
         print(f'  stooq_ticker NULL: {null_stooq}')
     if null_yahoo:
-        print(f'\nNULL yahoo_ticker by market (no Yahoo equivalent):')
+        print('\nNULL yahoo_ticker by market (no Yahoo equivalent):')
         print(df[df['yahoo_ticker'].isna()].groupby('Market').size().to_string())
 
 

@@ -1,5 +1,5 @@
 import logging
-from typing import ClassVar, Literal, Protocol
+from typing import Literal, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -7,7 +7,7 @@ Feed = Literal['bulk', 'update']
 
 
 class DataProvider(Protocol):
-    SUPPORTED_FEEDS: ClassVar[frozenset[Feed]]
+    SUPPORTED_FEEDS: frozenset[Feed]
 
     def fetch_bulk(self) -> None: ...
     def update(self) -> None: ...
@@ -31,3 +31,6 @@ def load_data(provider: DataProvider, feed: Feed) -> None:
 if __name__ == '__main__':
     from irp.cli import main
     main()
+
+    # from irp.ingest.sim_fin import SimFinSource
+    # a:DataProvider=SimFinSource
