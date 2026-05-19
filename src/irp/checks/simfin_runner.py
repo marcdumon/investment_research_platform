@@ -3,10 +3,10 @@ from typing import Literal
 import pandas as pd
 
 from irp.core.db import db
-from irp.data.simfin import fundamentals
-from irp.quality.edgar import filing_url
-from irp.quality.simfin_reviews import load_reviews, period_str
-from irp.quality.simfin_rules import REGISTRY
+from irp.query.simfin import fundamentals
+from irp.checks.edgar import filing_url
+from irp.checks.simfin_reviews import load_reviews, period_str
+from irp.checks.simfin_rules import REGISTRY
 
 _KEY = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period']
 

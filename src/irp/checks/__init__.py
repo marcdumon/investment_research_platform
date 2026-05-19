@@ -7,9 +7,9 @@ Each domain follows the same shape:
     {domain}_reviews.py  add_review, load_reviews, load_reviews_df + TOML I/O
 
 Import from the submodule explicitly:
-    from irp.quality.simfin_runner import run
-    from irp.quality.stooq_runner  import run as stooq_run
+    from irp.checks.simfin_runner import run
+    from irp.checks.stooq_runner  import run as stooq_run
 """
-from irp.quality.edgar import filing_url
+from irp.checks.edgar import filing_url
 
 __all__ = ['filing_url']

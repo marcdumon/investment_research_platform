@@ -14,7 +14,7 @@ for the fetch pipeline; the catalog columns are a snapshot for analysis only.
 Trigger via `uv run irp` → Steps → catalog.
 
 `catalog()` is a read-only accessor (uses the db() singleton), consistent
-with irp.data.stooq / irp.data.yahoo.
+with irp.query.stooq / irp.query.yahoo.
 """
 import json
 import logging
@@ -24,7 +24,7 @@ import duckdb
 import pandas as pd
 
 from irp.core.config import config
-from irp.data._common import db, ticker_filter
+from irp.query._common import db, ticker_filter
 
 logger = logging.getLogger(__name__)
 

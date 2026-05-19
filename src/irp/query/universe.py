@@ -24,7 +24,7 @@ Two operations:
   falls back to the existing DB table. Run via `uv run irp` -> Steps -> universe.
 
 `universe()` is a read-only accessor using the db() singleton, consistent
-with irp.data.stooq / irp.data.yahoo / irp.data.catalog.
+with irp.query.stooq / irp.query.yahoo / irp.query.catalog.
 """
 import logging
 import re
@@ -34,7 +34,7 @@ import duckdb
 import pandas as pd
 
 from irp.core.config import config
-from irp.data._common import db, ticker_filter
+from irp.query._common import db, ticker_filter
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-"""Stooq-anomaly inspector. Mirrors irp.quality.simfin_inspect.
+"""Stooq-anomaly inspector. Mirrors irp.checks.simfin_inspect.
 
 Two views for a (ticker, period, rule) finding:
 - `inspect()` — windowed candlestick ±pad_days around each sample date

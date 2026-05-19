@@ -9,8 +9,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-import irp.sources.stooq as mod
-from irp.sources.stooq import FeedSpec, StooqSource
+import irp.ingest.stooq as mod
+from irp.ingest.stooq import FeedSpec, StooqSource
 
 
 ZIP_NAME = "d_us_txt.zip"

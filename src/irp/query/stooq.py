@@ -1,7 +1,7 @@
 """Row accessors for Stooq tables (`prices`)."""
 import pandas as pd
 
-from irp.data._common import db, ticker_filter
+from irp.query._common import db, ticker_filter
 
 
 def prices(

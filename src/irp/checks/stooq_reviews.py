@@ -1,4 +1,4 @@
-"""Stooq-anomaly review storage. Mirrors irp.quality.simfin_reviews.
+"""Stooq-anomaly review storage. Mirrors irp.checks.simfin_reviews.
 
 Key shape: (ticker, period, rule). For stooq, `period` is the calendar year
 as a string (e.g. '2024'). The string-typed `period` field is shared with
