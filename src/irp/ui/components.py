@@ -7,5 +7,6 @@ def navbar() -> html.Nav:
         html.Div(className='nav-links', children=[
             dcc.Link('Home', href='/', className='nav-link'),
             dcc.Link('Ingest', href='/ingest', className='nav-link'),
+            dcc.Link('Ticker', href='/ticker', className='nav-link'),
         ]),
     ])
