@@ -139,9 +139,9 @@ def _fetch_actions_per_ticker(
             logger.warning(f'{ticker}: {type(e).__name__}: {e}')
             new_errors.add(ticker)
             _ERRORS.save(known_errors | new_errors)
-            time.sleep(yahoo_cfg.batch_sleep)
+            time.sleep(yahoo_cfg.actions_sleep)
             continue
-        time.sleep(yahoo_cfg.batch_sleep)
+        time.sleep(yahoo_cfg.actions_sleep)
         if actions is not None and not actions.empty:
             rows_df = _actions_to_long(ticker, actions)
             if not rows_df.empty:
@@ -177,9 +177,9 @@ def _fetch_prices_per_ticker(
             logger.warning(f'{ticker}: {type(e).__name__}: {e}')
             new_errors.add(ticker)
             _ERRORS.save(known_errors | new_errors)
-            time.sleep(yahoo_cfg.batch_sleep)
+            time.sleep(yahoo_cfg.ticker_sleep)
             continue
-        time.sleep(yahoo_cfg.batch_sleep)
+        time.sleep(yahoo_cfg.ticker_sleep)
         if hist is not None and not hist.empty:
             rows_df = _prices_to_long(ticker, hist)
             has_header = _append_csv(rows_df, _PRICES_FILE, has_header)
