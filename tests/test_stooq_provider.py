@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-import irp.sources.stooq as mod
-from irp.sources.stooq import StooqSource
+import irp.ingest.stooq as mod
+from irp.ingest.stooq import StooqSource
 
 
 TICKER_CSV = (

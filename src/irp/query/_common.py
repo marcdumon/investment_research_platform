@@ -1,4 +1,4 @@
-"""Shared helpers for `irp.data.simfin` and `irp.data.stooq` accessors."""
+"""Shared helpers for `irp.query.simfin` and `irp.query.stooq` accessors."""
 from irp.core.db import db
 
 __all__ = ['db', 'ticker_filter']

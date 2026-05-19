@@ -74,7 +74,7 @@ This runs the full pipeline: fetch → transform → store → cleanup for both 
 To run SimFin only:
 
 ```python
-from irp.sources.sim_fin import SimFinSource
+from irp.ingest.sim_fin import SimFinSource
 from irp.runner import load_data
 
 src = SimFinSource()
@@ -101,7 +101,7 @@ uv run python -m irp.runner
 Or Stooq only:
 
 ```python
-from irp.sources.stooq import StooqSource
+from irp.ingest.stooq import StooqSource
 from irp.runner import load_data
 
 src = StooqSource()
@@ -138,7 +138,7 @@ Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from th
 **Slow:** ~14k tickers, several hours end-to-end. **Resume-safe** — stop with Ctrl-C any time, rerun continues from where it left off.
 
 ```python
-from irp.sources.yahoo import YahooSource
+from irp.ingest.yahoo import YahooSource
 
 src = YahooSource()
 src.fetch_bulk()
@@ -203,7 +203,7 @@ Two CLI steps (both require Stooq bulk fetch to have run):
 To re-seed from a new Stooq bulk download, tick `seed-universe` again.
 
 ```python
-from irp.data.universe import universe, seed, refresh
+from irp.query.universe import universe, seed, refresh
 df = universe()                 # all tickers
 df = universe('AAPL')           # single ticker
 seed()                          # rebuild universe.csv from Stooq markets.csv
@@ -214,7 +214,7 @@ refresh()                       # write DB table from universe.csv
 
 ## Data Catalog
 
-`irp.data.catalog.catalog()` returns a single DataFrame with one row per ticker and columns covering every data source:
+`irp.query.catalog.catalog()` returns a single DataFrame with one row per ticker and columns covering every data source:
 
 | Column group | Source |
 |---|---|
@@ -229,7 +229,7 @@ refresh()                       # write DB table from universe.csv
 Rebuild via `uv run irp` → Steps → `catalog`. This reads the JSON files from `data/yahoo/raw/` and joins them with the current DB state; the resulting boolean columns are a snapshot, not live state.
 
 ```python
-from irp.data.catalog import catalog
+from irp.query.catalog import catalog
 df = catalog()                 # all tickers
 df = catalog('AAPL')           # single ticker
 df = catalog(['AAPL', 'MSFT']) # subset
@@ -251,9 +251,9 @@ Steps are **idempotent**: freshness markers (`.fetched`, `.transformed_bulk`, et
 
 | Module | Description |
 |---|---|
-| `src/irp/sources/sim_fin.py` | SimFin fetch, transform, store, update, cleanup |
-| `src/irp/sources/stooq.py` | Stooq unzip, transform, store, cleanup |
-| `src/irp/sources/yahoo.py` | Yahoo per-ticker dividends + splits + OHLCV via yfinance, resume-safe |
+| `src/irp/ingest/sim_fin.py` | SimFin fetch, transform, store, update, cleanup |
+| `src/irp/ingest/stooq.py` | Stooq unzip, transform, store, cleanup |
+| `src/irp/ingest/yahoo.py` | Yahoo per-ticker dividends + splits + OHLCV via yfinance, resume-safe |
 | `src/irp/runner.py` | Orchestrates providers via `DataProvider` protocol |
 | `src/irp/core/freshness.py` | `is_fresh(marker, *inputs)` — skip logic |
 | `src/irp/core/config.py` | Loads `config.toml` via Pydantic |

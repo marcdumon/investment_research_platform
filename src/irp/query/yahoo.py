@@ -1,7 +1,7 @@
 """Row accessors for Yahoo tables (`yahoo_prices`, `dividends`, `splits`)."""
 import pandas as pd
 
-from irp.data._common import db, ticker_filter
+from irp.query._common import db, ticker_filter
 
 
 def prices(

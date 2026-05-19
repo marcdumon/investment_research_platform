@@ -103,19 +103,19 @@ def main() -> None:
             src.cleanup()
 
     if 'seed-universe' in steps:
-        from irp.data.universe import seed as _seed_universe
+        from irp.query.universe import seed as _seed_universe
         print('── seed-universe ──')
         n = _seed_universe()
         print(f'  {n:,} tickers written to universe.csv')
 
     if 'universe' in steps:
-        from irp.data.universe import refresh as _refresh_universe
+        from irp.query.universe import refresh as _refresh_universe
         print('── universe ──')
         n = _refresh_universe()
         print(f'  {n:,} tickers')
 
     if 'catalog' in steps:
-        from irp.data.catalog import refresh as _refresh_catalog
+        from irp.query.catalog import refresh as _refresh_catalog
         print('── catalog ──')
         n = _refresh_catalog()
         print(f'  {n:,} tickers')
@@ -138,13 +138,13 @@ def _make_source(
     yahoo_prices_mode: str = 'batch',
 ) -> DataProvider:
     if name == 'simfin':
-        from irp.sources.sim_fin import SimFinSource
+        from irp.ingest.sim_fin import SimFinSource
         return SimFinSource()
     if name == 'stooq':
-        from irp.sources.stooq import StooqSource
+        from irp.ingest.stooq import StooqSource
         return StooqSource()
     if name == 'yahoo':
-        from irp.sources.yahoo import YahooSource
+        from irp.ingest.yahoo import YahooSource
         content = yahoo_content or ['actions', 'prices']
         return YahooSource(
             fetch_actions='actions' in content,

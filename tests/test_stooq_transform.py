@@ -3,8 +3,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-import irp.sources.stooq as mod
-from irp.sources.stooq import StooqSource, FeedSpec
+import irp.ingest.stooq as mod
+from irp.ingest.stooq import StooqSource, FeedSpec
 
 
 _RAW_BULK_ROWS = [

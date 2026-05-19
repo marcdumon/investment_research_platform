@@ -4,8 +4,8 @@ import duckdb
 import pandas as pd
 import pytest
 
-import irp.sources.stooq as mod
-from irp.sources.stooq import StooqSource
+import irp.ingest.stooq as mod
+from irp.ingest.stooq import StooqSource
 
 
 _BULK_PRICES = pd.DataFrame([

@@ -1,9 +1,9 @@
-"""Stooq anomaly runner. Mirrors irp.quality.simfin_runner."""
+"""Stooq anomaly runner. Mirrors irp.checks.simfin_runner."""
 import pandas as pd
 
 from irp.core.db import db
-from irp.quality.stooq_reviews import load_reviews
-from irp.quality.stooq_rules import REGISTRY
+from irp.checks.stooq_reviews import load_reviews
+from irp.checks.stooq_rules import REGISTRY
 
 
 def run(skip_reviewed: bool = True) -> pd.DataFrame:
