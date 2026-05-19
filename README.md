@@ -45,6 +45,18 @@ Source filter: `universe.yahoo_ticker IS NOT NULL` and `Market NOT IN config.pro
 SIMFIN_API_KEY=your_key_here
 ```
 
+### Yahoo sleep settings
+
+Three independent rate-limit knobs under `[providers.yahoo]`:
+
+| Key | Default | Applied to |
+|---|---|---|
+| `batch_sleep` | `1.0` | After each `yf.download()` batch (one request per ~50 tickers) |
+| `actions_sleep` | `0.5` | After each `yf.Ticker(t).actions` call (one request per ticker) |
+| `ticker_sleep` | `0.5` | After each `yf.Ticker(t).history()` call in `prices_mode='ticker'` (one request per ticker) |
+
+Batch mode hits Yahoo once per 50 tickers so `batch_sleep` can be shorter relative to the per-ticker modes. Increase any of these if you hit rate limits.
+
 ---
 
 ## How to Fetch Data
@@ -123,7 +135,7 @@ Yahoo uses the `yfinance` API. No manual downloads. Reads target tickers from th
 - **actions** — dividends + splits via `yf.Ticker(t).actions` (full history per ticker)
 - **prices** — auto-adjusted OHLCV via `yf.Ticker(t).history(period='max', auto_adjust=True)`, or batched via `yf.download()` when `prices_mode='batch'` (default, ~10× faster)
 
-**Slow:** ~14k tickers × `batch_sleep` per batch → several hours end-to-end. **Resume-safe** — stop with Ctrl-C any time, rerun continues from where it left off.
+**Slow:** ~14k tickers, several hours end-to-end. **Resume-safe** — stop with Ctrl-C any time, rerun continues from where it left off.
 
 ```python
 from irp.sources.yahoo import YahooSource
