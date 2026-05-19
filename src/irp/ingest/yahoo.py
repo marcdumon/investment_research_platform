@@ -129,9 +129,12 @@ def _fetch_actions_per_ticker(
     new_errors: set[str],
     has_header: bool,
 ) -> bool:
+    from irp.core.cancel import is_cancelled
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo actions: {len(todo)} tickers')
     for ticker in todo:
+        if is_cancelled():
+            break
         yahoo = ticker_map[ticker]
         logger.debug(f'Actions: {ticker} (yahoo={yahoo})')
         try:
@@ -161,9 +164,12 @@ def _fetch_prices_per_ticker(
     has_header: bool,
     last_dates: dict[str, date] | None = None,
 ) -> bool:
+    from irp.core.cancel import is_cancelled
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
     for ticker in todo:
+        if is_cancelled():
+            break
         yahoo = ticker_map[ticker]
         logger.debug(f'Prices: {ticker} (yahoo={yahoo})')
         last = last_dates.get(ticker) if last_dates is not None else None
@@ -210,10 +216,13 @@ def _fetch_prices_batched(
     When `last_dates` is provided, each batch uses the minimum last_date of
     the group as the shared start date (incremental update). Batches containing
     any ticker absent from `last_dates` fall back to `period='max'`."""
+    from irp.core.cancel import is_cancelled
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     bsize = yahoo_cfg.prices_batch_size
     logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers')
     for i in range(0, len(todo), bsize):
+        if is_cancelled():
+            break
         batch = todo[i : i + bsize]
         batch_yahoo = [ticker_map[t] for t in batch]
         batch_starts = [last_dates.get(t) for t in batch] if last_dates is not None else []

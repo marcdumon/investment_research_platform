@@ -4,30 +4,39 @@ logging.getLogger('urllib3').setLevel(logging.INFO)
 logging.getLogger('requests').setLevel(logging.INFO)
 logging.getLogger('yfinance').setLevel(logging.WARNING)
 logging.getLogger('peewee').setLevel(logging.WARNING)
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
-_COLORS = {
-    logging.DEBUG: '\033[37m',  # white
-    logging.INFO: '\033[32m',  # green
-    logging.WARNING: '\033[33m',  # yellow
-    logging.ERROR: '\033[31m',  # red
+LOG_FMT = '%(asctime)s|%(levelname)s|%(name)s: %(message)s'
+LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
+
+LEVEL_COLORS_ANSI = {
+    logging.DEBUG:    '\033[37m',
+    logging.INFO:     '\033[32m',
+    logging.WARNING:  '\033[33m',
+    logging.ERROR:    '\033[31m',
+    logging.CRITICAL: '\033[91m',
+}
+
+LEVEL_COLORS_HEX = {
+    logging.DEBUG:    '#888888',
+    logging.INFO:     '#4ec94e',
+    logging.WARNING:  '#e0c040',
+    logging.ERROR:    '#e05050',
+    logging.CRITICAL: '#ff4444',
 }
 _RESET = '\033[0m'
 
 
 class _ColorFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        color = _COLORS.get(record.levelno, _RESET)
+        color = LEVEL_COLORS_ANSI.get(record.levelno, _RESET)
         return f'{color}{super().format(record)}{_RESET}'
 
 
-def configure_logging(level: int = logging.INFO) -> None:
+def configure_logging(level: int = logging.DEBUG) -> None:
     root = logging.getLogger()
     root.setLevel(level)
-    if not root.handlers:
-        handler = logging.StreamHandler()
-        formatter = _ColorFormatter(
-            fmt='%(asctime)s|%(levelname)s|%(name)s: %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-        )
-        handler.setFormatter(formatter)
-        root.addHandler(handler)
+    root.handlers.clear()
+    handler = logging.StreamHandler()
+    handler.setFormatter(_ColorFormatter(fmt=LOG_FMT, datefmt=LOG_DATEFMT))
+    root.addHandler(handler)

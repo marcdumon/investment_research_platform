@@ -23,6 +23,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "questionary>=2.0.0",
     "pyarrow>=24.0.0",
+    "dash>=4.1.0",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,7 @@ dev = [
 
 [project.scripts]
 irp = "irp.cli:main"
+irp-ui = "irp.ui.server:run_server"
 
 [build-system]
 requires = ["setuptools>=61"]
