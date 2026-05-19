@@ -16,8 +16,10 @@ refresh_days_meta = 7
 [providers.yahoo]
 raw_dir = "yahoo/raw"
 processed_dir = "yahoo/processed"
-batch_sleep = 1.0
 prices_batch_size = 50
+batch_sleep = 1.0
+actions_sleep = 0.5
+ticker_sleep = 0.5
 markets_exclude = ["cryptocurrencies", "money market", "bonds"]
 
 
@@ -25,7 +27,7 @@ markets_exclude = ["cryptocurrencies", "money market", "bonds"]
 raw_dir = "stooq/raw"
 processed_dir = "stooq/processed"
 
-# Bulk data download
+# Stooq bulk data download
 bulk_url = "http://stooq.com/db/h/"
 bulk_files = ["d_us_txt.zip", "d_world_txt.zip"]
 bulk_instruction_template = """
@@ -38,7 +40,7 @@ Manually download
 and place them in the raw data directory.
 """
 
-# Update data download
+# Stooq update data download
 update_url = "http://stooq.com/db/"
 update_file = "data_d.txt"
 update_instruction_template = """ 
