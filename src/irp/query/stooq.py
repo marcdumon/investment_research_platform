@@ -1,4 +1,5 @@
 """Row accessors for Stooq tables (`prices`)."""
+
 import pandas as pd
 
 from irp.query._common import db, ticker_filter
@@ -27,7 +28,5 @@ def prices(
         params.append(src)
     where = f'WHERE {" AND ".join(filters)}' if filters else ''
     return (
-        db()
-        .execute(f'SELECT * FROM prices {where} ORDER BY Ticker, Date', params)
-        .df()
+        db().execute(f'SELECT * FROM prices {where} ORDER BY Ticker, Date', params).df()
     )
