@@ -201,7 +201,6 @@ layout = html.Div(
 # Callbacks
 # ---------------------------------------------------------------------------
 
-
 @callback(
     Output('all-tickers-store', 'data'),
     Output('filter-market', 'options'),
@@ -471,7 +470,7 @@ def render_prices(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(128,128,128,0.05)',
             margin=dict(l=0, r=0, t=8, b=0),
-            hovermode='x',
+            hovermode='x unified',
             font=dict(color=MUTED, size=11),
             legend=dict(
                 orientation='h',
@@ -491,14 +490,20 @@ def render_prices(
                 tickcolor=GRID,
                 zeroline=False,
                 showline=True,
+                showspikes=True,
+                spikecolor=GRID,
+                spikethickness=1,
+                spikedash='dot',
+                spikemode='across',
             ),
             yaxis=dict(
                 gridcolor=GRID,
                 linecolor=GRID,
                 tickfont=dict(color=MUTED, size=11),
                 tickcolor=GRID,
-                zeroline=False,
-                showline=True,
+                zeroline=True,
+                showline=False,
+                showspikes=False,
             ),
             shapes=shapes,
         ),
