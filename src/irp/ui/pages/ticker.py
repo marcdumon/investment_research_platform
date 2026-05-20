@@ -5,16 +5,19 @@ from typing import Any
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
+from plotly.basedatatypes import BaseTraceType
 
 from irp.query.simfin import companies as _companies
 from irp.query.simfin import statement as _stmt
-from irp.query.stooq import prices as _prices
+from irp.query.stooq import prices as _stooq_prices
 from irp.query.universe import universe as _universe
 from irp.query.yahoo import dividends as _divs
+from irp.query.yahoo import prices as _yahoo_prices
 from irp.query.yahoo import splits as _splits
+from irp.ui.theme import ACCENT, DIV_COLOR, GRID, HOVER_LABEL, MUTED, SPLIT_COLOR, TABLE_STYLE
 from irp.ui.ticker_fmt import date_range_for_preset, fmt_price_table, fmt_statement
 
 logger = logging.getLogger(__name__)
@@ -23,7 +26,7 @@ dash.register_page(__name__, path='/ticker', name='Ticker')
 
 _HIDE = {'display': 'none'}
 _SHOW = {'display': 'block'}
-_PRESETS = ['1M', '6M', '1Y', '3Y', '5Y', 'Max']
+_RANGE_PRESETS = ['1M', '6M', '1Y', '3Y', '5Y', 'Max']
 
 _today = date.today().isoformat()
 _1y_ago = (date.today() - timedelta(days=365)).isoformat()
@@ -112,7 +115,7 @@ layout = html.Div(
                                                     n_clicks=0,
                                                     className='btn price-preset-btn',
                                                 )
-                                                for p in _PRESETS
+                                                for p in _RANGE_PRESETS
                                             ],
                                         ),
                                         dcc.DatePickerRange(
@@ -352,7 +355,7 @@ def render_header(ticker: str | None) -> list:
 @callback(
     Output('price-dates', 'start_date'),
     Output('price-dates', 'end_date'),
-    [Input(f'preset-{p}', 'n_clicks') for p in _PRESETS],
+    [Input(f'preset-{p}', 'n_clicks') for p in _RANGE_PRESETS],
     prevent_initial_call=True,
 )
 def handle_preset(*args: int) -> tuple[str, str]:
@@ -394,10 +397,10 @@ def render_prices(
 
     try:
         if source == 'stooq':
-            df = _prices(ticker, start=start, end=end)
+            df = _stooq_prices(ticker, start=start, end=end)
             close_col = 'C'
         else:
-            df = _prices(ticker, start=start, end=end)
+            df = _yahoo_prices(ticker, start=start, end=end)
             close_col = 'Close'
     except Exception as exc:
         logger.warning(f'Price query failed for {ticker}: {exc}')
@@ -410,8 +413,9 @@ def render_prices(
     df['_date_str'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
 
     # Dividend + split markers
-    div_traces: list[go.BaseTraceType] = []
+    div_traces: list[BaseTraceType] = []
     shapes: list[dict] = []
+
     try:
         divs = _divs(ticker, start=start, end=end)
         spls = _splits(ticker, start=start, end=end)
@@ -427,11 +431,11 @@ def render_prices(
                     x=div_dates,
                     y=price_at_div,
                     mode='markers',
-                    marker=dict(symbol='triangle-up', size=10, color='#4ec94e'),
+                    marker=dict(symbol='triangle-up', size=10, color=DIV_COLOR),
                     name='Dividend',
                     hovertemplate='<b>%{x}</b><br>Div: $%{customdata:.4f}<extra></extra>',
                     customdata=divs[div_col],
-                    hoverlabel=dict(**_hl, bordercolor='#4ec94e'),
+                    hoverlabel=dict(**HOVER_LABEL, bordercolor=DIV_COLOR),
                 )
             )
         if not spls.empty:
@@ -445,24 +449,21 @@ def render_prices(
                         y0=0,
                         y1=1,
                         yref='paper',
-                        line=dict(color='#e0a040', width=1, dash='dash'),
+                        line=dict(color=SPLIT_COLOR, width=1, dash='dash'),
                     )
                 )
     except Exception:
         pass
 
-    _muted = '#7d8590'
-    _grid = 'rgba(128,128,128,0.18)'
-    _hl = dict(bgcolor='#ffffff', font=dict(color='#517198', size=12), namelength=0)
     fig = go.Figure(
         data=[
             go.Scatter(
                 x=df['_date_str'],
                 y=df[close_col],
                 name='Close',
-                line=dict(color='#58a6ff', width=1.5),
+                line=dict(color=ACCENT, width=1.5),
                 hovertemplate='<b>%{x}</b><br>Close: %{y:,.2f}<extra></extra>',
-                hoverlabel=dict(**_hl, bordercolor='#58a6ff'),
+                hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
             ),
             *div_traces,
         ],
@@ -471,31 +472,31 @@ def render_prices(
             plot_bgcolor='rgba(128,128,128,0.05)',
             margin=dict(l=0, r=0, t=8, b=0),
             hovermode='x',
-            font=dict(color=_muted, size=11),
+            font=dict(color=MUTED, size=11),
             legend=dict(
                 orientation='h',
                 y=1.02,
                 x=1,
                 xanchor='right',
                 yanchor='bottom',
-                font=dict(color=_muted, size=11),
+                font=dict(color=MUTED, size=11),
                 bgcolor='rgba(0,0,0,0)',
                 bordercolor='rgba(0,0,0,0)',
             ),
             xaxis=dict(
                 rangeslider_visible=False,
-                gridcolor=_grid,
-                linecolor=_grid,
-                tickfont=dict(color=_muted, size=11),
-                tickcolor=_grid,
+                gridcolor=GRID,
+                linecolor=GRID,
+                tickfont=dict(color=MUTED, size=11),
+                tickcolor=GRID,
                 zeroline=False,
                 showline=True,
             ),
             yaxis=dict(
-                gridcolor=_grid,
-                linecolor=_grid,
-                tickfont=dict(color=_muted, size=11),
-                tickcolor=_grid,
+                gridcolor=GRID,
+                linecolor=GRID,
+                tickfont=dict(color=MUTED, size=11),
+                tickcolor=GRID,
                 zeroline=False,
                 showline=True,
             ),
@@ -527,6 +528,7 @@ def update_price_table(price_data: list | None, relayout_data: dict | None) -> A
     ctx = dash.callback_context
     triggered = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else ''
 
+    ############# MD> This should go in a service #######################################
     rows = price_data
 
     # Only filter by zoom when chart interaction triggered this (not a data reload)
@@ -545,33 +547,13 @@ def update_price_table(price_data: list | None, relayout_data: dict | None) -> A
         return html.P('No data in selected range.', className='no-data')
 
     cols = [c for c in rows[0] if c != 'Ticker']
-
+    ###################################################################################
     return _dt.DataTable(
         data=rows,
         columns=[{'name': c, 'id': c} for c in cols],
         page_size=50,
-        style_table={'overflowX': 'auto', 'marginTop': '16px'},
-        style_header={
-            'backgroundColor': 'var(--surface-2)',
-            'color': 'var(--muted)',
-            'fontWeight': '600',
-            'fontSize': '11px',
-            'textTransform': 'uppercase',
-            'border': '1px solid var(--border)',
-        },
-        style_cell={
-            'backgroundColor': 'var(--surface)',
-            'color': 'var(--text)',
-            'border': '1px solid var(--border)',
-            'fontSize': '12px',
-            'fontFamily': '"SF Mono","Cascadia Code",monospace',
-            'padding': '5px 12px',
-            'textAlign': 'right',
-        },
-        style_cell_conditional=[
-            {'if': {'column_id': 'Date'}, 'textAlign': 'left'},
-        ],
         sort_action='native',
+        **TABLE_STYLE,
     )
 
 
