@@ -4,11 +4,14 @@ This is the only module in irp.factors that accesses the database.
 Pure computation is delegated to valuation.py and profitability.py.
 """
 import datetime
+import logging
 from typing import Literal
 
 import pandas as pd
 
 from irp.factors import cache as _cache
+
+logger = logging.getLogger(__name__)
 from irp.factors._cols import REPORT_DATE, TICKER
 from irp.factors._pit import pit_latest, pit_price, pit_ttm
 from irp.factors.backtest import compute_backtest, compute_forward_returns
@@ -158,6 +161,7 @@ def run_backtest(
     if tickers is None:
         cached = _cache.load_backtest(factor, horizon_days, variant, freq, start_date, end_date)
         if cached is not None:
+            logger.info(f'backtest cache hit: {factor} h={horizon_days} {variant}/{freq} {start_date}–{end_date}')
             return cached
 
     raw_income   = fundamentals(tickers, 'income',   variant)
@@ -184,6 +188,13 @@ def run_backtest(
     else:
         dates_to_compute = list(rebalance_dates)
 
+    n_total = len(rebalance_dates)
+    n_cached = n_total - len(dates_to_compute)
+    logger.info(
+        f'backtest {factor} h={horizon_days} {variant}/{freq} {start_date}–{end_date}: '
+        f'{n_cached}/{n_total} cross-sections from cache, {len(dates_to_compute)} to compute'
+    )
+
     for d in dates_to_compute:
         xs = _cross_section_from_raw(
             raw_income, raw_balance, raw_cashflow, raw_prices, d, variant
@@ -193,8 +204,13 @@ def run_backtest(
             if tickers is None:
                 _cache.store(d, variant, xs)
 
+    logger.info(f'backtest {factor}: computing IC series and quintile returns...')
     fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
     result = compute_backtest(factor, cross_sections, fwd_returns)
     if tickers is None and result['n_dates'] > 0:
         _cache.store_backtest(factor, horizon_days, variant, freq, start_date, end_date, result)
+        logger.info(
+            f'backtest {factor}: done — mean IC={result["mean_ic"]:.3f}, '
+            f't-stat={result["ic_tstat"]:.2f}, n={result["n_dates"]} dates (result cached)'
+        )
     return result

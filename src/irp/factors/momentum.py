@@ -87,6 +87,9 @@ def compute_momentum(
         closes = g[PRICE_CLOSE].values
         if len(closes) < 22:
             return float('nan')
+        window = closes[-22:]
+        if not np.all((window > 0) & np.isfinite(window)):
+            return float('nan')
         log_rets = np.log(closes[-21:] / closes[-22:-1])
         return float(log_rets.std() * np.sqrt(252))
 
