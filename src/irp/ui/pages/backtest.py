@@ -1,4 +1,4 @@
-"""Backtest page: factor IC series and quintile cumulative returns."""
+"""Backtest page: single-factor IC/quintile analysis and multi-factor composite models."""
 import datetime
 import logging
 from math import isfinite, isnan
@@ -10,7 +10,8 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
-from irp.factors.compute import run_backtest
+from irp.features.composite import PRESETS
+from irp.factors.compute import run_backtest, run_composite_backtest
 from irp.ui.factor_meta import FACTOR_OPTIONS
 from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
 
@@ -28,6 +29,20 @@ _VARIANT_OPTIONS  = [{'label': 'Annual', 'value': 'A'}, {'label': 'Quarterly', '
 _FREQ_OPTIONS     = [{'label': 'Quarterly', 'value': 'Q'}, {'label': 'Annual', 'value': 'A'}]
 _CURRENT_YEAR     = datetime.date.today().year
 _QUINTILE_COLOURS = ['#e05252', '#e09952', MUTED, '#52a0e0', ACCENT]
+
+_PRESET_OPTIONS = [
+    {'label': 'Value  (P/E + P/B + P/S + FCF Yield)',           'value': 'value'},
+    {'label': 'Quality  (ROE + ROIC + Gross Margin + FCF Margin)', 'value': 'quality'},
+    {'label': 'Momentum  (12-1m + 6-1m)',                         'value': 'momentum'},
+    {'label': 'Composite  (Value + Quality + Momentum)',           'value': 'composite'},
+]
+_NORMALIZE_OPTIONS = [
+    {'label': 'Z-score',   'value': 'zscore'},
+    {'label': 'Rank norm', 'value': 'rank'},
+]
+
+_HIDE = {'display': 'none'}
+_SHOW = {'display': 'flex', 'flexWrap': 'wrap', 'gap': '12px', 'alignItems': 'flex-end'}
 
 
 def _empty_figure(message: str = 'No data') -> go.Figure:
@@ -77,22 +92,73 @@ layout = html.Div(className='backtest-page', children=[
     html.H2('Factor Backtest', className='page-title'),
     html.P(
         'Spearman IC series and equal-weight quintile cumulative returns '
-        'for any factor over a historical window.',
+        'for any factor or composite model over a historical window.',
         className='page-subtitle',
+    ),
+
+    # Mode selector tabs
+    dcc.Tabs(
+        id='bt-mode-tabs',
+        value='single',
+        className='bt-mode-tabs',
+        children=[
+            dcc.Tab(label='Single Factor', value='single',
+                    className='bt-mode-tab', selected_className='bt-mode-tab--active'),
+            dcc.Tab(label='Composite Model', value='composite',
+                    className='bt-mode-tab', selected_className='bt-mode-tab--active'),
+        ],
     ),
 
     # Controls
     html.Div(className='bt-controls', children=[
-        html.Div(className='bt-control-group', children=[
-            html.Label('Factor', className='control-label'),
-            dcc.Dropdown(
-                id='bt-factor',
-                options=FACTOR_OPTIONS,
-                value='pe',
-                clearable=False,
-                className='control-dropdown',
+
+        # Single-factor controls (visible by default)
+        html.Div(id='bt-single-controls', style=_SHOW, children=[
+            html.Div(className='bt-control-group', children=[
+                html.Label('Factor', className='control-label'),
+                dcc.Dropdown(
+                    id='bt-factor',
+                    options=FACTOR_OPTIONS,
+                    value='pe',
+                    clearable=False,
+                    className='control-dropdown',
+                ),
+            ]),
+        ]),
+
+        # Composite controls (hidden by default)
+        html.Div(id='bt-composite-controls', style=_HIDE, children=[
+            html.Div(className='bt-control-group', children=[
+                html.Label('Preset', className='control-label'),
+                dcc.Dropdown(
+                    id='bt-preset',
+                    options=_PRESET_OPTIONS,
+                    value='composite',
+                    clearable=False,
+                    className='control-dropdown',
+                    style={'minWidth': '260px'},
+                ),
+            ]),
+            html.Div(className='bt-control-group', children=[
+                html.Label('Normalize', className='control-label'),
+                dcc.Dropdown(
+                    id='bt-normalize',
+                    options=_NORMALIZE_OPTIONS,
+                    value='zscore',
+                    clearable=False,
+                    className='control-dropdown',
+                ),
+            ]),
+            dcc.Checklist(
+                id='bt-sector-neutral',
+                options=[{'label': ' Sector neutral', 'value': 'sector_neutral'}],
+                value=[],
+                labelClassName='check-item',
+                style={'alignSelf': 'flex-end', 'paddingBottom': '6px'},
             ),
         ]),
+
+        # Shared controls
         html.Div(className='bt-control-group', children=[
             html.Label('Horizon', className='control-label'),
             dcc.Dropdown(
@@ -165,31 +231,60 @@ layout = html.Div(className='backtest-page', children=[
 # ── Callbacks ─────────────────────────────────────────────────────────
 
 @callback(
+    Output('bt-single-controls',    'style'),
+    Output('bt-composite-controls', 'style'),
+    Input('bt-mode-tabs', 'value'),
+)
+def toggle_mode_controls(mode: str) -> tuple[dict, dict]:
+    if mode == 'composite':
+        return _HIDE, _SHOW
+    return _SHOW, _HIDE
+
+
+@callback(
     Output('backtest-store', 'data'),
     Input('bt-run-btn', 'n_clicks'),
-    State('bt-factor',     'value'),
-    State('bt-horizon',    'value'),
-    State('bt-variant',    'value'),
-    State('bt-freq',       'value'),
-    State('bt-start-year', 'value'),
-    State('bt-end-year',   'value'),
+    State('bt-mode-tabs',      'value'),
+    State('bt-factor',         'value'),
+    State('bt-preset',         'value'),
+    State('bt-normalize',      'value'),
+    State('bt-sector-neutral', 'value'),
+    State('bt-horizon',        'value'),
+    State('bt-variant',        'value'),
+    State('bt-freq',           'value'),
+    State('bt-start-year',     'value'),
+    State('bt-end-year',       'value'),
     prevent_initial_call=True,
 )
-def run_bt(n_clicks, factor, horizon, variant, freq, start_yr, end_yr):
-    if not n_clicks or not factor or not horizon:
+def run_bt(n_clicks, mode, factor, preset, normalize, sector_neutral,
+           horizon, variant, freq, start_yr, end_yr):
+    if not n_clicks or not horizon:
         raise PreventUpdate
     try:
         start_yr = int(start_yr or 2015)
         end_yr   = int(end_yr   or _CURRENT_YEAR)
-        result = run_backtest(
-            factor=factor,
+        kwargs = dict(
             horizon_days=int(horizon),
             start_date=datetime.date(start_yr, 1, 1),
             end_date=datetime.date(end_yr, 12, 31),
             variant=variant or 'A',
             freq=freq or 'Q',
         )
-        # Serialise pandas objects → JSON-safe
+        if mode == 'composite':
+            weights = PRESETS.get(preset or 'composite', PRESETS['composite'])
+            result = run_composite_backtest(
+                weights=weights,
+                normalize=normalize or 'zscore',
+                use_sector_neutral=bool(sector_neutral),
+                **kwargs,
+            )
+            label = f'{preset or "composite"} ({normalize or "zscore"}{"  sector-neutral" if sector_neutral else ""})'
+        else:
+            if not factor:
+                raise PreventUpdate
+            result = run_backtest(factor=factor, **kwargs)
+            label = factor
+
         ic = result['ic_series']
         ic_records = [
             {'date': d.isoformat(), 'ic': None if isnan(v) else float(v)}
@@ -206,23 +301,25 @@ def run_bt(n_clicks, factor, horizon, variant, freq, start_yr, end_yr):
                     v = getattr(row, col, None)
                     rec[col] = None if v is None or (isinstance(v, float) and isnan(v)) else float(v)
                 qcr_records.append(rec)
-        mean_ic = result['mean_ic']
+        mean_ic  = result['mean_ic']
         ic_tstat = result['ic_tstat']
         return {
             'ic': ic_records,
             'qcr': qcr_records,
-            'mean_ic': None if isnan(mean_ic) else float(mean_ic),
+            'mean_ic':  None if isnan(mean_ic)  else float(mean_ic),
             'ic_tstat': None if isnan(ic_tstat) else float(ic_tstat),
             'n_dates': result['n_dates'],
-            'factor': factor,
+            'label': label,
         }
+    except PreventUpdate:
+        raise
     except Exception as exc:
         logger.exception(f'Backtest error: {exc}')
         return {'error': str(exc)}
 
 
 @callback(
-    Output('bt-summary', 'children'),
+    Output('bt-summary',  'children'),
     Output('bt-ic-chart', 'figure'),
     Input('backtest-store', 'data'),
 )
@@ -236,7 +333,6 @@ def render_ic(data):
     ic_tstat   = data.get('ic_tstat')
     n_dates    = data.get('n_dates', 0)
 
-    # Summary chips
     def _fmt_ic(v):
         return f'{v:.3f}' if v is not None and isfinite(v) else 'N/A'
 
@@ -249,7 +345,7 @@ def render_ic(data):
     if not ic_records:
         return chips, _empty_figure('No IC data')
 
-    dates  = [r['date'] for r in ic_records]
+    dates   = [r['date'] for r in ic_records]
     ic_vals = [r['ic'] for r in ic_records]
     colours = [ACCENT if (v is not None and v >= 0) else '#e05252' for v in ic_vals]
 
