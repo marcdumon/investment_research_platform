@@ -277,6 +277,56 @@ data/
 
 ---
 
+## Factors Analysis
+
+`irp.factors` computes quant valuation and profitability factors from the stored fundamentals and prices. All results are point-in-time (PIT) safe: only data with `Report Date <= as_of_date` and prices with `Date <= as_of_date` are used.
+
+### Factors computed
+
+| Group | Factors |
+|---|---|
+| Valuation | mktcap, pe, pb, ps, ev_ebitda, ev_ebit, ev_sales, fcf_yield |
+| Profitability | gross_margin, op_margin, net_margin, roe, roa, roic, fcf_margin |
+
+### Usage
+
+```python
+import datetime
+from irp.factors import cross_section, ticker_factor_history
+
+# Full-universe cross-section at a point in time
+df = cross_section(datetime.date(2024, 12, 31), variant='A')
+
+# Factor history for one ticker (one row per annual filing)
+df = ticker_factor_history('AAPL', variant='A')
+
+# Quarterly: uses TTM (sum of last 4 quarters) for income/cashflow
+df = cross_section(datetime.date(2024, 12, 31), variant='Q')
+```
+
+`variant='Q'` routes income and cashflow through TTM aggregation (sum of last 4 quarterly filings) so ratios reflect a full year of activity rather than a single quarter. Balance sheet uses the most-recent quarter.
+
+**Known limitation**: PIT cutoff uses `Report Date` (fiscal period end), not SimFin's `Publish Date` (when the filing was public). This introduces up to ~30–60 day lookahead bias when backtesting.
+
+---
+
+## Dash UI
+
+```bash
+uv run python -m irp.ui
+```
+
+Multi-page web UI. Pages:
+
+| Route | Description |
+|---|---|
+| `/` | Home |
+| `/ingest` | Data ingestion controls + live log |
+| `/ticker` | Per-ticker fundamentals, prices, corporate actions |
+| `/factors` | Cross-section factor ranking + single-ticker factor history |
+
+---
+
 ## Development
 
 ```bash

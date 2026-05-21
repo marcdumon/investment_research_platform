@@ -397,6 +397,25 @@ a { color: var(--accent); }
 }
 
 
+/* === Factors page === */
+.factors-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.factors-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
 /* === No data placeholder === */
 .no-data {
   text-align: center;

@@ -1,6 +1,6 @@
 # Quant Research Overview
 
-_2026-05-19_
+_2026-05-21_
 
 ---
 
@@ -42,7 +42,7 @@ Compute per ticker per period, joining latest prices:
 | Interest coverage | EBIT / Interest Expense | Solvency buffer |
 | Current ratio | Current Assets / Current Liabilities | Liquidity |
 
-**Critical**: price × fundamentals join must use `Publish Date` (when results were public), not `Report Date` (fiscal period end). Naively joining on Report Date introduces ~30–60 day look-ahead bias.
+**PIT alignment**: `irp.factors` uses SimFin's `Report Date` (fiscal period end) as the PIT cutoff. This is conservative but introduces up to ~30–60 day lookahead bias: results are typically published 4–8 weeks after the fiscal period ends. The stricter approach — use SimFin's `Publish Date` (when the filing was actually made public) — would eliminate this. Relevant for backtesting; less critical for exploratory cross-sections.
 
 ---
 
@@ -129,7 +129,7 @@ With bonds + currencies + indices:
 Universe includes current tickers. Delisted companies (failures) likely missing or sparse in fundamentals. Inflates backtested returns if uncorrected. Mitigant: use catalog coverage to filter to tickers with continuous data over the test window.
 
 **2. Point-in-time joins**
-Use `Publish Date` from SimFin, not `Report Date`. This is the single biggest source of backtest inflation.
+`irp.factors` uses `Report Date` (fiscal period end) as the PIT cutoff — introduces ~30–60 day lookahead bias. To eliminate it, switch to SimFin's `Publish Date` in `pit_latest` / `pit_ttm`.
 
 **3. Ratio explosion**
 When EBITDA, earnings, or book value is negative / near-zero, ratios blow up. Fix: winsorize at 1st/99th percentile, or exclude negatives from valuation sorts (but still include in growth/quality sorts).
@@ -148,13 +148,15 @@ Filter `violations == 0` rows before ratio computation, or flag affected tickers
 
 ## Suggested experiment sequence
 
-| Phase | Experiment | Risk |
+| Phase | Experiment | Status |
 |---|---|---|
-| 1 | Cross-sectional snapshot — compute all ratios for latest period, explore distribution by sector | Low — no time series, no backtest |
-| 2 | Piotroski F-Score — implement 9 signals, rank universe today | Low — well-defined inputs |
-| 3 | Momentum backtest — 12-1 month, quarterly rebalance, equal-weight, top vs bottom quintile | Medium — prices only, minimal fundamental risk |
-| 4 | Value factor backtest — P/E or EV/EBITDA quintile sort, requires correct point-in-time joins | Higher — join logic must be airtight |
-| 5 | Factor combination — Value + Quality + Momentum composite score | Highest complexity |
+| 1 | Cross-sectional snapshot — compute all ratios for latest period, explore distribution by sector | **Done** — `irp.factors.cross_section()` + `/factors` UI |
+| 2 | Piotroski F-Score — implement 9 signals, rank universe today | Pending |
+| 3 | Momentum backtest — 12-1 month, quarterly rebalance, equal-weight, top vs bottom quintile | Pending |
+| 4 | Value factor backtest — P/E or EV/EBITDA quintile sort, requires correct point-in-time joins | Pending |
+| 5 | Factor combination — Value + Quality + Momentum composite score | Pending |
+
+Phase 1 implementation: `irp.factors` module (15 factors across valuation + profitability), PIT-safe via `pit_latest` / `pit_ttm`. Quarterly variant uses TTM aggregation. Exposed in the Dash UI at `/factors` (cross-section ranking + per-ticker factor history).
 
 ---
 

@@ -1,0 +1,97 @@
+"""Valuation factors: mktcap, pe, pb, ps, ev_ebitda, ev_ebit, ev_sales, fcf_yield.
+
+All inputs must already be PIT-aligned (one row per ticker). No DB access.
+"""
+import pandas as pd
+
+from irp.factors._cols import (
+    TICKER,
+    REVENUE,
+    OPERATING_INCOME,
+    NET_INCOME,
+    TOTAL_EQUITY,
+    CASH_AND_ST_INVESTMENTS,
+    SHORT_TERM_DEBT,
+    LONG_TERM_DEBT,
+    SHARES_DILUTED_BAL,
+    CFO,
+    CFI,
+    DA,
+    PRICE_CLOSE,
+)
+
+
+def _safe_div(num: pd.Series, denom: pd.Series) -> pd.Series:
+    return (num / denom).replace([float('inf'), float('-inf')], pd.NA)
+
+
+def compute_valuation(
+    income: pd.DataFrame,
+    balance: pd.DataFrame,
+    cashflow: pd.DataFrame,
+    prices: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compute valuation factors for each ticker.
+
+    Parameters
+    ----------
+    income, balance, cashflow : PIT-aligned, one row per Ticker.
+    prices : PIT-aligned price frame with columns [Ticker, Close].
+
+    Returns
+    -------
+    DataFrame indexed by Ticker with columns:
+        mktcap    - market capitalisation (price * diluted shares)
+        pe        - P / E  (mktcap / net_income)
+        pb        - P / B  (mktcap / total_equity)
+        ps        - P / S  (mktcap / revenue)
+        ev_ebitda - EV / EBITDA
+        ev_ebit   - EV / Operating Income
+        ev_sales  - EV / Revenue
+        fcf_yield - (CFO + CFI) / mktcap
+
+    Tickers absent from any input frame are dropped (inner-join semantics).
+    Negative ratios (e.g. pb with negative equity) are kept; only inf -> NA.
+    """
+    w = (
+        prices[[TICKER, PRICE_CLOSE]]
+        .merge(
+            income[[TICKER, NET_INCOME, REVENUE, OPERATING_INCOME]],
+            on=TICKER, how='inner',
+        )
+        .merge(
+            balance[[TICKER, TOTAL_EQUITY, CASH_AND_ST_INVESTMENTS,
+                     SHORT_TERM_DEBT, LONG_TERM_DEBT, SHARES_DILUTED_BAL]],
+            on=TICKER, how='inner',
+        )
+        .merge(
+            cashflow[[TICKER, CFO, CFI, DA]],
+            on=TICKER, how='inner',
+        )
+        .set_index(TICKER)
+    )
+
+    w['mktcap'] = w[PRICE_CLOSE] * w[SHARES_DILUTED_BAL]
+
+    st_debt = w[SHORT_TERM_DEBT].fillna(0)
+    lt_debt = w[LONG_TERM_DEBT].fillna(0)
+    cash    = w[CASH_AND_ST_INVESTMENTS].fillna(0)
+    w['net_debt'] = st_debt + lt_debt - cash
+    w['ev']       = w['mktcap'] + w['net_debt']
+
+    # DA from cashflow is positive; no abs() needed.
+    w['ebit']   = w[OPERATING_INCOME]
+    w['ebitda'] = w[OPERATING_INCOME] + w[DA].fillna(0)
+    w['fcf']    = w[CFO] + w[CFI]
+
+    out = pd.DataFrame(index=w.index)
+    out['mktcap']    = w['mktcap']
+    out['pe']        = _safe_div(w['mktcap'], w[NET_INCOME])
+    out['pb']        = _safe_div(w['mktcap'], w[TOTAL_EQUITY])
+    out['ps']        = _safe_div(w['mktcap'], w[REVENUE])
+    out['ev_ebitda'] = _safe_div(w['ev'], w['ebitda'])
+    out['ev_ebit']   = _safe_div(w['ev'], w['ebit'])
+    out['ev_sales']  = _safe_div(w['ev'], w[REVENUE])
+    out['fcf_yield'] = _safe_div(w['fcf'], w['mktcap'])
+    out.index.name   = TICKER
+    return out
