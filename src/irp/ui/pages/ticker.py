@@ -154,7 +154,7 @@ layout = html.Div(
                             selected_className='ticker-tab--active',
                             children=[
                                 _period_radio('income'),
-                                dcc.Loading(html.Div(id='income-table')),
+                                dcc.Loading(html.Div(id='income-table', style={'overflowX': 'auto'})),
                                 html.P(id='income-note', className='stmt-note'),
                             ],
                         ),
@@ -165,7 +165,7 @@ layout = html.Div(
                             selected_className='ticker-tab--active',
                             children=[
                                 _period_radio('balance'),
-                                dcc.Loading(html.Div(id='balance-table')),
+                                dcc.Loading(html.Div(id='balance-table', style={'overflowX': 'auto'})),
                                 html.P(id='balance-note', className='stmt-note'),
                             ],
                         ),
@@ -176,7 +176,7 @@ layout = html.Div(
                             selected_className='ticker-tab--active',
                             children=[
                                 _period_radio('cashflow'),
-                                dcc.Loading(html.Div(id='cashflow-table')),
+                                dcc.Loading(html.Div(id='cashflow-table', style={'overflowX': 'auto'})),
                                 html.P(id='cashflow-note', className='stmt-note'),
                             ],
                         ),
@@ -235,18 +235,34 @@ def load_ticker_data(_: Any) -> tuple[Any, ...]:
     return merged.to_dict('records'), markets, sectors, industries
 
 
+def _ticker_sort_key(opt: dict, q: str) -> tuple:
+    ticker = opt['value'].upper()
+    name = opt['label'].upper()
+    if ticker == q:
+        return (0, ticker)
+    if ticker.startswith(q):
+        return (1, ticker)
+    if q in ticker:
+        return (2, ticker)
+    if name.startswith(q):
+        return (3, name)
+    return (4, name)
+
+
 @callback(
     Output('ticker-select', 'options'),
     Input('all-tickers-store', 'data'),
     Input('filter-market', 'value'),
     Input('filter-sector', 'value'),
     Input('filter-industry', 'value'),
+    Input('ticker-select', 'search_value'),
 )
 def filter_tickers(
     all_data: list[dict] | None,
     market: str | None,
     sector: str | None,
     industry: str | None,
+    search: str | None,
 ) -> list[dict]:
     if not all_data:
         return []
@@ -260,9 +276,18 @@ def filter_tickers(
 
     options = []
     for _, row in df.iterrows():
+        ticker = row['Ticker']
+        if not isinstance(ticker, str):
+            continue
         name = row.get('Company Name')
-        label = f'{row["Ticker"]}  {name}' if name and pd.notna(name) else row['Ticker']
-        options.append({'label': label, 'value': row['Ticker']})
+        label = f'{ticker}  {name}' if name and pd.notna(name) else ticker
+        options.append({'label': label, 'value': ticker})
+
+    if search:
+        q = search.upper()
+        options = [o for o in options if q in o['value'].upper() or q in o['label'].upper()]
+        options.sort(key=lambda o: _ticker_sort_key(o, q))
+
     return options
 
 
@@ -424,7 +449,9 @@ def render_prices(
             price_at_div = (
                 df.set_index('_date_str')[close_col].reindex(div_dates).values
             )
-            div_col = 'Dividends' if 'Dividends' in divs.columns else divs.columns[-1]
+            div_col = next((c for c in ('Amount', 'Dividends') if c in divs.columns), None)
+        if div_col is None:
+            div_col = 'Amount'
             div_traces.append(
                 go.Scatter(
                     x=div_dates,
@@ -604,11 +631,22 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
     if df.empty:
         return html.P('No data available.', className='no-data'), ''
 
-    # Filter columns to requested variant
+    # Filter columns to requested variant, sorted newest first
+    def _period_key(p: str) -> tuple:
+        p = str(p)
+        try:
+            year = int(p[:4])
+            q = int(p[5]) if len(p) > 5 and p[4] == 'Q' else 0
+        except (ValueError, IndexError):
+            return (0, 0)
+        return (year, q)
+
     if period == 'A':
-        cols = [c for c in df.columns if str(c).endswith('FY')]
+        cols = sorted([c for c in df.columns if str(c).endswith('FY')],
+                      key=_period_key, reverse=True)
     else:
-        cols = [c for c in df.columns if not str(c).endswith('FY')]
+        cols = sorted([c for c in df.columns if not str(c).endswith('FY')],
+                      key=_period_key, reverse=True)
 
     df = df[cols] if cols else df
     if df.empty or df.columns.empty:
@@ -665,12 +703,14 @@ def render_actions(ticker: str | None) -> Any:
         div_block = html.P('No dividend history.', className='no-data')
     else:
         divs = divs.sort_values('Date', ascending=False).reset_index(drop=True)
-        div_col = 'Dividends' if 'Dividends' in divs.columns else divs.columns[-1]
+        div_col = next((c for c in ('Amount', 'Dividends') if c in divs.columns), None)
+        if div_col is None:
+            div_col = 'Amount'
         rows = [
             html.Tr(
                 [
                     html.Td(str(row['Date'])[:10], className='stmt-td stmt-td--item'),
-                    html.Td(f'{float(row[div_col]):,.4f}', className='stmt-td'),
+                    html.Td(f'{float(row[div_col]):,.4f}' if row[div_col] is not None and str(row[div_col]) not in ('', 'nan') else '—', className='stmt-td'),
                 ]
             )
             for _, row in divs.iterrows()

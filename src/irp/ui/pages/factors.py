@@ -1,5 +1,6 @@
 """Factors page: cross-section screening + per-ticker factor history."""
 import datetime
+import logging
 from math import isfinite
 from typing import Any
 
@@ -15,6 +16,8 @@ from irp.query.simfin import companies as _companies
 from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')
+
+logger = logging.getLogger(__name__)
 
 # ── Factor metadata ───────────────────────────────────────────────────
 
@@ -104,7 +107,7 @@ def _chart_layout(**extra: Any) -> go.Layout:
 layout = html.Div(
     className='factors-page',
     children=[
-        dcc.Store(id='factors-init', data=None),
+        dcc.Store(id='factors-init', data=1),
         dcc.Store(id='companies-store'),
         dcc.Store(id='xsection-store'),
         dcc.Store(id='factor-history-store'),
@@ -236,8 +239,13 @@ layout = html.Div(
 )
 def load_options(_: Any) -> tuple[Any, list, list, list]:
     """Populate filter dropdowns from SimFin companies table on page load."""
-    df = _companies()
+    try:
+        df = _companies()
+    except Exception:
+        logger.exception('load_options: _companies() failed')
+        return None, [], [], []
     if df.empty:
+        logger.warning('load_options: companies() returned empty DataFrame')
         return None, [], [], []
 
     sectors = sorted(df['Sector'].dropna().unique())
@@ -249,14 +257,16 @@ def load_options(_: Any) -> tuple[Any, list, list, list]:
         {'label': f'{r["Ticker"]} – {r["Company Name"]}', 'value': r['Ticker']}
         for _, r in df.sort_values('Ticker').iterrows()
     ]
-    return df.to_dict('records'), sector_opts, market_opts, ticker_opts
+    slim = df[['Ticker', 'Company Name', 'Sector', 'Market']].fillna('')
+    logger.info(f'load_options: {len(sector_opts)} sectors, {len(market_opts)} markets, {len(ticker_opts)} tickers')
+    return slim.to_dict('records'), sector_opts, market_opts, ticker_opts
 
 
 @callback(
     Output('xsection-store', 'data'),
     Input('xsection-date', 'date'),
     Input('xsection-variant', 'value'),
-    State('companies-store', 'data'),
+    Input('companies-store', 'data'),
 )
 def compute_xsection(
     as_of_str: str | None,
@@ -264,7 +274,7 @@ def compute_xsection(
     companies_data: list | None,
 ) -> Any:
     """Compute full cross-section and join with company metadata."""
-    if not as_of_str:
+    if not as_of_str or not companies_data:
         raise PreventUpdate
     as_of = datetime.date.fromisoformat(as_of_str[:10])
     df = cross_section(as_of, variant)  # type: ignore[arg-type]
@@ -298,9 +308,9 @@ def render_ranking_chart(
 
     df = pd.DataFrame(data)
     if sector:
-        df = df[df.get('Sector', pd.Series(dtype=str)) == sector]
+        df = df[df['Sector'] == sector]
     if market:
-        df = df[df.get('Market', pd.Series(dtype=str)) == market]
+        df = df[df['Market'] == market]
     if factor not in df.columns:
         return _empty_figure()
 
@@ -357,10 +367,10 @@ def render_xsection_table(
         return html.P('No data — select a date and wait for computation.', className='no-data')
 
     df = pd.DataFrame(data)
-    if sector:
-        df = df[df.get('Sector', pd.Series(dtype=str)) == sector]
-    if market:
-        df = df[df.get('Market', pd.Series(dtype=str)) == market]
+    if sector and 'Sector' in df.columns:
+        df = df[df['Sector'] == sector]
+    if market and 'Market' in df.columns:
+        df = df[df['Market'] == market]
     if df.empty:
         return html.P('No data for selected filters.', className='no-data')
 

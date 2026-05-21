@@ -161,6 +161,8 @@ def start_run(
     irp_logger.addHandler(handler)
 
     def _run() -> None:
+        from irp.core.db import db_close
+        db_close()
         try:
             _run_pipeline(
                 providers or [],
@@ -171,7 +173,11 @@ def start_run(
                 bool(force),
             )
         except Exception as exc:
-            logger.error(f'Pipeline error: {exc}')
+            import traceback
+            logger.error(f'Pipeline error: {exc}\n{traceback.format_exc()}')
+            logger.error('Pipeline finished with errors.')
+        else:
+            logger.info('Pipeline finished.')
         finally:
             irp_logger.removeHandler(handler)
             lh._run_done = True
@@ -205,7 +211,7 @@ def cancel_run(n_clicks: int) -> tuple[Any, ...]:
 def poll_log(n_intervals: int) -> tuple[Any, ...]:
     lines = [
         html.Div(text, style={'color': _LEVEL_COLORS.get(level, '#d4d4d4'), 'lineHeight': '1.6'})
-        for level, text in lh._log_buffer
+        for level, text in list(lh._log_buffer)
     ]
     active = lh._run_active
     done = lh._run_done
@@ -249,12 +255,16 @@ def _run_pipeline(
             logger.warning(f'feed {feed!r} not supported by {name}, skipping')
             continue
         if 'fetch' in steps and not cancelled():
+            logger.info(f'fetch ({feed})')
             src.fetch_bulk() if feed == 'bulk' else src.update()
         if 'transform' in steps and not cancelled():
+            logger.info(f'transform ({feed})')
             src.transform(feed)
         if 'store' in steps and not cancelled():
+            logger.info(f'store ({feed})')
             src.store(feed)
         if 'cleanup' in steps and not cancelled():
+            logger.info('cleanup')
             src.cleanup()
 
     if 'seed-universe' in steps and not cancelled():
