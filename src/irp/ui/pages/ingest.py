@@ -80,6 +80,8 @@ layout = html.Div(className='ingest-page', children=[
                 {'label': ' seed-universe', 'value': 'seed-universe'},
                 {'label': ' universe', 'value': 'universe'},
                 {'label': ' catalog', 'value': 'catalog'},
+                {'label': ' clear factor cache', 'value': 'clear-factor-cache'},
+                {'label': ' rebuild factor cache', 'value': 'rebuild-factor-cache'},
             ],
             value=['fetch', 'transform', 'store'],
             labelClassName='check-item',
@@ -284,3 +286,19 @@ def _run_pipeline(
         logger.info('-- catalog --')
         n = _refresh_catalog()
         logger.info(f'{n:,} tickers')
+
+    if 'clear-factor-cache' in steps and not cancelled():
+        from irp.factors.cache import clear as _clear_cache
+        logger.info('-- clear factor cache --')
+        n = _clear_cache()
+        logger.info(f'factor cache cleared ({n} snapshot{"s" if n != 1 else ""} removed)')
+
+    if 'rebuild-factor-cache' in steps and not cancelled():
+        from irp.factors.cache import precompute_all
+        import datetime as _dt
+        logger.info('-- rebuild factor cache --')
+        n = precompute_all(
+            start_date=_dt.date(2010, 1, 1),
+            end_date=_dt.date.today(),
+        )
+        logger.info(f'factor cache rebuilt ({n} new snapshot{"s" if n != 1 else ""} written)')
