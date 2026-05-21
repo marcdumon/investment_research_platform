@@ -1,20 +1,46 @@
-"""Process-wide read-only DuckDB connection singleton for notebooks and data accessors.
+"""Per-thread read-only DuckDB connections for notebooks and data accessors.
 
-Sources (yahoo, stooq, simfin) open their own short-lived read-write connections
-via `duckdb.connect(config.database.path)` for writes. They must NOT call `db()`
-before calling `store()` in the same process — DuckDB rejects mixing read-only
-and read-write connections within one process. `_load_target_tickers()` in
-yahoo.py uses a local connection for this reason.
+Each thread gets its own connection so concurrent Dash callbacks don't
+share state. A global registry lets db_close() drain all connections
+before a write connection is opened (DuckDB requires exclusive access
+for writes).
+
+Sources open their own short-lived read-write connections via
+duckdb.connect(config.database.path). Call db_close() before any store
+step in the same process.
 """
+import threading
+
 import duckdb
 
 from irp.core.config import config
 
-_con: duckdb.DuckDBPyConnection | None = None
+_local = threading.local()
+_registry_lock = threading.Lock()
+_registry: set[duckdb.DuckDBPyConnection] = set()
 
 
 def db() -> duckdb.DuckDBPyConnection:
-    global _con
-    if _con is None:
-        _con = duckdb.connect(str(config.database.path), read_only=True)
-    return _con
+    con = getattr(_local, 'con', None)
+    if con is None:
+        con = duckdb.connect(str(config.database.path), read_only=True)
+        _local.con = con
+        with _registry_lock:
+            _registry.add(con)
+    return con
+
+
+def db_close() -> None:
+    """Close all read-only connections so a write connection can be opened.
+
+    Increments a generation counter so threads that try to use a stale
+    connection will reopen on next db() call.
+    """
+    with _registry_lock:
+        for con in list(_registry):
+            try:
+                con.close()
+            except Exception:
+                pass
+        _registry.clear()
+    _local.con = None
