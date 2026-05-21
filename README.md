@@ -279,7 +279,7 @@ data/
 
 ## Factors Analysis
 
-`irp.factors` computes quant valuation and profitability factors from the stored fundamentals and prices. All results are point-in-time (PIT) safe: only data with `Report Date <= as_of_date` and prices with `Date <= as_of_date` are used.
+`irp.factors` computes quant factors from stored fundamentals and prices. All results are point-in-time (PIT) safe: only data with `Report Date <= as_of_date` and prices with `Date <= as_of_date` are used.
 
 ### Factors computed
 
@@ -287,12 +287,25 @@ data/
 |---|---|
 | Valuation | mktcap, pe, pb, ps, ev_ebitda, ev_ebit, ev_sales, fcf_yield |
 | Profitability | gross_margin, op_margin, net_margin, roe, roa, roic, fcf_margin |
+| Momentum | mom_12_1, mom_6_1, vol_21d, ma200_ratio |
+
+**Momentum factor definitions:**
+
+| Column | Formula | Notes |
+|---|---|---|
+| `mom_12_1` | log(P₋₃₀d / P₋₃₆₅d) | 12m return skipping last month (Jegadeesh-Titman) |
+| `mom_6_1` | log(P₋₃₀d / P₋₁₈₂d) | 6m return skipping last month |
+| `vol_21d` | std(daily log returns, 21d) × √252 | Annualised realised volatility |
+| `ma200_ratio` | P₀ / SMA(Close, 200d) | Price relative to 200-day moving average |
+
+Calendar-day lags approximate trading-day lags. Skipping the last month avoids short-term reversal bias.
 
 ### Usage
 
 ```python
 import datetime
 from irp.factors import cross_section, ticker_factor_history
+from irp.factors.compute import run_backtest
 
 # Full-universe cross-section at a point in time
 df = cross_section(datetime.date(2024, 12, 31), variant='A')
@@ -302,11 +315,28 @@ df = ticker_factor_history('AAPL', variant='A')
 
 # Quarterly: uses TTM (sum of last 4 quarters) for income/cashflow
 df = cross_section(datetime.date(2024, 12, 31), variant='Q')
+
+# Factor backtest: IC series + quintile cumulative returns
+result = run_backtest('pe', horizon_days=252,
+                      start_date=datetime.date(2018, 1, 1),
+                      end_date=datetime.date(2024, 12, 31),
+                      variant='A', freq='Q')
+print(result['mean_ic'], result['ic_tstat'])
+print(result['quintile_cumret'].tail())
 ```
 
 `variant='Q'` routes income and cashflow through TTM aggregation (sum of last 4 quarterly filings) so ratios reflect a full year of activity rather than a single quarter. Balance sheet uses the most-recent quarter.
 
 **Known limitation**: PIT cutoff uses `Report Date` (fiscal period end), not SimFin's `Publish Date` (when the filing was public). This introduces up to ~30–60 day lookahead bias when backtesting.
+
+### Backtest module
+
+`irp.factors.backtest` contains two pure functions (no DB access):
+
+- `compute_forward_returns(prices, rebalance_dates, horizon_days)` — log return per ticker per date.
+- `compute_backtest(factor, cross_sections, fwd_returns)` — Spearman IC series and equal-weight quintile cumulative returns.
+
+`run_backtest()` in `compute.py` is the DB-layer entry point: fetches raw data once, generates rebalance dates, and calls both pure functions.
 
 ---
 
@@ -324,6 +354,7 @@ Multi-page web UI. Pages:
 | `/ingest` | Data ingestion controls + live log |
 | `/ticker` | Per-ticker fundamentals, prices, corporate actions |
 | `/factors` | Cross-section factor ranking + single-ticker factor history |
+| `/backtest` | Factor IC series and equal-weight quintile cumulative returns |
 
 ---
 

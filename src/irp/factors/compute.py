@@ -10,6 +10,7 @@ import pandas as pd
 
 from irp.factors._cols import REPORT_DATE, TICKER
 from irp.factors._pit import pit_latest, pit_price, pit_ttm
+from irp.factors.backtest import compute_backtest, compute_forward_returns
 from irp.factors.momentum import compute_momentum
 from irp.factors.profitability import compute_profitability
 from irp.factors.valuation import compute_valuation
@@ -17,12 +18,42 @@ from irp.query.simfin import fundamentals
 from irp.query.yahoo import prices as yahoo_prices
 
 
+def _cross_section_from_raw(
+    raw_income: pd.DataFrame,
+    raw_balance: pd.DataFrame,
+    raw_cashflow: pd.DataFrame,
+    raw_prices: pd.DataFrame,
+    as_of_date: datetime.date,
+    variant: Literal['A', 'Q'],
+) -> pd.DataFrame:
+    """PIT cross-section from pre-fetched raw DataFrames (no DB access)."""
+    if variant == 'Q':
+        income   = pit_ttm(raw_income,   as_of_date)
+        cashflow = pit_ttm(raw_cashflow, as_of_date)
+    else:
+        income   = pit_latest(raw_income,   as_of_date)
+        cashflow = pit_latest(raw_cashflow, as_of_date)
+    balance = pit_latest(raw_balance,  as_of_date)
+    prices  = pit_price(raw_prices,    as_of_date)
+
+    if income.empty or balance.empty or cashflow.empty or prices.empty:
+        return pd.DataFrame()
+
+    val  = compute_valuation(income, balance, cashflow, prices)
+    prof = compute_profitability(income, balance, cashflow)
+    mom  = compute_momentum(raw_prices, as_of_date)
+
+    result = val.join(prof, how='outer').join(mom, how='outer')
+    result.index.name = TICKER
+    return result
+
+
 def cross_section(
     as_of_date: datetime.date,
     variant: Literal['A', 'Q'] = 'A',
     tickers: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Compute all phase-1 factors cross-sectionally at a point in time.
+    """Compute all factors cross-sectionally at a point in time.
 
     Only fundamental data with Report Date <= as_of_date and prices with
     Date <= as_of_date are used, making results PIT-safe.
@@ -35,39 +66,16 @@ def cross_section(
 
     Returns
     -------
-    DataFrame indexed by Ticker. Columns from valuation:
-        mktcap, pe, pb, ps, ev_ebitda, ev_ebit, ev_sales, fcf_yield
-    Columns from profitability:
-        gross_margin, op_margin, net_margin, roe, roa, roic, fcf_margin
-
-    Tickers without sufficient data in any required statement, or without
-    a price on or before as_of_date, are silently absent (inner-join
-    semantics propagate through the merge chain in each factor module).
+    DataFrame indexed by Ticker with valuation, profitability, and momentum columns.
+    Tickers without sufficient data are silently absent.
     """
     raw_income   = fundamentals(tickers, 'income',   variant)
     raw_balance  = fundamentals(tickers, 'balance',  variant)
     raw_cashflow = fundamentals(tickers, 'cashflow', variant)
     raw_prices   = yahoo_prices(tickers, end=as_of_date.isoformat())
-
-    if variant == 'Q':
-        income   = pit_ttm(raw_income,   as_of_date)
-        cashflow = pit_ttm(raw_cashflow, as_of_date)
-    else:
-        income   = pit_latest(raw_income,   as_of_date)
-        cashflow = pit_latest(raw_cashflow, as_of_date)
-    balance  = pit_latest(raw_balance,  as_of_date)
-    prices   = pit_price(raw_prices,    as_of_date)
-
-    if income.empty or balance.empty or cashflow.empty or prices.empty:
-        return pd.DataFrame()
-
-    val  = compute_valuation(income, balance, cashflow, prices)
-    prof = compute_profitability(income, balance, cashflow)
-    mom  = compute_momentum(raw_prices, as_of_date)
-
-    result = val.join(prof, how='outer').join(mom, how='outer')
-    result.index.name = TICKER
-    return result
+    return _cross_section_from_raw(
+        raw_income, raw_balance, raw_cashflow, raw_prices, as_of_date, variant
+    )
 
 
 def ticker_factor_history(
@@ -109,3 +117,53 @@ def ticker_factor_history(
         rows.append(row)
 
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def run_backtest(
+    factor: str,
+    horizon_days: int,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    variant: Literal['A', 'Q'] = 'A',
+    tickers: list[str] | None = None,
+    freq: Literal['Q', 'A'] = 'Q',
+) -> dict:
+    """IC series and quintile cumulative returns for one factor over a date range.
+
+    Fetches raw data once; loops over rebalance dates in memory.
+
+    Parameters
+    ----------
+    factor       : Factor column name (e.g. 'pe', 'mom_12_1').
+    horizon_days : Forward-return horizon in calendar days (e.g. 252 = ~12m).
+    start_date   : First rebalance date (inclusive).
+    end_date     : Last rebalance date (inclusive).
+    variant      : 'A' annual or 'Q' quarterly fundamentals.
+    tickers      : Subset of tickers; None = full universe.
+    freq         : 'Q' quarterly or 'A' annual rebalance schedule.
+
+    Returns
+    -------
+    dict from compute_backtest(): ic_series, quintile_cumret, mean_ic, ic_tstat, n_dates.
+    """
+    raw_income   = fundamentals(tickers, 'income',   variant)
+    raw_balance  = fundamentals(tickers, 'balance',  variant)
+    raw_cashflow = fundamentals(tickers, 'cashflow', variant)
+    raw_prices   = yahoo_prices(tickers)
+
+    pd_freq = 'QE' if freq == 'Q' else 'YE'
+    rebalance_dates = [
+        ts.date()
+        for ts in pd.date_range(start_date, end_date, freq=pd_freq)
+    ]
+
+    cross_sections: dict[datetime.date, pd.DataFrame] = {}
+    for d in rebalance_dates:
+        xs = _cross_section_from_raw(
+            raw_income, raw_balance, raw_cashflow, raw_prices, d, variant
+        )
+        if not xs.empty:
+            cross_sections[d] = xs
+
+    fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
+    return compute_backtest(factor, cross_sections, fwd_returns)

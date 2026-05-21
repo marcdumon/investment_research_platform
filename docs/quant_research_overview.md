@@ -1,6 +1,6 @@
 # Quant Research Overview
 
-_2026-05-21_
+_2026-05-21 (updated)_
 
 ---
 
@@ -150,13 +150,17 @@ Filter `violations == 0` rows before ratio computation, or flag affected tickers
 
 | Phase | Experiment | Status |
 |---|---|---|
-| 1 | Cross-sectional snapshot — compute all ratios for latest period, explore distribution by sector | **Done** — `irp.factors.cross_section()` + `/factors` UI |
-| 2 | Piotroski F-Score — implement 9 signals, rank universe today | Pending |
-| 3 | Momentum backtest — 12-1 month, quarterly rebalance, equal-weight, top vs bottom quintile | Pending |
-| 4 | Value factor backtest — P/E or EV/EBITDA quintile sort, requires correct point-in-time joins | Pending |
+| 1 | Cross-sectional snapshot — compute all ratios for latest period, explore distribution by sector | **Done** |
+| 2 | Momentum factors — 12-1m, 6-1m log returns, realised vol, MA200 ratio | **Done** |
+| 3 | Factor backtest — Spearman IC series + quintile cumulative returns for any factor | **Done** |
+| 4 | Piotroski F-Score — 9 accounting signals (profitability, leverage, efficiency), score 0–9 | Pending |
 | 5 | Factor combination — Value + Quality + Momentum composite score | Pending |
 
-Phase 1 implementation: `irp.factors` module (15 factors across valuation + profitability), PIT-safe via `pit_latest` / `pit_ttm`. Quarterly variant uses TTM aggregation. Exposed in the Dash UI at `/factors` (cross-section ranking + per-ticker factor history).
+**Phase 1** (`irp.factors`): 15 factors across valuation + profitability. PIT-safe via `pit_latest` / `pit_ttm`. Quarterly variant uses TTM aggregation. UI: `/factors` (cross-section ranking + per-ticker factor history).
+
+**Phase 2** (`irp.factors.momentum`): 4 price-based factors — `mom_12_1`, `mom_6_1`, `vol_21d`, `ma200_ratio`. Calendar-day lags (30/182/365 days). Skips last month to avoid short-term reversal bias. Integrated into `cross_section()` and `ticker_factor_history()`.
+
+**Phase 3** (`irp.factors.backtest`): `run_backtest(factor, horizon_days, start_date, end_date)` fetches raw data once, iterates over quarterly (or annual) rebalance dates in memory, computes Spearman IC per date and equal-weight quintile cumulative log returns. Exposed in the Dash UI at `/backtest`.
 
 ---
 
