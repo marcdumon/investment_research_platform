@@ -129,6 +129,8 @@ def precompute_all(
     if variants is None:
         variants = ['A', 'Q']
 
+    import time
+
     rebalance_dates = [ts.date() for ts in pd.date_range(start_date, end_date, freq=freq)]
     n_total = len(rebalance_dates)
     written = 0
@@ -155,5 +157,6 @@ def precompute_all(
                 store(d, variant, xs)
                 written += 1
             logger.info(f'variant {variant}: {i}/{len(todo)}  {d}  ({len(xs)} tickers)')
+            time.sleep(0.05)  # yield to Dash server thread between snapshots
         logger.info(f'variant {variant}: done — {written} new snapshots written')
     return written
