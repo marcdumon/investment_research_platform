@@ -13,12 +13,15 @@ Layout:
                 meta.parquet            # mean_ic, ic_tstat, n_dates (one row)
 """
 import datetime
+import logging
 import shutil
 from pathlib import Path
 
 import pandas as pd
 
 from irp.core.config import config
+
+logger = logging.getLogger(__name__)
 
 _CACHE_ROOT: Path = Path(config.data.root_dir) / 'factor_cache'
 
@@ -127,19 +130,30 @@ def precompute_all(
         variants = ['A', 'Q']
 
     rebalance_dates = [ts.date() for ts in pd.date_range(start_date, end_date, freq=freq)]
+    n_total = len(rebalance_dates)
     written = 0
     for variant in variants:
+        cached_count = sum(1 for d in rebalance_dates if _path(d, variant).exists())
+        todo = [d for d in rebalance_dates if force or not _path(d, variant).exists()]
+        logger.info(
+            f'variant {variant}: {cached_count}/{n_total} already cached, '
+            f'{len(todo)} to compute'
+        )
+        if not todo:
+            continue
+        logger.info(f'variant {variant}: fetching raw data...')
         raw_income   = fundamentals(None, 'income',   variant)
         raw_balance  = fundamentals(None, 'balance',  variant)
         raw_cashflow = fundamentals(None, 'cashflow', variant)
         raw_prices   = yahoo_prices(None)
-        for d in rebalance_dates:
-            if not force and _path(d, variant).exists():
-                continue
+        logger.info(f'variant {variant}: raw data ready, computing snapshots...')
+        for i, d in enumerate(todo, 1):
             xs = _cross_section_from_raw(
                 raw_income, raw_balance, raw_cashflow, raw_prices, d, variant
             )
             if not xs.empty:
                 store(d, variant, xs)
                 written += 1
+            logger.info(f'variant {variant}: {i}/{len(todo)}  {d}  ({len(xs)} tickers)')
+        logger.info(f'variant {variant}: done — {written} new snapshots written')
     return written
