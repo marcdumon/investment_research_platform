@@ -338,6 +338,23 @@ print(result['quintile_cumret'].tail())
 
 `run_backtest()` in `compute.py` is the DB-layer entry point: fetches raw data once, generates rebalance dates, and calls both pure functions.
 
+### Factor cache
+
+`irp.factors.cache` persists full-universe cross-section snapshots to disk so they don't need recomputation on every app run. One parquet file per `(as_of_date, variant)` pair under `data/factor_cache/`.
+
+Historical PIT snapshots are immutable, so the cache is valid until the underlying raw data changes. After a fresh ingest, clear the cache via the `/ingest` page (tick **clear factor cache**) or rebuild it in one shot (tick **rebuild factor cache**).
+
+```python
+from irp.factors import cache
+
+cache.clear()                    # delete all cached snapshots
+cache.clear('A')                 # delete only annual snapshots
+n = cache.precompute_all(        # populate cache for a date range
+    start_date=datetime.date(2010, 1, 1),
+    end_date=datetime.date.today(),
+)
+```
+
 ---
 
 ## Dash UI

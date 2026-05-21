@@ -8,6 +8,7 @@ from typing import Literal
 
 import pandas as pd
 
+from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE, TICKER
 from irp.factors._pit import pit_latest, pit_price, pit_ttm
 from irp.factors.backtest import compute_backtest, compute_forward_returns
@@ -69,13 +70,21 @@ def cross_section(
     DataFrame indexed by Ticker with valuation, profitability, and momentum columns.
     Tickers without sufficient data are silently absent.
     """
+    if tickers is None:
+        cached = _cache.load(as_of_date, variant)
+        if cached is not None:
+            return cached
+
     raw_income   = fundamentals(tickers, 'income',   variant)
     raw_balance  = fundamentals(tickers, 'balance',  variant)
     raw_cashflow = fundamentals(tickers, 'cashflow', variant)
     raw_prices   = yahoo_prices(tickers, end=as_of_date.isoformat())
-    return _cross_section_from_raw(
+    result = _cross_section_from_raw(
         raw_income, raw_balance, raw_cashflow, raw_prices, as_of_date, variant
     )
+    if tickers is None and not result.empty:
+        _cache.store(as_of_date, variant, result)
+    return result
 
 
 def ticker_factor_history(
@@ -146,6 +155,11 @@ def run_backtest(
     -------
     dict from compute_backtest(): ic_series, quintile_cumret, mean_ic, ic_tstat, n_dates.
     """
+    if tickers is None:
+        cached = _cache.load_backtest(factor, horizon_days, variant, freq, start_date, end_date)
+        if cached is not None:
+            return cached
+
     raw_income   = fundamentals(tickers, 'income',   variant)
     raw_balance  = fundamentals(tickers, 'balance',  variant)
     raw_cashflow = fundamentals(tickers, 'cashflow', variant)
@@ -158,12 +172,29 @@ def run_backtest(
     ]
 
     cross_sections: dict[datetime.date, pd.DataFrame] = {}
-    for d in rebalance_dates:
+    dates_to_compute = []
+
+    if tickers is None:
+        for d in rebalance_dates:
+            cached = _cache.load(d, variant)
+            if cached is not None:
+                cross_sections[d] = cached
+            else:
+                dates_to_compute.append(d)
+    else:
+        dates_to_compute = list(rebalance_dates)
+
+    for d in dates_to_compute:
         xs = _cross_section_from_raw(
             raw_income, raw_balance, raw_cashflow, raw_prices, d, variant
         )
         if not xs.empty:
             cross_sections[d] = xs
+            if tickers is None:
+                _cache.store(d, variant, xs)
 
     fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
-    return compute_backtest(factor, cross_sections, fwd_returns)
+    result = compute_backtest(factor, cross_sections, fwd_returns)
+    if tickers is None and result['n_dates'] > 0:
+        _cache.store_backtest(factor, horizon_days, variant, freq, start_date, end_date, result)
+    return result
