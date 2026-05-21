@@ -36,11 +36,16 @@ FACTOR_LABELS: dict[str, str] = {
     'roa':          'ROA',
     'roic':         'ROIC',
     'fcf_margin':   'FCF Margin',
+    'mom_12_1':    '12-1m Mom',
+    'mom_6_1':     '6-1m Mom',
+    'vol_21d':     'Vol 21d',
+    'ma200_ratio': 'MA200 Ratio',
 }
 
 _PCT_FACTORS = {
     'fcf_yield', 'gross_margin', 'op_margin', 'net_margin',
     'roe', 'roa', 'roic', 'fcf_margin',
+    'mom_12_1', 'mom_6_1', 'vol_21d',
 }
 
 FACTOR_OPTIONS = [{'label': v, 'value': k} for k, v in FACTOR_LABELS.items()]

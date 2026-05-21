@@ -10,6 +10,7 @@ import pandas as pd
 
 from irp.factors._cols import REPORT_DATE, TICKER
 from irp.factors._pit import pit_latest, pit_price, pit_ttm
+from irp.factors.momentum import compute_momentum
 from irp.factors.profitability import compute_profitability
 from irp.factors.valuation import compute_valuation
 from irp.query.simfin import fundamentals
@@ -62,8 +63,9 @@ def cross_section(
 
     val  = compute_valuation(income, balance, cashflow, prices)
     prof = compute_profitability(income, balance, cashflow)
+    mom  = compute_momentum(raw_prices, as_of_date)
 
-    result = val.join(prof, how='outer')
+    result = val.join(prof, how='outer').join(mom, how='outer')
     result.index.name = TICKER
     return result
 
@@ -100,6 +102,8 @@ def ticker_factor_history(
             continue
         row = compute_valuation(inc, bal, cf, px).join(
             compute_profitability(inc, bal, cf), how='outer',
+        ).join(
+            compute_momentum(raw_prices, as_of), how='outer',
         ).reset_index()
         row[REPORT_DATE] = pd.Timestamp(rd)
         rows.append(row)
