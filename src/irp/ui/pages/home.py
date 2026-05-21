@@ -23,10 +23,11 @@ def _card(icon: str, title: str, desc: str, href: str, available: bool = True) -
 
 layout = html.Div(className='home-page', children=[
     html.H1('Investment Research Platform', className='home-title'),
-    html.P('Data pipelines, fundamentals analysis, anomaly detection.', className='home-subtitle'),
+    html.P('Data pipelines, fundamentals analysis, factor research.', className='home-subtitle'),
     html.Div(className='card-grid', children=[
-        _card('\U0001f4e5', 'Ingest', 'Run SimFin, Stooq and Yahoo data pipelines.', '/ingest'),
-        _card('\U0001f4ca', 'Analysis', 'Anomaly detection and fundamentals review.', '/analysis', available=False),
-        _card('\U0001f9ea', 'Research', 'Custom signals and factor models.', '/research', available=False),
+        _card('\U0001f4e5', 'Ingest',   'Run SimFin, Stooq and Yahoo data pipelines.', '/ingest'),
+        _card('\U0001f50d', 'Ticker',   'Per-ticker fundamentals, prices, and actions.', '/ticker'),
+        _card('\U0001f4ca', 'Factors',  'Cross-section screening and factor history.', '/factors'),
+        _card('\U0001f4c8', 'Backtest', 'IC and quintile return analysis for any factor.', '/backtest'),
     ]),
 ])

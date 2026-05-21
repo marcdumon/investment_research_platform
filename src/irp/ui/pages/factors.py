@@ -13,43 +13,14 @@ from dash.exceptions import PreventUpdate
 
 from irp.factors import cross_section, ticker_factor_history
 from irp.query.simfin import companies as _companies
+from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')
 
 logger = logging.getLogger(__name__)
 
-# ── Factor metadata ───────────────────────────────────────────────────
-
-FACTOR_LABELS: dict[str, str] = {
-    'pe':           'P/E',
-    'pb':           'P/B',
-    'ps':           'P/S',
-    'ev_ebitda':    'EV/EBITDA',
-    'ev_ebit':      'EV/EBIT',
-    'ev_sales':     'EV/Sales',
-    'fcf_yield':    'FCF Yield',
-    'gross_margin': 'Gross Margin',
-    'op_margin':    'Op. Margin',
-    'net_margin':   'Net Margin',
-    'roe':          'ROE',
-    'roa':          'ROA',
-    'roic':         'ROIC',
-    'fcf_margin':   'FCF Margin',
-    'mom_12_1':    '12-1m Mom',
-    'mom_6_1':     '6-1m Mom',
-    'vol_21d':     'Vol 21d',
-    'ma200_ratio': 'MA200 Ratio',
-}
-
-_PCT_FACTORS = {
-    'fcf_yield', 'gross_margin', 'op_margin', 'net_margin',
-    'roe', 'roa', 'roic', 'fcf_margin',
-    'mom_12_1', 'mom_6_1', 'vol_21d',
-}
-
-FACTOR_OPTIONS = [{'label': v, 'value': k} for k, v in FACTOR_LABELS.items()]
-
+_PCT_FACTORS = PCT_FACTORS
 _ALL_FACTOR_COLS = list(FACTOR_LABELS.keys())
 _VARIANT_OPTIONS = [{'label': ' Annual', 'value': 'A'}, {'label': ' Quarterly', 'value': 'Q'}]
 _TOP_OPTIONS = [
