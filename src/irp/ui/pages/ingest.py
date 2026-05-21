@@ -104,7 +104,7 @@ layout = html.Div(className='ingest-page', children=[
 
     # Log panel
     html.Div(className='ingest-log', children=[
-        dcc.Interval(id='log-interval', interval=1000),
+        dcc.Interval(id='log-interval', interval=5000),
         html.Div(id='log-output', children=[]),
     ]),
 ])
