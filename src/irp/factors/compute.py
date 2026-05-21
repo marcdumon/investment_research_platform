@@ -131,6 +131,96 @@ def ticker_factor_history(
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
+def run_composite_backtest(
+    weights: dict[str, float],
+    horizon_days: int,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    variant: Literal['A', 'Q'] = 'A',
+    freq: Literal['Q', 'A'] = 'Q',
+    normalize: str = 'zscore',
+    use_sector_neutral: bool = False,
+) -> dict:
+    """IC series and quintile cumulative returns for a multi-factor composite.
+
+    Builds a composite signal at each rebalance date from cached cross-sections,
+    then evaluates it with the same IC / quintile methodology as run_backtest().
+
+    Parameters
+    ----------
+    weights           : Factor column → weight mapping (e.g. {'pe': -1, 'roe': 1}).
+                        Use PRESETS from irp.features.composite for predefined models.
+    horizon_days      : Forward-return horizon in calendar days.
+    start_date        : First rebalance date (inclusive).
+    end_date          : Last rebalance date (inclusive).
+    variant           : 'A' annual or 'Q' quarterly fundamentals.
+    freq              : 'Q' quarterly or 'A' annual rebalance schedule.
+    normalize         : 'zscore' | 'rank' | 'none'. Applied per factor before weighting.
+    use_sector_neutral: Demean within sector before normalizing.
+
+    Returns
+    -------
+    Same dict as compute_backtest(): ic_series, quintile_cumret, mean_ic, ic_tstat, n_dates.
+    Results are NOT cached (composite weights can vary freely).
+    """
+    from irp.features.composite import build_composite
+
+    pd_freq = 'QE' if freq == 'Q' else 'YE'
+    rebalance_dates = [ts.date() for ts in pd.date_range(start_date, end_date, freq=pd_freq)]
+
+    cross_sections_raw: dict[datetime.date, pd.DataFrame] = {}
+    dates_to_compute = []
+    for d in rebalance_dates:
+        cached = _cache.load(d, variant)
+        if cached is not None:
+            cross_sections_raw[d] = cached
+        else:
+            dates_to_compute.append(d)
+
+    raw_prices = yahoo_prices(None)
+
+    if dates_to_compute:
+        logger.info(f'composite backtest: computing {len(dates_to_compute)} uncached cross-sections')
+        raw_income   = fundamentals(None, 'income',   variant)
+        raw_balance  = fundamentals(None, 'balance',  variant)
+        raw_cashflow = fundamentals(None, 'cashflow', variant)
+        for d in dates_to_compute:
+            xs = _cross_section_from_raw(raw_income, raw_balance, raw_cashflow, raw_prices, d, variant)
+            if not xs.empty:
+                cross_sections_raw[d] = xs
+                _cache.store(d, variant, xs)
+
+    sector = None
+    if use_sector_neutral:
+        from irp.query.simfin import sector_map
+        sector = sector_map()
+
+    cross_sections_enriched: dict[datetime.date, pd.DataFrame] = {}
+    for d, xs in cross_sections_raw.items():
+        score = build_composite(xs, weights, normalize=normalize, sector=sector)
+        xs_out = xs.copy()
+        xs_out['__composite__'] = score
+        cross_sections_enriched[d] = xs_out
+
+    if not cross_sections_enriched:
+        return {
+            'ic_series': pd.Series(dtype=float),
+            'quintile_cumret': pd.DataFrame(),
+            'mean_ic': float('nan'),
+            'ic_tstat': float('nan'),
+            'n_dates': 0,
+        }
+
+    fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
+    logger.info('composite backtest: computing IC series and quintile returns...')
+    result = compute_backtest('__composite__', cross_sections_enriched, fwd_returns)
+    logger.info(
+        f'composite backtest: done — mean IC={result["mean_ic"]:.3f}, '
+        f't-stat={result["ic_tstat"]:.2f}, n={result["n_dates"]} dates'
+    )
+    return result
+
+
 def run_backtest(
     factor: str,
     horizon_days: int,

@@ -117,6 +117,12 @@ def companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
     return db().execute(f'SELECT * FROM companies {where} ORDER BY Ticker', params).df()
 
 
+def sector_map(tickers: list[str] | None = None) -> pd.Series:
+    """Sector per ticker. Returns pd.Series indexed by Ticker, values are sector strings."""
+    df = companies(tickers)
+    return df.set_index('Ticker')['Sector'].dropna()
+
+
 def universe(
     sector: str | None = None,
     industry: str | None = None,
