@@ -357,6 +357,80 @@ n = cache.precompute_all(        # populate cache for a date range
 
 ---
 
+## Features and Models
+
+### Composite signals (`irp.features`)
+
+`irp.features.normalize` provides cross-sectional normalization applied per snapshot date:
+
+```python
+from irp.features.normalize import zscore, rank_norm, sector_neutral
+
+norm = zscore(df)                              # z-score, clipped at ±3
+norm = rank_norm(df)                           # rank scaled to [-0.5, +0.5]
+norm = sector_neutral(df, sector_series)       # demean within sector, then z-score
+```
+
+`irp.features.composite` combines normalized factors into a single composite score:
+
+```python
+from irp.features.composite import build_composite, PRESETS
+
+# Use a predefined preset
+score = build_composite(df, PRESETS['composite'])          # pe + pb + roe + roic + mom
+score = build_composite(df, PRESETS['value'])
+score = build_composite(df, PRESETS['quality'])
+score = build_composite(df, PRESETS['momentum'])
+
+# Custom weights (negative = short that signal)
+score = build_composite(df, {'pe': -1, 'roe': 1, 'mom_12_1': 0.5}, normalize='rank')
+
+# Sector-neutral composite
+from irp.query.simfin import sector_map
+score = build_composite(df, PRESETS['composite'], sector=sector_map())
+```
+
+Backtest a composite over a historical window:
+
+```python
+from irp.factors.compute import run_composite_backtest
+
+result = run_composite_backtest(
+    weights=PRESETS['composite'],
+    horizon_days=252,
+    start_date=datetime.date(2015, 1, 1),
+    end_date=datetime.date(2024, 12, 31),
+    normalize='zscore',
+    use_sector_neutral=False,
+)
+print(result['mean_ic'], result['ic_tstat'])
+```
+
+### ML models (`irp.models`)
+
+`irp.models.ml` runs walk-forward backtests using any sklearn-compatible estimator. Returns the same dict as `compute_backtest()` so results are directly comparable to single-factor and composite backtests.
+
+```python
+from sklearn.linear_model import Ridge
+from irp.models.ml import run_ml_backtest
+from irp.factors import cache
+from irp.factors.backtest import compute_forward_returns
+from irp.query.yahoo import prices as yahoo_prices
+import pandas as pd, datetime
+
+dates = [ts.date() for ts in pd.date_range('2015-01-01', '2024-12-31', freq='QE')]
+xs = {d: cache.load(d, 'A') for d in dates}
+xs = {d: v for d, v in xs.items() if v is not None}
+
+prices = yahoo_prices(None)
+fwd = compute_forward_returns(prices, list(xs.keys()), 252)
+
+result = run_ml_backtest(Ridge(alpha=1.0), xs, fwd, n_train=20, n_test=4)
+print(result['mean_ic'], result['ic_tstat'])
+```
+
+---
+
 ## Dash UI
 
 ```bash
@@ -371,7 +445,7 @@ Multi-page web UI. Pages:
 | `/ingest` | Data ingestion controls + live log |
 | `/ticker` | Per-ticker fundamentals, prices, corporate actions |
 | `/factors` | Cross-section factor ranking + single-ticker factor history |
-| `/backtest` | Factor IC series and equal-weight quintile cumulative returns |
+| `/backtest` | Single-factor IC/quintile backtest + Composite Model tab |
 
 ---
 
