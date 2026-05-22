@@ -111,12 +111,29 @@ def _stat_chip(label: str, value: str) -> html.Div:
     )
 
 
+def _filtered_tickers(market: str, sector: str | None) -> list[str] | None:
+    if not market and not sector:
+        return None
+    from irp.query.simfin import companies as _companies
+    from irp.query.universe import universe
+    u = universe()[['Ticker', 'Market']]
+    c = _companies()[['Ticker', 'Sector']]
+    df = u.merge(c, on='Ticker', how='left')
+    if market:
+        df = df[df['Market'].str.lower() == market.lower()]
+    if sector:
+        df = df[df['Sector'] == sector]
+    tickers = df['Ticker'].tolist()
+    return tickers if tickers else None
+
+
 # ── Layout ────────────────────────────────────────────────────────────
 
 layout = html.Div(
     className='backtest-page',
     children=[
         dcc.Store(id='backtest-store'),
+        dcc.Store(id='backtest-init', data=1),
         html.H2('Factor Backtest', className='page-title'),
         html.P(
             'Spearman IC series and equal-weight quintile cumulative returns '
@@ -207,6 +224,37 @@ layout = html.Div(
                             value=[],
                             labelClassName='check-item',
                             style={'alignSelf': 'flex-end', 'paddingBottom': '6px'},
+                        ),
+                    ],
+                ),
+                # Universe filters (shared)
+                html.Div(
+                    className='bt-control-group',
+                    children=[
+                        html.Label('Market', className='control-label'),
+                        dcc.Dropdown(
+                            id='bt-market',
+                            options=[
+                                {'label': 'All markets', 'value': ''},
+                                {'label': 'US', 'value': 'us'},
+                                {'label': 'DE', 'value': 'de'},
+                            ],
+                            value='',
+                            clearable=False,
+                            className='control-dropdown',
+                        ),
+                    ],
+                ),
+                html.Div(
+                    className='bt-control-group',
+                    children=[
+                        html.Label('Sector', className='control-label'),
+                        dcc.Dropdown(
+                            id='bt-sector',
+                            placeholder='All sectors',
+                            clearable=True,
+                            className='control-dropdown',
+                            style={'minWidth': '170px'},
                         ),
                     ],
                 ),
@@ -322,6 +370,16 @@ layout = html.Div(
 
 
 @callback(
+    Output('bt-sector', 'options'),
+    Input('backtest-init', 'data'),
+)
+def load_sector_options(_: Any) -> list[dict]:
+    from irp.query.simfin import sector_map
+    sectors = sorted(sector_map().dropna().unique().tolist())
+    return [{'label': s, 'value': s} for s in sectors]
+
+
+@callback(
     Output('bt-single-controls', 'style'),
     Output('bt-composite-controls', 'style'),
     Input('bt-mode-tabs', 'value'),
@@ -345,6 +403,8 @@ def toggle_mode_controls(mode: str) -> tuple[dict, dict]:
     State('bt-freq', 'value'),
     State('bt-start-year', 'value'),
     State('bt-end-year', 'value'),
+    State('bt-market', 'value'),
+    State('bt-sector', 'value'),
     running=[
         (Output('bt-run-btn', 'disabled'), True, False),
         (Output('bt-run-btn', 'children'), 'Running...', 'Run'),
@@ -363,12 +423,15 @@ def run_bt(
     freq,
     start_yr,
     end_yr,
+    market,
+    sector,
 ):
     if not n_clicks or not horizon:
         raise PreventUpdate
     try:
         start_yr = int(start_yr or 2015)
         end_yr = int(end_yr or _CURRENT_YEAR)
+        tickers = _filtered_tickers(market or '', sector)
 
         if mode == 'composite':
             weights = PRESETS.get(preset or 'composite', PRESETS['composite'])
@@ -381,6 +444,7 @@ def run_bt(
                 weights=weights,
                 normalize=normalize or 'zscore',
                 use_sector_neutral=bool(sector_neutral),
+                tickers=tickers,
             )
             label = f'{preset or "composite"} ({normalize or "zscore"}{"  sector-neutral" if sector_neutral else ""})'
         else:
@@ -393,6 +457,7 @@ def run_bt(
                 end_date=datetime.date(end_yr, 12, 31),
                 variant=variant or 'A',
                 freq=freq or 'Q',
+                tickers=tickers,
             )
             label = factor
 

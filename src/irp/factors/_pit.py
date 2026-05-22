@@ -7,24 +7,34 @@ import datetime
 
 import pandas as pd
 
-from irp.factors._cols import TICKER, REPORT_DATE, PRICE_TICKER, PRICE_DATE, PRICE_CLOSE
+from irp.factors._cols import TICKER, REPORT_DATE, PUBLISH_DATE, PRICE_TICKER, PRICE_DATE, PRICE_CLOSE
+
+
+def _eff_date(df: pd.DataFrame) -> pd.Series:
+    """Effective public date: Publish Date if present, else Report Date + 60 days."""
+    rd = pd.to_datetime(df[REPORT_DATE])
+    if PUBLISH_DATE in df.columns:
+        pub = pd.to_datetime(df[PUBLISH_DATE])
+        return pub.where(pub.notna(), rd + pd.Timedelta(days=60))
+    return rd + pd.Timedelta(days=60)
 
 
 def pit_latest(
     fundamentals: pd.DataFrame,
     as_of_date: datetime.date,
 ) -> pd.DataFrame:
-    """Return the most-recent fundamental row per ticker where Report Date <= as_of_date.
+    """Return the most-recent fundamental row per ticker with effective public date <= as_of_date.
 
-    Uses the actual SimFin Report Date (filing date) so no fixed lag heuristic is needed.
-    Tickers whose every row has Report Date > as_of_date are absent from the result.
+    Effective date = Publish Date when available, else Report Date + 60 days (conservative
+    fallback for rows where the filing date is unknown). This eliminates lookahead bias
+    from using Report Date alone.
 
     Returns a reset-index DataFrame with the same columns as the input.
     """
     df = fundamentals.copy()
     df[REPORT_DATE] = pd.to_datetime(df[REPORT_DATE])
     cutoff = pd.Timestamp(as_of_date)
-    eligible = df.loc[df[REPORT_DATE] <= cutoff]
+    eligible = df.loc[_eff_date(df) <= cutoff]
     if eligible.empty:
         return df.iloc[0:0].reset_index(drop=True)
     idx = eligible.groupby(TICKER)[REPORT_DATE].idxmax()
@@ -48,7 +58,7 @@ def pit_ttm(
     df = fundamentals.copy()
     df[REPORT_DATE] = pd.to_datetime(df[REPORT_DATE])
     cutoff = pd.Timestamp(as_of_date)
-    eligible = df.loc[df[REPORT_DATE] <= cutoff]
+    eligible = df.loc[_eff_date(df) <= cutoff]
     if eligible.empty:
         return df.iloc[0:0].reset_index(drop=True)
 

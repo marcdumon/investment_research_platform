@@ -9,6 +9,7 @@ FISCAL_YEAR   = 'Fiscal Year'
 FISCAL_PERIOD = 'Fiscal Period'
 PERIOD        = 'Period'
 REPORT_DATE   = 'Report Date'
+PUBLISH_DATE  = 'Publish Date'
 
 # ── Income statement ──────────────────────────────────────────────────
 REVENUE          = 'Revenue'
