@@ -10,8 +10,6 @@ from typing import Literal
 import pandas as pd
 
 from irp.factors import cache as _cache
-
-logger = logging.getLogger(__name__)
 from irp.factors._cols import REPORT_DATE, TICKER
 from irp.factors._pit import pit_latest, pit_price, pit_ttm
 from irp.factors.backtest import compute_backtest, compute_forward_returns
@@ -20,6 +18,8 @@ from irp.factors.profitability import compute_profitability
 from irp.factors.valuation import compute_valuation
 from irp.query.simfin import fundamentals
 from irp.query.yahoo import prices as yahoo_prices
+
+logger = logging.getLogger(__name__)
 
 
 def _cross_section_from_raw(

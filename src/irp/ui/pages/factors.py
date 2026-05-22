@@ -1,4 +1,5 @@
 """Factors page: cross-section screening + per-ticker factor history."""
+
 import datetime
 import logging
 from math import isfinite
@@ -7,7 +8,7 @@ from typing import Any
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
@@ -22,11 +23,14 @@ logger = logging.getLogger(__name__)
 
 _PCT_FACTORS = PCT_FACTORS
 _ALL_FACTOR_COLS = list(FACTOR_LABELS.keys())
-_VARIANT_OPTIONS = [{'label': ' Annual', 'value': 'A'}, {'label': ' Quarterly', 'value': 'Q'}]
+_VARIANT_OPTIONS = [
+    {'label': ' Annual', 'value': 'A'},
+    {'label': ' Quarterly', 'value': 'Q'},
+]
 _TOP_OPTIONS = [
-    {'label': 'Top 50',  'value': 50},
+    {'label': 'Top 50', 'value': 50},
     {'label': 'Top 100', 'value': 100},
-    {'label': 'All',     'value': 0},
+    {'label': 'All', 'value': 0},
 ]
 
 _DEFAULT_DATE = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
@@ -52,10 +56,17 @@ def _empty_figure(message: str = 'No data') -> go.Figure:
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        annotations=[dict(
-            text=message, x=0.5, y=0.5, xref='paper', yref='paper',
-            showarrow=False, font=dict(color=MUTED, size=13),
-        )],
+        annotations=[
+            dict(
+                text=message,
+                x=0.5,
+                y=0.5,
+                xref='paper',
+                yref='paper',
+                showarrow=False,
+                font=dict(color=MUTED, size=13),
+            )
+        ],
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
         margin=dict(l=0, r=0, t=8, b=0),
@@ -70,10 +81,20 @@ def _chart_layout(**extra: Any) -> go.Layout:
         font=dict(color=MUTED, size=11),
         margin=dict(l=0, r=0, t=24, b=0),
         hovermode='closest',
-        xaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=11),
-                   zeroline=False, showline=True),
-        yaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=11),
-                   zeroline=True, showline=False),
+        xaxis=dict(
+            gridcolor=GRID,
+            linecolor=GRID,
+            tickfont=dict(color=MUTED, size=11),
+            zeroline=False,
+            showline=True,
+        ),
+        yaxis=dict(
+            gridcolor=GRID,
+            linecolor=GRID,
+            tickfont=dict(color=MUTED, size=11),
+            zeroline=True,
+            showline=False,
+        ),
         **extra,
     )
 
@@ -87,13 +108,11 @@ layout = html.Div(
         dcc.Store(id='companies-store'),
         dcc.Store(id='xsection-store'),
         dcc.Store(id='factor-history-store'),
-
         dcc.Tabs(
             id='factors-tabs',
             value='tab-screening',
             className='ticker-tabs',
             children=[
-
                 # ── Tab 1: Screening ──────────────────────────────────
                 dcc.Tab(
                     label='Screening',
@@ -101,61 +120,68 @@ layout = html.Div(
                     className='ticker-tab',
                     selected_className='ticker-tab--active',
                     children=[
-                        html.Div(className='factors-controls', children=[
-                            dcc.DatePickerSingle(
-                                id='xsection-date',
-                                date=_DEFAULT_DATE,
-                                display_format='YYYY-MM-DD',
-                                style={'fontSize': '13px'},
-                            ),
-                            dcc.RadioItems(
-                                id='xsection-variant',
-                                options=_VARIANT_OPTIONS,
-                                value='A',
-                                inline=True,
-                                labelClassName='check-item',
-                            ),
-                            dcc.Dropdown(
-                                id='xsection-sector',
-                                placeholder='All sectors',
-                                clearable=True,
-                                className='filter-dropdown',
-                                style={'minWidth': '160px'},
-                            ),
-                            dcc.Dropdown(
-                                id='xsection-market',
-                                placeholder='All markets',
-                                clearable=True,
-                                className='filter-dropdown',
-                                style={'minWidth': '130px'},
-                            ),
-                            dcc.Dropdown(
-                                id='ranking-factor',
-                                options=FACTOR_OPTIONS,
-                                value='pe',
-                                clearable=False,
-                                className='filter-dropdown',
-                                style={'minWidth': '130px'},
-                            ),
-                            dcc.RadioItems(
-                                id='ranking-top',
-                                options=_TOP_OPTIONS,
-                                value=50,
-                                inline=True,
-                                labelClassName='check-item',
-                            ),
-                        ]),
-                        html.Div(className='tab-content', children=[
-                            dcc.Loading(dcc.Graph(
-                                id='ranking-chart',
-                                config={'displayModeBar': False},
-                                style={'height': '420px'},
-                            )),
-                            dcc.Loading(html.Div(id='xsection-table-container')),
-                        ]),
+                        html.Div(
+                            className='factors-controls',
+                            children=[
+                                dcc.DatePickerSingle(
+                                    id='xsection-date',
+                                    date=_DEFAULT_DATE,
+                                    display_format='YYYY-MM-DD',
+                                    style={'fontSize': '13px'},
+                                ),
+                                dcc.RadioItems(
+                                    id='xsection-variant',
+                                    options=_VARIANT_OPTIONS,
+                                    value='A',
+                                    inline=True,
+                                    labelClassName='check-item',
+                                ),
+                                dcc.Dropdown(
+                                    id='xsection-sector',
+                                    placeholder='All sectors',
+                                    clearable=True,
+                                    className='filter-dropdown',
+                                    style={'minWidth': '160px'},
+                                ),
+                                dcc.Dropdown(
+                                    id='xsection-market',
+                                    placeholder='All markets',
+                                    clearable=True,
+                                    className='filter-dropdown',
+                                    style={'minWidth': '130px'},
+                                ),
+                                dcc.Dropdown(
+                                    id='ranking-factor',
+                                    options=FACTOR_OPTIONS,
+                                    value='pe',
+                                    clearable=False,
+                                    className='filter-dropdown',
+                                    style={'minWidth': '130px'},
+                                ),
+                                dcc.RadioItems(
+                                    id='ranking-top',
+                                    options=_TOP_OPTIONS,
+                                    value=50,
+                                    inline=True,
+                                    labelClassName='check-item',
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            className='tab-content',
+                            children=[
+                                dcc.Loading(
+                                    dcc.Graph(
+                                        id='ranking-chart',
+                                        config={'displayModeBar': False},
+                                        style={'height': '420px'},
+                                    )
+                                ),
+                                dcc.Loading(html.Div(id='xsection-table-container')),
+                            ],
+                        ),
                     ],
                 ),
-
                 # ── Tab 2: Factor History ─────────────────────────────
                 dcc.Tab(
                     label='Factor History',
@@ -163,39 +189,47 @@ layout = html.Div(
                     className='ticker-tab',
                     selected_className='ticker-tab--active',
                     children=[
-                        html.Div(className='factors-controls', children=[
-                            dcc.Dropdown(
-                                id='ts-ticker',
-                                placeholder='Search ticker or company name…',
-                                searchable=True,
-                                clearable=True,
-                                className='ticker-dropdown',
-                                style={'minWidth': '240px'},
-                            ),
-                            dcc.RadioItems(
-                                id='ts-variant',
-                                options=_VARIANT_OPTIONS,
-                                value='A',
-                                inline=True,
-                                labelClassName='check-item',
-                            ),
-                            dcc.Dropdown(
-                                id='ts-factor',
-                                options=FACTOR_OPTIONS,
-                                value='pe',
-                                clearable=False,
-                                className='filter-dropdown',
-                                style={'minWidth': '130px'},
-                            ),
-                        ]),
-                        html.Div(className='tab-content', children=[
-                            dcc.Loading(dcc.Graph(
-                                id='ts-chart',
-                                config={'displayModeBar': False},
-                                style={'height': '380px'},
-                            )),
-                            dcc.Loading(html.Div(id='ts-table-container')),
-                        ]),
+                        html.Div(
+                            className='factors-controls',
+                            children=[
+                                dcc.Dropdown(
+                                    id='ts-ticker',
+                                    placeholder='Search ticker or company name…',
+                                    searchable=True,
+                                    clearable=True,
+                                    className='ticker-dropdown',
+                                    style={'minWidth': '240px'},
+                                ),
+                                dcc.RadioItems(
+                                    id='ts-variant',
+                                    options=_VARIANT_OPTIONS,
+                                    value='A',
+                                    inline=True,
+                                    labelClassName='check-item',
+                                ),
+                                dcc.Dropdown(
+                                    id='ts-factor',
+                                    options=FACTOR_OPTIONS,
+                                    value='pe',
+                                    clearable=False,
+                                    className='filter-dropdown',
+                                    style={'minWidth': '130px'},
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            className='tab-content',
+                            children=[
+                                dcc.Loading(
+                                    dcc.Graph(
+                                        id='ts-chart',
+                                        config={'displayModeBar': False},
+                                        style={'height': '380px'},
+                                    )
+                                ),
+                                dcc.Loading(html.Div(id='ts-table-container')),
+                            ],
+                        ),
                     ],
                 ),
             ],
@@ -205,6 +239,7 @@ layout = html.Div(
 
 
 # ── Callbacks ─────────────────────────────────────────────────────────
+
 
 @callback(
     Output('companies-store', 'data'),
@@ -234,7 +269,9 @@ def load_options(_: Any) -> tuple[Any, list, list, list]:
         for _, r in df.sort_values('Ticker').iterrows()
     ]
     slim = df[['Ticker', 'Company Name', 'Sector', 'Market']].fillna('')
-    logger.info(f'load_options: {len(sector_opts)} sectors, {len(market_opts)} markets, {len(ticker_opts)} tickers')
+    logger.info(
+        f'load_options: {len(sector_opts)} sectors, {len(market_opts)} markets, {len(ticker_opts)} tickers'
+    )
     return slim.to_dict('records'), sector_opts, market_opts, ticker_opts
 
 
@@ -258,7 +295,9 @@ def compute_xsection(
         return []
     df = df.reset_index()
     if companies_data:
-        comp = pd.DataFrame(companies_data)[['Ticker', 'Company Name', 'Sector', 'Market']]
+        comp = pd.DataFrame(companies_data)[
+            ['Ticker', 'Company Name', 'Sector', 'Market']
+        ]
         df = df.merge(comp, on='Ticker', how='left')
     return df.to_dict('records')
 
@@ -317,8 +356,12 @@ def render_ranking_chart(
             hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
         ),
         layout=_chart_layout(
-            title=dict(text=f'{label} — cross-section', font=dict(color=MUTED, size=12),
-                       x=0, xref='paper'),
+            title=dict(
+                text=f'{label} — cross-section',
+                font=dict(color=MUTED, size=12),
+                x=0,
+                xref='paper',
+            ),
             yaxis_autorange='reversed',
             yaxis_tickfont=dict(color=MUTED, size=10),
             xaxis_title=label,
@@ -340,7 +383,9 @@ def render_xsection_table(
 ) -> Any:
     """DataTable of all tickers with all factors, formatted."""
     if not data:
-        return html.P('No data — select a date and wait for computation.', className='no-data')
+        return html.P(
+            'No data — select a date and wait for computation.', className='no-data'
+        )
 
     df = pd.DataFrame(data)
     if sector and 'Sector' in df.columns:
@@ -357,10 +402,16 @@ def render_xsection_table(
     for _, r in df.iterrows():
         row: dict = {}
         for c in display_cols:
-            row[c] = _fmt(r.get(c), c) if c in FACTOR_LABELS or c == 'mktcap' else r.get(c, '')
+            row[c] = (
+                _fmt(r.get(c), c)
+                if c in FACTOR_LABELS or c == 'mktcap'
+                else r.get(c, '')
+            )
         rows.append(row)
 
-    columns = [{'name': FACTOR_LABELS.get(c, c), 'id': c} for c in display_cols]
+    columns: list[Any] = [
+        {'name': FACTOR_LABELS.get(c, c), 'id': c} for c in display_cols
+    ]
 
     left_cols = [
         {'if': {'column_id': c}, 'textAlign': 'left'}
@@ -375,7 +426,8 @@ def render_xsection_table(
         page_size=50,
         **{
             **TABLE_STYLE,
-            'style_cell_conditional': TABLE_STYLE.get('style_cell_conditional', []) + left_cols,
+            'style_cell_conditional': TABLE_STYLE.get('style_cell_conditional', [])
+            + left_cols,
         },
     )
 
@@ -394,6 +446,7 @@ def compute_history(ticker: str | None, variant: str) -> Any:
         return []
     df = df.copy()
     from irp.factors._cols import REPORT_DATE
+
     if REPORT_DATE in df.columns:
         df[REPORT_DATE] = pd.to_datetime(df[REPORT_DATE]).dt.strftime('%Y-%m-%d')
     return df.to_dict('records')
@@ -411,6 +464,7 @@ def render_history_chart(data: list | None, factor: str) -> go.Figure:
 
     df = pd.DataFrame(data)
     from irp.factors._cols import REPORT_DATE
+
     if REPORT_DATE not in df.columns or factor not in df.columns:
         return _empty_figure()
 
@@ -454,6 +508,7 @@ def render_history_table(data: list | None) -> Any:
 
     df = pd.DataFrame(data)
     from irp.factors._cols import REPORT_DATE
+
     if REPORT_DATE in df.columns:
         df = df.sort_values(REPORT_DATE, ascending=False)
 
@@ -464,11 +519,18 @@ def render_history_table(data: list | None) -> Any:
     for _, r in df.iterrows():
         row: dict = {}
         for c in display_cols:
-            row[c] = _fmt(r.get(c), c) if c in FACTOR_LABELS or c == 'mktcap' else str(r.get(c, ''))
+            row[c] = (
+                _fmt(r.get(c), c)
+                if c in FACTOR_LABELS or c == 'mktcap'
+                else str(r.get(c, ''))
+            )
         rows.append(row)
 
-    columns = [
-        {'name': FACTOR_LABELS.get(c, 'Filing Date' if c == REPORT_DATE else c), 'id': c}
+    columns: list[Any] = [
+        {
+            'name': FACTOR_LABELS.get(c, 'Filing Date' if c == REPORT_DATE else c),
+            'id': c,
+        }
         for c in display_cols
     ]
 
@@ -481,6 +543,7 @@ def render_history_table(data: list | None) -> Any:
         page_size=20,
         **{
             **TABLE_STYLE,
-            'style_cell_conditional': TABLE_STYLE.get('style_cell_conditional', []) + left_cols,
+            'style_cell_conditional': TABLE_STYLE.get('style_cell_conditional', [])
+            + left_cols,
         },
     )
