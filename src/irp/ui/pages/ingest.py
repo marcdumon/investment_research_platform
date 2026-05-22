@@ -298,7 +298,7 @@ def _run_pipeline(
         import datetime as _dt
         logger.info('-- rebuild factor cache --')
         n = precompute_all(
-            start_date=_dt.date(2010, 1, 1),
+            start_date=_dt.date(1991, 1, 1),
             end_date=_dt.date.today(),
         )
         logger.info(f'factor cache rebuilt ({n} new snapshot{"s" if n != 1 else ""} written)')
