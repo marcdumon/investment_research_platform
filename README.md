@@ -168,7 +168,7 @@ src.transform('update')
 src.store('update')
 ```
 
-`update()` is **incremental**: it queries `yahoo_prices` for the last stored date per ticker and only fetches rows after that date. New tickers (not yet in the DB) get full history. Batches use the minimum last date of the group as the shared start date.
+`update()` is **incremental**: it queries `yahoo_prices` for the last stored date per ticker and only fetches rows after that date, with a 30-day lookback window applied so recently adjusted prices are refreshed. New tickers (not yet in the DB) get full history. Batches use the minimum last date of the group as the shared start date.
 
 Actions (dividends + splits) always re-fetch full history — yfinance has no incremental endpoint for these, but the volume is small and the merge deduplicates on `(Ticker, Date)`.
 
@@ -279,7 +279,7 @@ data/
 
 ## Factors Analysis
 
-`irp.factors` computes quant factors from stored fundamentals and prices. All results are point-in-time (PIT) safe: only data with `Report Date <= as_of_date` and prices with `Date <= as_of_date` are used.
+`irp.factors` computes quant factors from stored fundamentals and prices. All results are point-in-time (PIT) safe: only data with `Publish Date <= as_of_date` (falling back to `Report Date + 60 days` when Publish Date is unavailable) and prices with `Date <= as_of_date` are used.
 
 ### Factors computed
 
@@ -288,6 +288,7 @@ data/
 | Valuation | mktcap, pe, pb, ps, ev_ebitda, ev_ebit, ev_sales, fcf_yield |
 | Profitability | gross_margin, op_margin, net_margin, roe, roa, roic, fcf_margin |
 | Momentum | mom_12_1, mom_6_1, vol_21d, ma200_ratio |
+| Leverage | debt_equity, net_debt_ebitda, interest_coverage |
 
 **Momentum factor definitions:**
 
@@ -327,7 +328,9 @@ print(result['quintile_cumret'].tail())
 
 `variant='Q'` routes income and cashflow through TTM aggregation (sum of last 4 quarterly filings) so ratios reflect a full year of activity rather than a single quarter. Balance sheet uses the most-recent quarter.
 
-**Known limitation**: PIT cutoff uses `Report Date` (fiscal period end), not SimFin's `Publish Date` (when the filing was public). This introduces up to ~30–60 day lookahead bias when backtesting.
+### Factor registry
+
+Each compute module calls `register('col_name', 'UI Label', pct=True/False, group='...')` at import time, populating a central `irp.factors.registry`. UI labels, percentage formatting flags, and dropdown options are all derived from this registry — adding a new factor in one compute file automatically propagates to the UI and normalization layer with no other changes needed.
 
 ### Backtest module
 
@@ -350,7 +353,7 @@ from irp.factors import cache
 cache.clear()                    # delete all cached snapshots
 cache.clear('A')                 # delete only annual snapshots
 n = cache.precompute_all(        # populate cache for a date range
-    start_date=datetime.date(2010, 1, 1),
+    start_date=datetime.date(1991, 1, 1),
     end_date=datetime.date.today(),
 )
 ```
@@ -444,8 +447,8 @@ Multi-page web UI. Pages:
 | `/` | Home |
 | `/ingest` | Data ingestion controls + live log |
 | `/ticker` | Per-ticker fundamentals, prices, corporate actions |
-| `/factors` | Cross-section factor ranking + single-ticker factor history |
-| `/backtest` | Single-factor IC/quintile backtest + Composite Model tab |
+| `/factors` | Cross-section factor ranking (filterable by market/sector) + single-ticker factor history |
+| `/backtest` | Single-factor IC/quintile backtest (rolling IC line, EW benchmark) + Composite Model tab |
 
 ---
 

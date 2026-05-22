@@ -59,8 +59,8 @@ def compute_forward_returns(
             continue
         for ticker in p0_info.index.intersection(p1_info.index):
             entry_date = pd.Timestamp(p0_info.loc[ticker, PRICE_DATE])  # type: ignore[arg-type]
-            exit_date  = pd.Timestamp(p1_info.loc[ticker, PRICE_DATE])  # type: ignore[arg-type]
-            if exit_date <= entry_date: 
+            exit_date = pd.Timestamp(p1_info.loc[ticker, PRICE_DATE])  # type: ignore[arg-type]
+            if exit_date <= entry_date:
                 continue
             p0 = float(p0_info.loc[ticker, PRICE_CLOSE])  # type: ignore[arg-type]
             p1 = float(p1_info.loc[ticker, PRICE_CLOSE])  # type: ignore[arg-type]
@@ -104,6 +104,7 @@ def compute_backtest(
     empty = {
         'ic_series': pd.Series(dtype=float),
         'quintile_cumret': pd.DataFrame(columns=quantile_labels),
+        'ew_cumret': pd.Series(dtype=float),
         'mean_ic': float('nan'),
         'ic_tstat': float('nan'),
         'n_dates': 0,
@@ -173,12 +174,15 @@ def compute_backtest(
         qdf = pd.DataFrame(qret_rows)
         qdf.index = pd.DatetimeIndex(qret_dates)
         quintile_cumret = qdf.fillna(0).cumsum()
+        ew_cumret = qdf.mean(axis=1).fillna(0).cumsum()
     else:
         quintile_cumret = pd.DataFrame(columns=quantile_labels)
+        ew_cumret = pd.Series(dtype=float)
 
     return {
         'ic_series': ic_series,
         'quintile_cumret': quintile_cumret,
+        'ew_cumret': ew_cumret,
         'mean_ic': mean_ic,
         'ic_tstat': ic_tstat,
         'n_dates': int(len(valid_ic)),
