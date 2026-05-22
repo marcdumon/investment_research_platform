@@ -219,7 +219,8 @@ def _fetch_prices_batched(
     from irp.core.cancel import is_cancelled
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     bsize = yahoo_cfg.prices_batch_size
-    logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers')
+    n_batches = (len(todo) + bsize - 1) // bsize
+    logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers, {n_batches} batches')
     for i in range(0, len(todo), bsize):
         if is_cancelled():
             break
@@ -231,7 +232,8 @@ def _fetch_prices_batched(
             dl_kwargs: dict = {'start': (min(non_null_starts) + timedelta(days=1)).isoformat()}
         else:
             dl_kwargs = {'period': 'max'}
-        logger.debug(f'Batch {i // bsize + 1}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}')
+        batch_num = i // bsize + 1
+        logger.info(f'Batch {batch_num}/{n_batches}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}')
         try:
             raw = yf.download(
                 batch_yahoo,
@@ -501,7 +503,12 @@ class YahooSource:
         use the minimum last_date of the group, so new tickers in a batch pull
         full history. Actions always re-fetch full history (no incremental API).
         Merge dedupes on (Ticker, Date) so reruns are idempotent."""
-        last_dates = _load_last_prices_dates() if self._fetch_prices else None
+        _LOOKBACK_DAYS = 30
+        last_dates_raw = _load_last_prices_dates() if self._fetch_prices else None
+        last_dates = (
+            {t: d - timedelta(days=_LOOKBACK_DAYS) for t, d in last_dates_raw.items()}
+            if last_dates_raw is not None else None
+        )
         _fetch_ticker_data(
             skip_queried=False,
             fetch_actions=self._fetch_actions,
