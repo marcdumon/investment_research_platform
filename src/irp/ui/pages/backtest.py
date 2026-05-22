@@ -116,6 +116,7 @@ def _filtered_tickers(market: str, sector: str | None) -> list[str] | None:
         return None
     from irp.query.simfin import companies as _companies
     from irp.query.universe import universe
+
     u = universe()[['Ticker', 'Market']]
     c = _companies()[['Ticker', 'Sector']]
     df = u.merge(c, on='Ticker', how='left')
@@ -375,6 +376,7 @@ layout = html.Div(
 )
 def load_sector_options(_: Any) -> list[dict]:
     from irp.query.simfin import sector_map
+
     sectors = sorted(sector_map().dropna().unique().tolist())
     return [{'label': s, 'value': s} for s in sectors]
 
@@ -481,11 +483,20 @@ def run_bt(
                         else float(v)
                     )
                 qcr_records.append(rec)
+        ew = result.get('ew_cumret', pd.Series(dtype=float))
+        ew_records = []
+        if not ew.empty:
+            for d, v in zip(ew.index, ew.values):
+                ew_records.append({
+                    'date': pd.Timestamp(d).isoformat(),
+                    'ew': None if (isinstance(v, float) and isnan(v)) else float(v),
+                })
         mean_ic = result['mean_ic']
         ic_tstat = result['ic_tstat']
         return {
             'ic': ic_records,
             'qcr': qcr_records,
+            'ew': ew_records,
             'mean_ic': None if isnan(mean_ic) else float(mean_ic),
             'ic_tstat': None if isnan(ic_tstat) else float(ic_tstat),
             'n_dates': result['n_dates'],
@@ -544,6 +555,19 @@ def render_ic(data):
             hovertemplate='%{x}<br>IC: %{y:.3f}<extra></extra>',
         )
     )
+    rolling = (
+        pd.Series(ic_vals, index=pd.to_datetime(dates)).rolling(4, min_periods=2).mean()
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[d.isoformat() for d in rolling.index],
+            y=rolling.tolist(),
+            mode='lines',
+            name='4-period rolling',
+            line=dict(color=MUTED, width=1.5, dash='dot'),
+            hovertemplate='%{x}<br>Rolling IC: %{y:.3f}<extra></extra>',
+        )
+    )
     if mean_ic is not None and isfinite(mean_ic):
         fig.add_hline(
             y=mean_ic,
@@ -552,7 +576,7 @@ def render_ic(data):
             annotation_text=f'Mean {mean_ic:.3f}',
             annotation_font_color=MUTED,
         )
-    fig.update_layout(yaxis_title='Spearman IC', showlegend=False)
+    fig.update_layout(yaxis_title='Spearman IC', showlegend=True)
     return chips, fig
 
 
@@ -582,6 +606,19 @@ def render_quintiles(data):
                     color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1
                 ),
                 hovertemplate=f'{col}: %{{y:.3f}}<extra></extra>',
+            )
+        )
+    ew_cols = [c for c in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'] if c in df.columns]
+    if ew_cols:
+        ew_vals = df[ew_cols].mean(axis=1)
+        fig.add_trace(
+            go.Scatter(
+                x=df['date'],
+                y=ew_vals,
+                mode='lines',
+                name='EW',
+                line=dict(color=MUTED, width=1, dash='dash'),
+                hovertemplate='EW: %{y:.3f}<extra></extra>',
             )
         )
     fig.update_layout(yaxis_title='Cumulative log return')

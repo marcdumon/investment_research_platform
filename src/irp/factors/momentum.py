@@ -10,6 +10,12 @@ import pandas as pd
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
 from irp.factors._pit import pit_price
+from irp.factors.registry import register
+
+register('mom_12_1',    '12-1m Mom',   pct=True, group='momentum')
+register('mom_6_1',     '6-1m Mom',    pct=True, group='momentum')
+register('vol_21d',     'Vol 21d',     pct=True, group='momentum')
+register('ma200_ratio', 'MA200 Ratio',           group='momentum')
 
 # Calendar-day approximations for trading-day lags
 _LAG_1M  = 30    # skip last month (short-term reversal avoidance)

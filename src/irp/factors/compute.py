@@ -13,9 +13,10 @@ from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE, TICKER
 from irp.factors._pit import pit_latest, pit_price, pit_ttm
 from irp.factors.backtest import compute_backtest, compute_forward_returns
-from irp.factors.momentum import compute_momentum
-from irp.factors.profitability import compute_profitability
 from irp.factors.valuation import compute_valuation
+from irp.factors.profitability import compute_profitability
+from irp.factors.momentum import compute_momentum
+from irp.factors.leverage import compute_leverage
 from irp.query.simfin import fundamentals
 from irp.query.yahoo import prices as yahoo_prices
 
@@ -46,8 +47,9 @@ def _cross_section_from_raw(
     val  = compute_valuation(income, balance, cashflow, prices)
     prof = compute_profitability(income, balance, cashflow)
     mom  = compute_momentum(raw_prices, as_of_date)
+    lev  = compute_leverage(income, balance, cashflow)
 
-    result = val.join(prof, how='outer').join(mom, how='outer')
+    result = val.join(prof, how='outer').join(mom, how='outer').join(lev, how='outer')
     result.index.name = TICKER
     return result
 

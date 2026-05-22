@@ -19,10 +19,16 @@ from irp.factors._cols import (
     DA,
     PRICE_CLOSE,
 )
+from irp.factors._utils import _safe_div
+from irp.factors.registry import register
 
-
-def _safe_div(num: pd.Series, denom: pd.Series) -> pd.Series:
-    return (num / denom).replace([float('inf'), float('-inf')], pd.NA)
+register('pe',        'P/E',       group='valuation')
+register('pb',        'P/B',       group='valuation')
+register('ps',        'P/S',       group='valuation')
+register('ev_ebitda', 'EV/EBITDA', group='valuation')
+register('ev_ebit',   'EV/EBIT',   group='valuation')
+register('ev_sales',  'EV/Sales',  group='valuation')
+register('fcf_yield', 'FCF Yield', pct=True, group='valuation')
 
 
 def compute_valuation(
@@ -80,7 +86,6 @@ def compute_valuation(
     w['ev']       = w['mktcap'] + w['net_debt']
 
     # DA from cashflow is positive; no abs() needed.
-    w['ebit']   = w[OPERATING_INCOME]
     w['ebitda'] = w[OPERATING_INCOME] + w[DA].fillna(0)
     w['fcf']    = w[CFO] + w[CFI]
 
@@ -90,8 +95,9 @@ def compute_valuation(
     out['pb']        = _safe_div(w['mktcap'], w[TOTAL_EQUITY])
     out['ps']        = _safe_div(w['mktcap'], w[REVENUE])
     out['ev_ebitda'] = _safe_div(w['ev'], w['ebitda'])
-    out['ev_ebit']   = _safe_div(w['ev'], w['ebit'])
+    out['ev_ebit']   = _safe_div(w['ev'], w[OPERATING_INCOME])
     out['ev_sales']  = _safe_div(w['ev'], w[REVENUE])
     out['fcf_yield'] = _safe_div(w['fcf'], w['mktcap'])
-    out.index.name   = TICKER
+
+    out.index.name = TICKER
     return out
