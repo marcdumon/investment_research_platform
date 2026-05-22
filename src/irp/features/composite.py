@@ -59,5 +59,5 @@ def build_composite(
         from irp.features.normalize import sector_neutral
         normed = sector_neutral(df[cols], sector, cols=cols, method=normalize)
 
-    score = sum(normed[c] * w for c, w in weights.items())
+    score = pd.DataFrame({c: normed[c] * w for c, w in weights.items()}).sum(axis=1)
     return _norm_series(score, normalize if normalize != 'none' else 'zscore').rename('composite')

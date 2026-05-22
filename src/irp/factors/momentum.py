@@ -77,14 +77,14 @@ def compute_momentum(
     # Log momentum (NaN when either lag price is missing or non-positive)
     def _log_ret(p_num: pd.Series, p_den: pd.Series) -> pd.Series:
         ratio = p_num / p_den
-        return np.log(ratio.where(ratio > 0))
+        return pd.Series(np.log(ratio.where(ratio > 0)), index=ratio.index)
 
     mom_12_1 = _log_ret(p_1m, p_12m)
     mom_6_1  = _log_ret(p_1m, p_6m)
 
     # Realised vol: std of last 21 daily log returns * sqrt(252)
     def _vol(g: pd.DataFrame) -> float:
-        closes = g[PRICE_CLOSE].values
+        closes = g[PRICE_CLOSE].to_numpy(dtype=float)
         if len(closes) < 22:
             return float('nan')
         window = closes[-22:]
@@ -97,7 +97,7 @@ def compute_momentum(
 
     # MA200 ratio: current price / mean of last 200 closes
     def _ma200(g: pd.DataFrame) -> float:
-        closes = g[PRICE_CLOSE].values
+        closes = g[PRICE_CLOSE].to_numpy(dtype=float)
         if len(closes) < 200:
             return float('nan')
         return float(closes[-200:].mean())
