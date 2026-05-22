@@ -221,6 +221,12 @@ layout = html.Div(
                                     className='filter-dropdown',
                                     style={'minWidth': '130px'},
                                 ),
+                                html.Button(
+                                    'Run',
+                                    id='ts-run-btn',
+                                    className='run-btn',
+                                    n_clicks=0,
+                                ),
                             ],
                         ),
                         html.Div(
@@ -454,35 +460,42 @@ def render_xsection_table(store: dict | None) -> Any:
 
 @callback(
     Output('factor-history-store', 'data'),
-    Input('ts-ticker', 'value'),
-    Input('ts-variant', 'value'),
+    Input('ts-run-btn', 'n_clicks'),
+    State('ts-ticker', 'value'),
+    State('ts-variant', 'value'),
+    State('ts-factor', 'value'),
+    running=[
+        (Output('ts-run-btn', 'disabled'), True, False),
+        (Output('ts-run-btn', 'children'), 'Running...', 'Run'),
+    ],
+    prevent_initial_call=True,
 )
-def compute_history(ticker: str | None, variant: str) -> Any:
-    """Compute per-ticker factor history on ticker/variant change."""
+def compute_history(n_clicks: int, ticker: str | None, variant: str, factor: str | None) -> Any:
+    """Compute per-ticker factor history on Run click."""
     if not ticker:
         raise PreventUpdate
     df = ticker_factor_history(ticker, variant)  # type: ignore[arg-type]
     if df.empty:
-        return []
+        return {}
     df = df.copy()
     from irp.factors._cols import REPORT_DATE
 
     if REPORT_DATE in df.columns:
         df[REPORT_DATE] = pd.to_datetime(df[REPORT_DATE]).dt.strftime('%Y-%m-%d')
-    return df.to_dict('records')
+    return {'records': df.to_dict('records'), 'factor': factor or 'pe'}
 
 
 @callback(
     Output('ts-chart', 'figure'),
     Input('factor-history-store', 'data'),
-    Input('ts-factor', 'value'),
 )
-def render_history_chart(data: list | None, factor: str) -> go.Figure:
+def render_history_chart(store: dict | None) -> go.Figure:
     """Line chart of selected factor over filing dates."""
-    if not data or not factor:
-        return _empty_figure('Select a ticker to view factor history.')
+    if not store or not store.get('records'):
+        return _empty_figure('Select a ticker and click Run.')
 
-    df = pd.DataFrame(data)
+    factor: str = store.get('factor', 'pe')
+    df = pd.DataFrame(store['records'])
     from irp.factors._cols import REPORT_DATE
 
     if REPORT_DATE not in df.columns or factor not in df.columns:
@@ -521,12 +534,12 @@ def render_history_chart(data: list | None, factor: str) -> go.Figure:
     Output('ts-table-container', 'children'),
     Input('factor-history-store', 'data'),
 )
-def render_history_table(data: list | None) -> Any:
+def render_history_table(store: dict | None) -> Any:
     """Table of all factors by filing date for the selected ticker."""
-    if not data:
-        return html.P('Select a ticker above.', className='no-data')
+    if not store or not store.get('records'):
+        return html.P('Select a ticker and click Run.', className='no-data')
 
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(store['records'])
     from irp.factors._cols import REPORT_DATE
 
     if REPORT_DATE in df.columns:
