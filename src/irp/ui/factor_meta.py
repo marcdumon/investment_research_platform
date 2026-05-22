@@ -1,33 +1,16 @@
 """Shared factor metadata — labels, formatting sets, dropdown options.
 
-Imported by both factors.py and backtest.py to avoid page-module duplication.
+Derived from the central factor registry. Import this module anywhere that
+needs factor labels or dropdown options; do NOT hardcode factor lists elsewhere.
 """
+import irp.factors.valuation      # noqa: F401 — populate registry
+import irp.factors.profitability  # noqa: F401
+import irp.factors.momentum       # noqa: F401
+import irp.factors.leverage       # noqa: F401
+from irp.factors.registry import all_factors
 
-FACTOR_LABELS: dict[str, str] = {
-    'pe':           'P/E',
-    'pb':           'P/B',
-    'ps':           'P/S',
-    'ev_ebitda':    'EV/EBITDA',
-    'ev_ebit':      'EV/EBIT',
-    'ev_sales':     'EV/Sales',
-    'fcf_yield':    'FCF Yield',
-    'gross_margin': 'Gross Margin',
-    'op_margin':    'Op. Margin',
-    'net_margin':   'Net Margin',
-    'roe':          'ROE',
-    'roa':          'ROA',
-    'roic':         'ROIC',
-    'fcf_margin':   'FCF Margin',
-    'mom_12_1':    '12-1m Mom',
-    'mom_6_1':     '6-1m Mom',
-    'vol_21d':     'Vol 21d',
-    'ma200_ratio': 'MA200 Ratio',
-}
+_all = all_factors()
 
-PCT_FACTORS: frozenset[str] = frozenset({
-    'fcf_yield', 'gross_margin', 'op_margin', 'net_margin',
-    'roe', 'roa', 'roic', 'fcf_margin',
-    'mom_12_1', 'mom_6_1', 'vol_21d',
-})
-
-FACTOR_OPTIONS: list[dict] = [{'label': v, 'value': k} for k, v in FACTOR_LABELS.items()]
+FACTOR_LABELS: dict[str, str]  = {f.name: f.label for f in _all}
+PCT_FACTORS: frozenset[str]    = frozenset(f.name for f in _all if f.pct)
+FACTOR_OPTIONS: list[dict]     = [{'label': f.label, 'value': f.name} for f in _all]

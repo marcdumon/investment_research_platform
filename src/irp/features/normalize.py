@@ -4,11 +4,13 @@ Pure functions; no DB access. All operate per-snapshot (one date at a time).
 """
 import pandas as pd
 
-FACTOR_COLS: list[str] = [
-    'pe', 'pb', 'ps', 'ev_ebitda', 'ev_ebit', 'ev_sales', 'fcf_yield',
-    'gross_margin', 'op_margin', 'net_margin', 'roe', 'roa', 'roic', 'fcf_margin',
-    'mom_12_1', 'mom_6_1', 'vol_21d', 'ma200_ratio',
-]
+import irp.factors.valuation      # noqa: F401 — populate registry
+import irp.factors.profitability  # noqa: F401
+import irp.factors.momentum       # noqa: F401
+import irp.factors.leverage       # noqa: F401
+from irp.factors.registry import all_factors
+
+FACTOR_COLS: list[str] = [f.name for f in all_factors()]
 
 
 def _cols(df: pd.DataFrame, cols: list[str] | None) -> list[str]:

@@ -17,10 +17,16 @@ from irp.factors._cols import (
     LONG_TERM_DEBT,
     CFO,
 )
+from irp.factors._utils import _safe_div
+from irp.factors.registry import register
 
-
-def _safe_div(num: pd.Series, denom: pd.Series) -> pd.Series:
-    return (num / denom).replace([float('inf'), float('-inf')], pd.NA)
+register('gross_margin', 'Gross Margin', pct=True, group='profitability')
+register('op_margin',    'Op. Margin',   pct=True, group='profitability')
+register('net_margin',   'Net Margin',   pct=True, group='profitability')
+register('roe',          'ROE',          pct=True, group='profitability')
+register('roa',          'ROA',          pct=True, group='profitability')
+register('roic',         'ROIC',         pct=True, group='profitability')
+register('fcf_margin',   'FCF Margin',   pct=True, group='profitability')
 
 
 def compute_profitability(
