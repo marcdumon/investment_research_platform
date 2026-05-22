@@ -345,6 +345,10 @@ def toggle_mode_controls(mode: str) -> tuple[dict, dict]:
     State('bt-freq', 'value'),
     State('bt-start-year', 'value'),
     State('bt-end-year', 'value'),
+    running=[
+        (Output('bt-run-btn', 'disabled'), True, False),
+        (Output('bt-run-btn', 'children'), 'Running...', 'Run'),
+    ],
     prevent_initial_call=True,
 )
 def run_bt(

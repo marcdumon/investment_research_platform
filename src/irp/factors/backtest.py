@@ -2,6 +2,7 @@
 
 Pure computation — no DB access. Called by compute.run_backtest().
 """
+
 import datetime
 
 import numpy as np
@@ -57,14 +58,18 @@ def compute_forward_returns(
         if p0_info.empty or p1_info.empty:
             continue
         for ticker in p0_info.index.intersection(p1_info.index):
-            entry_date = p0_info.loc[ticker, PRICE_DATE]
-            exit_date  = p1_info.loc[ticker, PRICE_DATE]
-            if exit_date <= entry_date:
+            entry_date = pd.Timestamp(p0_info.loc[ticker, PRICE_DATE])  # type: ignore[arg-type]
+            exit_date  = pd.Timestamp(p1_info.loc[ticker, PRICE_DATE])  # type: ignore[arg-type]
+            if exit_date <= entry_date: 
                 continue
-            p0 = p0_info.loc[ticker, PRICE_CLOSE]
-            p1 = p1_info.loc[ticker, PRICE_CLOSE]
+            p0 = float(p0_info.loc[ticker, PRICE_CLOSE])  # type: ignore[arg-type]
+            p1 = float(p1_info.loc[ticker, PRICE_CLOSE])  # type: ignore[arg-type]
             if p0 > 0 and p1 > 0:
-                records.append({PRICE_TICKER: ticker, 'Date': d, 'fwd_ret': float(np.log(p1 / p0))})
+                records.append({
+                    PRICE_TICKER: ticker,
+                    'Date': d,
+                    'fwd_ret': float(np.log(p1 / p0)),
+                })
 
     return pd.DataFrame(records, columns=[PRICE_TICKER, 'Date', 'fwd_ret'])
 
@@ -127,14 +132,19 @@ def compute_backtest(
             ic_records.append((d, float('nan')))
             continue
         ic_val, _ = stats.spearmanr(merged['factor'], merged['fwd_ret'])
-        ic_records.append((d, float(ic_val)))
+        ic_records.append((d, float(ic_val)))  # type: ignore[arg-type]
         try:
             merged['q'] = pd.qcut(
                 merged['factor'], n_quantiles, labels=quantile_labels, duplicates='drop'
             )
         except ValueError:
             continue
-        qrets = merged.groupby('q', observed=True)['fwd_ret'].mean().reindex(quantile_labels)
+        qrets = (
+            merged
+            .groupby('q', observed=True)['fwd_ret']
+            .mean()
+            .reindex(quantile_labels)
+        )
         qrets.name = d
         qret_rows.append(qrets)
         qret_dates.append(d)
@@ -151,7 +161,11 @@ def compute_backtest(
     mean_ic = float(valid_ic.mean()) if not valid_ic.empty else float('nan')
     if len(valid_ic) > 1:
         std_ic = valid_ic.std()
-        ic_tstat = float(mean_ic / std_ic * np.sqrt(len(valid_ic))) if std_ic > 0 else float('nan')
+        ic_tstat = (
+            float(mean_ic / std_ic * np.sqrt(len(valid_ic)))
+            if std_ic > 0
+            else float('nan')
+        )
     else:
         ic_tstat = float('nan')
 

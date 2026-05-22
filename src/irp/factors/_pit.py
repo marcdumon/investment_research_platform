@@ -2,6 +2,7 @@
 
 Pure functions — no DB access. Input DataFrames come from irp.query.*
 """
+
 import datetime
 
 import pandas as pd
@@ -82,4 +83,6 @@ def pit_price(
     if eligible.empty:
         return pd.DataFrame(columns=[PRICE_TICKER, PRICE_DATE, PRICE_CLOSE])
     idx = eligible.groupby(PRICE_TICKER)[PRICE_DATE].idxmax()
-    return eligible.loc[idx, [PRICE_TICKER, PRICE_DATE, PRICE_CLOSE]].reset_index(drop=True)
+    return eligible.loc[idx, [PRICE_TICKER, PRICE_DATE, PRICE_CLOSE]].reset_index(
+        drop=True
+    )

@@ -16,6 +16,7 @@ import datetime
 import logging
 import shutil
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 
@@ -111,7 +112,7 @@ def store_backtest(
 def precompute_all(
     start_date: datetime.date,
     end_date: datetime.date,
-    variants: list[str] | None = None,
+    variants: list[Literal['A', 'Q']] | None = None,
     freq: str = 'QE',
     force: bool = False,
 ) -> int:

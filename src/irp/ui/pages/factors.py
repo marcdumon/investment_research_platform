@@ -8,7 +8,7 @@ from typing import Any
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, callback, dcc, html
+from dash import Input, Output, State, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
@@ -165,6 +165,12 @@ layout = html.Div(
                                     inline=True,
                                     labelClassName='check-item',
                                 ),
+                                html.Button(
+                                    'Run',
+                                    id='xsection-run-btn',
+                                    className='run-btn',
+                                    n_clicks=0,
+                                ),
                             ],
                         ),
                         html.Div(
@@ -277,55 +283,60 @@ def load_options(_: Any) -> tuple[Any, list, list, list]:
 
 @callback(
     Output('xsection-store', 'data'),
-    Input('xsection-date', 'date'),
-    Input('xsection-variant', 'value'),
+    Input('xsection-run-btn', 'n_clicks'),
     Input('companies-store', 'data'),
+    State('xsection-date', 'date'),
+    State('xsection-variant', 'value'),
+    State('xsection-sector', 'value'),
+    State('xsection-market', 'value'),
+    State('ranking-factor', 'value'),
+    State('ranking-top', 'value'),
+    running=[
+        (Output('xsection-run-btn', 'disabled'), True, False),
+        (Output('xsection-run-btn', 'children'), 'Running...', 'Run'),
+    ],
 )
 def compute_xsection(
+    n_clicks: int,
+    companies_data: list | None,
     as_of_str: str | None,
     variant: str,
-    companies_data: list | None,
+    sector: str | None,
+    market: str | None,
+    factor: str | None,
+    top_n: int | None,
 ) -> Any:
-    """Compute full cross-section and join with company metadata."""
+    """Compute full cross-section, join metadata, apply filters."""
     if not as_of_str or not companies_data:
         raise PreventUpdate
     as_of = datetime.date.fromisoformat(as_of_str[:10])
     df = cross_section(as_of, variant)  # type: ignore[arg-type]
     if df.empty:
-        return []
+        return {}
     df = df.reset_index()
-    if companies_data:
-        comp = pd.DataFrame(companies_data)[
-            ['Ticker', 'Company Name', 'Sector', 'Market']
-        ]
-        df = df.merge(comp, on='Ticker', how='left')
-    return df.to_dict('records')
+    comp = pd.DataFrame(companies_data)[['Ticker', 'Company Name', 'Sector', 'Market']]
+    df = df.merge(comp, on='Ticker', how='left')
+    if sector:
+        df = df[df['Sector'] == sector]
+    if market:
+        df = df[df['Market'] == market]
+    return {'records': df.to_dict('records'), 'factor': factor or 'pe', 'top_n': top_n or 50}
 
 
 @callback(
     Output('ranking-chart', 'figure'),
     Input('xsection-store', 'data'),
-    Input('ranking-factor', 'value'),
-    Input('xsection-sector', 'value'),
-    Input('xsection-market', 'value'),
-    Input('ranking-top', 'value'),
 )
-def render_ranking_chart(
-    data: list | None,
-    factor: str,
-    sector: str | None,
-    market: str | None,
-    top_n: int,
-) -> go.Figure:
+def render_ranking_chart(store: dict | None) -> go.Figure:
     """Horizontal bar chart of tickers ranked by selected factor."""
-    if not data or not factor:
+    if not store or not store.get('records'):
         return _empty_figure()
 
+    data = store['records']
+    factor: str = store.get('factor', 'pe')
+    top_n: int = store.get('top_n', 50)
+
     df = pd.DataFrame(data)
-    if sector:
-        df = df[df['Sector'] == sector]
-    if market:
-        df = df[df['Market'] == market]
     if factor not in df.columns:
         return _empty_figure()
 
@@ -373,44 +384,53 @@ def render_ranking_chart(
 @callback(
     Output('xsection-table-container', 'children'),
     Input('xsection-store', 'data'),
-    Input('xsection-sector', 'value'),
-    Input('xsection-market', 'value'),
 )
-def render_xsection_table(
-    data: list | None,
-    sector: str | None,
-    market: str | None,
-) -> Any:
+def render_xsection_table(store: dict | None) -> Any:
     """DataTable of all tickers with all factors, formatted."""
-    if not data:
+    if not store or not store.get('records'):
         return html.P(
-            'No data — select a date and wait for computation.', className='no-data'
+            'No data — select a date and click Run.', className='no-data'
         )
 
-    df = pd.DataFrame(data)
-    if sector and 'Sector' in df.columns:
-        df = df[df['Sector'] == sector]
-    if market and 'Market' in df.columns:
-        df = df[df['Market'] == market]
+    df = pd.DataFrame(store['records'])
     if df.empty:
         return html.P('No data for selected filters.', className='no-data')
 
     display_cols = ['Ticker', 'Company Name', 'Sector', 'mktcap'] + _ALL_FACTOR_COLS
     display_cols = [c for c in display_cols if c in df.columns]
 
+    from dash.dash_table.Format import Format, Scheme, Symbol
+
+    numeric_cols = {c for c in display_cols if c in FACTOR_LABELS or c == 'mktcap'}
+
     rows = []
     for _, r in df.iterrows():
         row: dict = {}
         for c in display_cols:
-            row[c] = (
-                _fmt(r.get(c), c)
-                if c in FACTOR_LABELS or c == 'mktcap'
-                else r.get(c, '')
-            )
+            if c in numeric_cols:
+                v = r.get(c)
+                try:
+                    fv = float(v)  # type: ignore[arg-type]
+                    row[c] = round(fv / 1e9, 2) if c == 'mktcap' else (round(fv, 4) if isfinite(fv) else None)
+                except (TypeError, ValueError):
+                    row[c] = None
+            else:
+                row[c] = r.get(c, '')
         rows.append(row)
 
+    def _col_fmt(c: str) -> dict[str, Any]:
+        if c == 'mktcap':
+            return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.fixed, symbol=Symbol.yes, symbol_prefix='$')}
+        if c in _PCT_FACTORS:
+            return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.percentage)}
+        if c in FACTOR_LABELS:
+            return {'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)}
+        return {}
+
+    mktcap_label = 'Mkt Cap ($B)'
     columns: list[Any] = [
-        {'name': FACTOR_LABELS.get(c, c), 'id': c} for c in display_cols
+        {'name': mktcap_label if c == 'mktcap' else FACTOR_LABELS.get(c, c), 'id': c, **_col_fmt(c)}
+        for c in display_cols
     ]
 
     left_cols = [
