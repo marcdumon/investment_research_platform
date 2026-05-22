@@ -8,6 +8,7 @@ from irp.factors._cols import (
     PRICE_CLOSE,
     PRICE_DATE,
     PRICE_TICKER,
+    PUBLISH_DATE,
     REPORT_DATE,
     TICKER,
 )
@@ -23,7 +24,17 @@ def _prices(*rows: dict) -> pd.DataFrame:
 
 
 class TestPitLatest:
-    def test_returns_most_recent_row_per_ticker(self):
+    # ── Fallback path (no Publish Date column) ────────────────────────
+
+    def test_fallback_uses_report_date_plus_60(self):
+        # Report Date 2024-02-15 → effective = 2024-04-15
+        df = _fund({TICKER: 'AAPL', REPORT_DATE: '2024-02-15', 'Revenue': 100})
+        # as_of = 2024-04-14: not yet public
+        assert pit_latest(df, datetime.date(2024, 4, 14)).empty
+        # as_of = 2024-04-15: just became public
+        assert len(pit_latest(df, datetime.date(2024, 4, 15))) == 1
+
+    def test_fallback_returns_most_recent_per_ticker(self):
         df = _fund(
             {TICKER: 'AAPL', REPORT_DATE: '2024-02-15', 'Revenue': 100},
             {TICKER: 'AAPL', REPORT_DATE: '2023-08-10', 'Revenue': 90},
@@ -34,7 +45,8 @@ class TestPitLatest:
         aapl = result.loc[result[TICKER] == 'AAPL'].iloc[0]
         assert aapl['Revenue'] == 100
 
-    def test_excludes_rows_after_as_of_date(self):
+    def test_fallback_excludes_row_not_yet_public(self):
+        # Report Date 2024-07-01 → effective 2024-08-30; as_of 2024-06-01 too early
         df = _fund(
             {TICKER: 'AAPL', REPORT_DATE: '2024-07-01', 'Revenue': 120},
             {TICKER: 'AAPL', REPORT_DATE: '2024-02-15', 'Revenue': 100},
@@ -43,17 +55,12 @@ class TestPitLatest:
         assert len(result) == 1
         assert result.iloc[0]['Revenue'] == 100
 
-    def test_inclusive_on_exact_as_of_date(self):
-        df = _fund({TICKER: 'AAPL', REPORT_DATE: '2024-06-01', 'Revenue': 100})
-        result = pit_latest(df, datetime.date(2024, 6, 1))
-        assert len(result) == 1
-
-    def test_returns_empty_when_all_rows_after_as_of(self):
+    def test_fallback_returns_empty_when_all_too_recent(self):
         df = _fund({TICKER: 'AAPL', REPORT_DATE: '2025-01-01', 'Revenue': 100})
         result = pit_latest(df, datetime.date(2024, 6, 1))
         assert result.empty
 
-    def test_tickers_with_only_future_rows_are_absent(self):
+    def test_fallback_ticker_absent_when_all_rows_too_recent(self):
         df = _fund(
             {TICKER: 'AAPL', REPORT_DATE: '2024-02-01', 'Revenue': 100},
             {TICKER: 'GOOG', REPORT_DATE: '2025-01-01', 'Revenue': 999},
@@ -72,6 +79,44 @@ class TestPitLatest:
         df = _fund({TICKER: 'AAPL', REPORT_DATE: '2024-02-01', 'Revenue': 100, 'NetIncome': 20})
         result = pit_latest(df, datetime.date(2024, 6, 1))
         assert set(df.columns) == set(result.columns)
+
+    # ── Publish Date path ─────────────────────────────────────────────
+
+    def test_publish_date_used_when_present(self):
+        # Report Date 2024-01-01 but Publish Date 2024-03-15
+        df = _fund({TICKER: 'AAPL', REPORT_DATE: '2024-01-01', PUBLISH_DATE: '2024-03-15', 'Revenue': 100})
+        assert pit_latest(df, datetime.date(2024, 3, 14)).empty
+        assert len(pit_latest(df, datetime.date(2024, 3, 15))) == 1
+
+    def test_publish_date_earlier_than_fallback(self):
+        # Filed quickly: Publish Date < Report Date + 60d
+        df = _fund({TICKER: 'AAPL', REPORT_DATE: '2024-01-01', PUBLISH_DATE: '2024-01-20', 'Revenue': 100})
+        assert len(pit_latest(df, datetime.date(2024, 1, 20))) == 1
+
+    def test_null_publish_date_falls_back_to_report_plus_60(self):
+        df = _fund({TICKER: 'AAPL', REPORT_DATE: '2024-01-01', PUBLISH_DATE: None, 'Revenue': 100})
+        # effective = 2024-01-01 + 60 = 2024-03-01
+        assert pit_latest(df, datetime.date(2024, 2, 28)).empty
+        assert len(pit_latest(df, datetime.date(2024, 3, 1))) == 1
+
+    def test_mixed_publish_date_and_null(self):
+        df = _fund(
+            {TICKER: 'AAPL', REPORT_DATE: '2024-01-01', PUBLISH_DATE: '2024-01-20', 'Revenue': 100},
+            {TICKER: 'MSFT', REPORT_DATE: '2024-01-01', PUBLISH_DATE: None, 'Revenue': 200},
+        )
+        # 2024-01-25: AAPL published, MSFT not yet (fallback = Mar 1)
+        result = pit_latest(df, datetime.date(2024, 1, 25))
+        assert list(result[TICKER]) == ['AAPL']
+
+    def test_publish_date_picks_correct_row_per_ticker(self):
+        df = _fund(
+            {TICKER: 'AAPL', REPORT_DATE: '2024-07-01', PUBLISH_DATE: '2024-07-30', 'Revenue': 120},
+            {TICKER: 'AAPL', REPORT_DATE: '2024-01-01', PUBLISH_DATE: '2024-01-20', 'Revenue': 100},
+        )
+        result = pit_latest(df, datetime.date(2024, 6, 1))
+        assert result.iloc[0]['Revenue'] == 100
+        result2 = pit_latest(df, datetime.date(2024, 8, 1))
+        assert result2.iloc[0]['Revenue'] == 120
 
 
 class TestPitPrice:

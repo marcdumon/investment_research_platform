@@ -140,6 +140,7 @@ def run_composite_backtest(
     freq: Literal['Q', 'A'] = 'Q',
     normalize: str = 'zscore',
     use_sector_neutral: bool = False,
+    tickers: list[str] | None = None,
 ) -> dict:
     """IC series and quintile cumulative returns for a multi-factor composite.
 
@@ -177,13 +178,13 @@ def run_composite_backtest(
         else:
             dates_to_compute.append(d)
 
-    raw_prices = yahoo_prices(None)
+    raw_prices = yahoo_prices(tickers)
 
     if dates_to_compute:
         logger.info(f'composite backtest: computing {len(dates_to_compute)} uncached cross-sections')
-        raw_income   = fundamentals(None, 'income',   variant)
-        raw_balance  = fundamentals(None, 'balance',  variant)
-        raw_cashflow = fundamentals(None, 'cashflow', variant)
+        raw_income   = fundamentals(tickers, 'income',   variant)
+        raw_balance  = fundamentals(tickers, 'balance',  variant)
+        raw_cashflow = fundamentals(tickers, 'cashflow', variant)
         for d in dates_to_compute:
             xs = _cross_section_from_raw(raw_income, raw_balance, raw_cashflow, raw_prices, d, variant)
             if not xs.empty:
@@ -197,6 +198,8 @@ def run_composite_backtest(
 
     cross_sections_enriched: dict[datetime.date, pd.DataFrame] = {}
     for d, xs in cross_sections_raw.items():
+        if tickers is not None:
+            xs = xs[xs.index.isin(tickers)]
         score = build_composite(xs, weights, normalize=normalize, sector=sector)
         xs_out = xs.copy()
         xs_out['__composite__'] = score
