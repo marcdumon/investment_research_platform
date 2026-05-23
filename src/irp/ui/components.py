@@ -10,5 +10,6 @@ def navbar() -> html.Nav:
             dcc.Link('Ticker', href='/ticker', className='nav-link'),
             dcc.Link('Factors', href='/factors', className='nav-link'),
             dcc.Link('Backtest', href='/backtest', className='nav-link'),
+            dcc.Link('Screener', href='/screener', className='nav-link'),
         ]),
     ])
