@@ -1,5 +1,9 @@
 
 
+[factors]
+cache_workers = 4   # threads for parallel cache precompute (ThreadPoolExecutor)
+min_ic_obs    = 20   # minimum tickers per date required to compute a valid IC
+
 [database]
 path = "/mnt/Dev/active_python_projects/investment_research_platform/data/irp.duckdb"
 

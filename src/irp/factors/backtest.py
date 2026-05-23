@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from irp.core.config import config
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
 
 
@@ -129,7 +130,7 @@ def compute_backtest(
         except KeyError:
             continue
         merged = pd.DataFrame({'factor': f_vals, 'fwd_ret': fwd_d}).dropna()
-        if len(merged) < 20:
+        if len(merged) < config.factors.min_ic_obs:
             ic_records.append((d, float('nan')))
             continue
         ic_val, _ = stats.spearmanr(merged['factor'], merged['fwd_ret'])
