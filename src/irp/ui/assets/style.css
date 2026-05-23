@@ -405,10 +405,9 @@ a { color: var(--accent); }
 
 .factors-controls {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 14px 20px;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 20px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   position: sticky;
@@ -474,13 +473,26 @@ a { color: var(--accent); }
 
 .bt-controls {
   display: flex;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 16px 20px;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px 20px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 0 8px 8px 8px;
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  padding: 8px 0;
+}
+
+.control-row + .control-row {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 4px;
 }
 
 .bt-control-group {
