@@ -13,6 +13,7 @@ from dash.exceptions import PreventUpdate
 
 from irp.features.composite import PRESETS
 from irp.factors.compute import run_backtest, run_composite_backtest
+from irp.query.watchlists import list_watchlists, load_watchlist
 from irp.ui.factor_meta import FACTOR_OPTIONS
 from irp.ui.theme import ACCENT, GRID, MUTED
 
@@ -136,6 +137,7 @@ layout = html.Div(
     children=[
         dcc.Store(id='backtest-store'),
         dcc.Store(id='backtest-init', data=1),
+        dcc.Store(id='backtest-wl-trigger', data=0),
         html.H2('Factor Backtest', className='page-title'),
         html.P(
             'Spearman IC series and equal-weight quintile cumulative returns '
@@ -268,6 +270,19 @@ layout = html.Div(
                         html.Div(
                             className='bt-control-group',
                             children=[
+                                html.Label('Watchlist', className='control-label'),
+                                dcc.Dropdown(
+                                    id='bt-watchlist',
+                                    placeholder='None (use market/sector)',
+                                    clearable=True,
+                                    className='control-dropdown',
+                                    style={'minWidth': '190px'},
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            className='bt-control-group',
+                            children=[
                                 html.Label('Horizon', className='control-label'),
                                 dcc.Dropdown(
                                     id='bt-horizon',
@@ -391,13 +406,32 @@ layout = html.Div(
 
 @callback(
     Output('bt-sector', 'options'),
+    Output('bt-watchlist', 'options'),
     Input('backtest-init', 'data'),
+    Input('backtest-wl-trigger', 'data'),
 )
-def load_sector_options(_: Any) -> list[dict]:
+def load_sector_options(_: Any, _wl: Any) -> tuple[list, list]:
     from irp.query.simfin import sector_map
 
     sectors = sorted(sector_map().dropna().unique().tolist())
-    return [{'label': s, 'value': s} for s in sectors]
+    sector_opts = [{'label': s, 'value': s} for s in sectors]
+    wl_df = list_watchlists()
+    wl_opts = (
+        [{'label': f'{r["name"]} ({r["n"]})', 'value': r['name']}
+         for _, r in wl_df.iterrows()]
+        if not wl_df.empty else []
+    )
+    return sector_opts, wl_opts
+
+
+@callback(
+    Output('bt-sector', 'disabled'),
+    Output('bt-market', 'disabled'),
+    Input('bt-watchlist', 'value'),
+)
+def toggle_bt_filters(watchlist: str | None) -> tuple[bool, bool]:
+    active = bool(watchlist)
+    return active, active
 
 
 @callback(
@@ -426,6 +460,7 @@ def toggle_mode_controls(mode: str) -> tuple[dict, dict]:
     State('bt-end-year', 'value'),
     State('bt-market', 'value'),
     State('bt-sector', 'value'),
+    State('bt-watchlist', 'value'),
     running=[
         (Output('bt-run-btn', 'disabled'), True, False),
         (Output('bt-run-btn', 'children'), 'Running...', 'Run'),
@@ -446,6 +481,7 @@ def run_bt(
     end_yr,
     market,
     sector,
+    watchlist,
 ):
     if not n_clicks or not horizon:
         raise PreventUpdate
@@ -454,7 +490,13 @@ def run_bt(
         end_yr = int(end_yr or _CURRENT_YEAR)
         if end_yr <= start_yr:
             return {'error': f'End year ({end_yr}) must be after start year ({start_yr})'}
-        tickers = _filtered_tickers(market or '', sector)
+        if watchlist:
+            try:
+                tickers = load_watchlist(watchlist)
+            except KeyError:
+                return {'error': f'Watchlist "{watchlist}" not found.'}
+        else:
+            tickers = _filtered_tickers(market or '', sector)
 
         if mode == 'composite':
             weights = PRESETS.get(preset or 'composite', PRESETS['composite'])
