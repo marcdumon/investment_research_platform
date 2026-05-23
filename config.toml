@@ -5,10 +5,12 @@ cache_workers = 4   # threads for parallel cache precompute (ThreadPoolExecutor)
 min_ic_obs    = 20   # minimum tickers per date required to compute a valid IC
 
 [database]
-path = "/mnt/Dev/active_python_projects/investment_research_platform/data/irp.duckdb"
+path = "/mnt/Databases/investment_research_platform/data/irp.duckdb"
+# path = "/mnt/Dev/active_python_projects/investment_research_platform/data/irp.duckdb"
 
 [data]
-root_dir = "/mnt/Dev/active_python_projects/investment_research_platform/data"
+root_dir = "/mnt/Databases/investment_research_platform/data"
+# root_dir = "/mnt/Dev/active_python_projects/investment_research_platform/data"
 
 [providers.simfin]
 raw_dir = "simfin/raw"
