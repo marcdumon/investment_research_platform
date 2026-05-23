@@ -440,15 +440,15 @@ print(result['mean_ic'], result['ic_tstat'])
 uv run python -m irp.ui
 ```
 
-Multi-page web UI. Pages:
+Multi-page web UI. All pages linked in the navbar.
 
 | Route | Description |
 |---|---|
 | `/` | Home |
 | `/ingest` | Data ingestion controls + live log |
 | `/ticker` | Per-ticker fundamentals, prices, corporate actions |
-| `/factors` | Cross-section factor ranking (filterable by market/sector) + single-ticker factor history |
-| `/backtest` | Single-factor IC/quintile backtest (rolling IC line, EW benchmark) + Composite Model tab |
+| `/factors` | Cross-section screening (filterable by market/sector/date) + single-ticker factor history |
+| `/backtest` | Single-factor and composite backtests — color-coded IC/t-stat chips, IC ±0.05 bands, Q1/Q5 terminal annotations |
 
 ---
 
