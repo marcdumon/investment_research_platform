@@ -11,16 +11,26 @@ from dataclasses import dataclass
 class FactorDef:
     name: str    # DataFrame column key, e.g. 'pe'
     label: str   # UI display label, e.g. 'P/E'
-    pct: bool = False  # format as percentage in UI
-    group: str = ''    # 'valuation' | 'profitability' | 'momentum' | 'leverage'
+    pct: bool = False           # format as percentage in UI
+    group: str = ''             # 'valuation' | 'profitability' | 'momentum' | 'leverage'
+    positive_only: bool = False # mask non-positive values as NaN (e.g. P/E for loss-makers)
 
 
 _REGISTRY: dict[str, FactorDef] = {}
 
 
-def register(name: str, label: str, *, pct: bool = False, group: str = '') -> None:
+def register(
+    name: str,
+    label: str,
+    *,
+    pct: bool = False,
+    group: str = '',
+    positive_only: bool = False,
+) -> None:
     """Register a factor definition. Called at module level in each compute file."""
-    _REGISTRY[name] = FactorDef(name=name, label=label, pct=pct, group=group)
+    _REGISTRY[name] = FactorDef(
+        name=name, label=label, pct=pct, group=group, positive_only=positive_only,
+    )
 
 
 def all_factors() -> list[FactorDef]:

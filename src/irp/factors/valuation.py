@@ -5,31 +5,30 @@ All inputs must already be PIT-aligned (one row per ticker). No DB access.
 import pandas as pd
 
 from irp.factors._cols import (
-    TICKER,
-    REVENUE,
-    OPERATING_INCOME,
-    NET_INCOME,
-    TOTAL_EQUITY,
     CASH_AND_ST_INVESTMENTS,
-    SHORT_TERM_DEBT,
-    LONG_TERM_DEBT,
-    SHARES_DILUTED_BAL,
-    CFO,
     CFI,
+    CFO,
     DA,
+    LONG_TERM_DEBT,
+    NET_INCOME,
+    OPERATING_INCOME,
     PRICE_CLOSE,
+    REVENUE,
+    SHARES_DILUTED_BAL,
+    SHORT_TERM_DEBT,
+    TICKER,
+    TOTAL_EQUITY,
 )
 from irp.factors._utils import _safe_div
 from irp.factors.registry import register
 
-register('pe',        'P/E',       group='valuation')
-register('pb',        'P/B',       group='valuation')
+register('pe',        'P/E',       group='valuation', positive_only=True)
+register('pb',        'P/B',       group='valuation', positive_only=True)
 register('ps',        'P/S',       group='valuation')
-register('ev_ebitda', 'EV/EBITDA', group='valuation')
-register('ev_ebit',   'EV/EBIT',   group='valuation')
+register('ev_ebitda', 'EV/EBITDA', group='valuation', positive_only=True)
+register('ev_ebit',   'EV/EBIT',   group='valuation', positive_only=True)
 register('ev_sales',  'EV/Sales',  group='valuation')
 register('fcf_yield', 'FCF Yield', pct=True, group='valuation')
-
 
 def compute_valuation(
     income: pd.DataFrame,
