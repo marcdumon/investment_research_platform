@@ -14,6 +14,7 @@ from dash.exceptions import PreventUpdate
 
 from irp.factors import cross_section, ticker_factor_history
 from irp.query.simfin import companies as _companies
+from irp.query.watchlists import list_watchlists, load_watchlist
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from dash.dash_table.Format import Format, Scheme, Symbol
 
@@ -121,6 +122,7 @@ layout = html.Div(
         dcc.Store(id='companies-store'),
         dcc.Store(id='xsection-store'),
         dcc.Store(id='factor-history-store'),
+        dcc.Store(id='factors-wl-trigger', data=0),
         dcc.Tabs(
             id='factors-tabs',
             value='tab-screening',
@@ -166,6 +168,13 @@ layout = html.Div(
                                             clearable=True,
                                             className='filter-dropdown',
                                             style={'minWidth': '130px'},
+                                        ),
+                                        dcc.Dropdown(
+                                            id='xsection-watchlist',
+                                            placeholder='Watchlist…',
+                                            clearable=True,
+                                            className='filter-dropdown',
+                                            style={'minWidth': '160px'},
                                         ),
                                     ],
                                 ),
@@ -283,9 +292,11 @@ layout = html.Div(
     Output('xsection-sector', 'options'),
     Output('xsection-market', 'options'),
     Output('ts-ticker', 'options'),
+    Output('xsection-watchlist', 'options'),
     Input('factors-init', 'data'),
+    Input('factors-wl-trigger', 'data'),
 )
-def load_options(_: Any) -> tuple[Any, list, list, list]:
+def load_options(_: Any, _wl: Any) -> tuple[Any, list, list, list, list]:
     """Populate filter dropdowns from SimFin companies table on page load."""
     try:
         df = _companies()
@@ -294,7 +305,7 @@ def load_options(_: Any) -> tuple[Any, list, list, list]:
         return None, [], [], []
     if df.empty:
         logger.warning('load_options: companies() returned empty DataFrame')
-        return None, [], [], []
+        return None, [], [], [], []
 
     sectors = sorted(df['Sector'].dropna().unique())
     markets = sorted(df['Market'].dropna().unique())
@@ -305,11 +316,28 @@ def load_options(_: Any) -> tuple[Any, list, list, list]:
         {'label': f'{r["Ticker"]} – {r["Company Name"]}', 'value': r['Ticker']}
         for _, r in df.sort_values('Ticker').iterrows()
     ]
+    wl_df = list_watchlists()
+    wl_opts = (
+        [{'label': f'{r["name"]} ({r["n"]})', 'value': r['name']}
+         for _, r in wl_df.iterrows()]
+        if not wl_df.empty else []
+    )
     slim = df[['Ticker', 'Company Name', 'Sector', 'Market']].fillna('')
     logger.info(
-        f'load_options: {len(sector_opts)} sectors, {len(market_opts)} markets, {len(ticker_opts)} tickers'
+        f'load_options: {len(sector_opts)} sectors, {len(market_opts)} markets, '
+        f'{len(ticker_opts)} tickers, {len(wl_opts)} watchlists'
     )
-    return slim.to_dict('records'), sector_opts, market_opts, ticker_opts
+    return slim.to_dict('records'), sector_opts, market_opts, ticker_opts, wl_opts
+
+
+@callback(
+    Output('xsection-sector', 'disabled'),
+    Output('xsection-market', 'disabled'),
+    Input('xsection-watchlist', 'value'),
+)
+def toggle_xsection_filters(watchlist: str | None) -> tuple[bool, bool]:
+    active = bool(watchlist)
+    return active, active
 
 
 @callback(
@@ -320,6 +348,7 @@ def load_options(_: Any) -> tuple[Any, list, list, list]:
     State('xsection-variant', 'value'),
     State('xsection-sector', 'value'),
     State('xsection-market', 'value'),
+    State('xsection-watchlist', 'value'),
     State('ranking-factor', 'value'),
     State('ranking-top', 'value'),
     running=[
@@ -334,6 +363,7 @@ def compute_xsection(
     variant: str,
     sector: str | None,
     market: str | None,
+    watchlist: str | None,
     factor: str | None,
     top_n: int | None,
 ) -> Any:
@@ -341,16 +371,25 @@ def compute_xsection(
     if not as_of_str or not companies_data:
         raise PreventUpdate
     as_of = datetime.date.fromisoformat(as_of_str[:10])
-    df = cross_section(as_of, variant)  # type: ignore[arg-type]
+
+    tickers = None
+    if watchlist:
+        try:
+            tickers = load_watchlist(watchlist)
+        except KeyError:
+            logger.warning(f'compute_xsection: watchlist "{watchlist}" not found')
+
+    df = cross_section(as_of, variant, tickers=tickers)  # type: ignore[arg-type]
     if df.empty:
         return {}
     df = df.reset_index()
     comp = pd.DataFrame(companies_data)[['Ticker', 'Company Name', 'Sector', 'Market']]
     df = df.merge(comp, on='Ticker', how='left')
-    if sector:
-        df = df[df['Sector'] == sector]
-    if market:
-        df = df[df['Market'] == market]
+    if not watchlist:
+        if sector:
+            df = df[df['Sector'] == sector]
+        if market:
+            df = df[df['Market'] == market]
     return {'records': df.to_dict('records'), 'factor': factor or 'pe', 'top_n': top_n or 50}
 
 
