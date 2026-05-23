@@ -62,10 +62,16 @@ class ProvidersConfig(BaseModel):
     yahoo: YahooConfig
 
 
+class FactorsConfig(BaseModel):
+    cache_workers: int = 4
+    min_ic_obs: int = 20
+
+
 class Config(BaseModel):
     database: DatabaseConfig
     data: DataConfig
     providers: ProvidersConfig
+    factors: FactorsConfig = Field(default_factory=FactorsConfig)
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> 'Config':

@@ -2,6 +2,7 @@
 
 All inputs must already be PIT-aligned (one row per ticker). No DB access.
 """
+import numpy as np
 import pandas as pd
 
 from irp.factors._cols import (
@@ -29,6 +30,7 @@ register('ev_ebitda', 'EV/EBITDA', group='valuation', positive_only=True)
 register('ev_ebit',   'EV/EBIT',   group='valuation', positive_only=True)
 register('ev_sales',  'EV/Sales',  group='valuation')
 register('fcf_yield', 'FCF Yield', pct=True, group='valuation')
+register('rand',      'Random',    group='valuation')
 
 def compute_valuation(
     income: pd.DataFrame,
@@ -97,6 +99,7 @@ def compute_valuation(
     out['ev_ebit']   = _safe_div(w['ev'], w[OPERATING_INCOME])
     out['ev_sales']  = _safe_div(w['ev'], w[REVENUE])
     out['fcf_yield'] = _safe_div(w['fcf'], w['mktcap'])
+    out['rand']      = np.random.rand(out.shape[0])
 
     out.index.name = TICKER
     return out

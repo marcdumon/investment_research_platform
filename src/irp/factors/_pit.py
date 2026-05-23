@@ -9,6 +9,8 @@ import pandas as pd
 
 from irp.factors._cols import TICKER, REPORT_DATE, PUBLISH_DATE, PRICE_TICKER, PRICE_DATE, PRICE_CLOSE
 
+_EFF_COL = '_eff'
+
 
 def _eff_date(df: pd.DataFrame) -> pd.Series:
     """Effective public date: Publish Date if present, else Report Date + 60 days."""
@@ -17,6 +19,30 @@ def _eff_date(df: pd.DataFrame) -> pd.Series:
         pub = pd.to_datetime(df[PUBLISH_DATE])
         return pub.where(pub.notna(), rd + pd.Timedelta(days=60))
     return rd + pd.Timedelta(days=60)
+
+
+def pit_prepare(df: pd.DataFrame, kind: str = 'fundamental') -> pd.DataFrame:
+    """Pre-process a raw DataFrame once before a multi-date rebalance loop.
+
+    Avoids O(N × rows) repeated date parsing across N rebalance dates.
+    Pass the result to pit_latest / pit_ttm / pit_price; they detect the
+    pre-processed state via the '_eff' column (fundamental) or datetime dtype (price)
+    and skip redundant work.
+
+    kind='fundamental': parses REPORT_DATE + PUBLISH_DATE, adds '_eff', sorts by
+                        [TICKER, REPORT_DATE].
+    kind='price'      : parses PRICE_DATE only.
+    """
+    out = df.copy()
+    if kind == 'fundamental':
+        out[REPORT_DATE] = pd.to_datetime(out[REPORT_DATE])
+        if PUBLISH_DATE in out.columns:
+            out[PUBLISH_DATE] = pd.to_datetime(out[PUBLISH_DATE])
+        out[_EFF_COL] = _eff_date(out)
+        out = out.sort_values([TICKER, REPORT_DATE])
+    else:
+        out[PRICE_DATE] = pd.to_datetime(out[PRICE_DATE])
+    return out
 
 
 def pit_latest(
@@ -30,10 +56,18 @@ def pit_latest(
     from using Report Date alone.
 
     Returns a reset-index DataFrame with the same columns as the input.
+    If pit_prepare() was called on the input, date parsing and copy are skipped.
     """
+    cutoff = pd.Timestamp(as_of_date)
+    if _EFF_COL in fundamentals.columns:
+        eligible = fundamentals.loc[fundamentals[_EFF_COL] <= cutoff]
+        if eligible.empty:
+            return fundamentals.iloc[0:0].reset_index(drop=True)
+        idx = eligible.groupby(TICKER)[REPORT_DATE].idxmax()
+        return eligible.loc[idx].reset_index(drop=True)
+    # slow path — pit_prepare was not called
     df = fundamentals.copy()
     df[REPORT_DATE] = pd.to_datetime(df[REPORT_DATE])
-    cutoff = pd.Timestamp(as_of_date)
     eligible = df.loc[_eff_date(df) <= cutoff]
     if eligible.empty:
         return df.iloc[0:0].reset_index(drop=True)
@@ -54,27 +88,32 @@ def pit_ttm(
     Balance sheet (stock) data should still use pit_latest.
 
     Tickers with no eligible rows are absent from the result.
+    If pit_prepare() was called on the input, date parsing, copy, and sort are skipped;
+    the inner for-loop is replaced with a vectorized groupby.
     """
-    df = fundamentals.copy()
-    df[REPORT_DATE] = pd.to_datetime(df[REPORT_DATE])
     cutoff = pd.Timestamp(as_of_date)
-    eligible = df.loc[_eff_date(df) <= cutoff]
+
+    if _EFF_COL in fundamentals.columns:
+        eligible = fundamentals.loc[fundamentals[_EFF_COL] <= cutoff]
+        empty_frame = fundamentals
+    else:
+        # slow path — pit_prepare was not called
+        df = fundamentals.copy()
+        df[REPORT_DATE] = pd.to_datetime(df[REPORT_DATE])
+        eligible = df.loc[_eff_date(df) <= cutoff].sort_values([TICKER, REPORT_DATE])
+        empty_frame = df
+
     if eligible.empty:
-        return df.iloc[0:0].reset_index(drop=True)
+        return empty_frame.iloc[0:0].reset_index(drop=True)
 
-    eligible = eligible.sort_values([TICKER, REPORT_DATE])
     numeric_cols = eligible.select_dtypes(include='number').columns.tolist()
-
-    rows = []
-    for _, g in eligible.groupby(TICKER, sort=False):
-        last_n = g.tail(n)
-        row = last_n.iloc[[-1]].copy()
-        row[numeric_cols] = last_n[numeric_cols].sum().values
-        rows.append(row)
-
-    if not rows:
-        return eligible.iloc[0:0].reset_index(drop=True)
-    return pd.concat(rows, ignore_index=True)
+    # rank 0 = most recent row per ticker (frame sorted ascending by date)
+    _rank = eligible.groupby(TICKER, sort=False).cumcount(ascending=False)
+    last_n = eligible[_rank < n]
+    sums = last_n.groupby(TICKER)[numeric_cols].sum()
+    most_recent = eligible[_rank == 0].set_index(TICKER).copy()
+    most_recent.update(sums)
+    return most_recent.reset_index()
 
 
 def pit_price(
@@ -85,14 +124,20 @@ def pit_price(
 
     Returns a DataFrame with columns [Ticker, Date, Close].
     Tickers with no price on or before as_of_date are absent.
+    If pit_prepare() was called on the input, date parsing and copy are skipped.
     """
+    cutoff = pd.Timestamp(as_of_date)
+    if pd.api.types.is_datetime64_any_dtype(prices[PRICE_DATE]):
+        eligible = prices.loc[prices[PRICE_DATE] <= cutoff]
+        if eligible.empty:
+            return pd.DataFrame(columns=[PRICE_TICKER, PRICE_DATE, PRICE_CLOSE])
+        idx = eligible.groupby(PRICE_TICKER)[PRICE_DATE].idxmax()
+        return eligible.loc[idx, [PRICE_TICKER, PRICE_DATE, PRICE_CLOSE]].reset_index(drop=True)
+    # slow path — pit_prepare was not called
     df = prices.copy()
     df[PRICE_DATE] = pd.to_datetime(df[PRICE_DATE])
-    cutoff = pd.Timestamp(as_of_date)
     eligible = df.loc[df[PRICE_DATE] <= cutoff]
     if eligible.empty:
         return pd.DataFrame(columns=[PRICE_TICKER, PRICE_DATE, PRICE_CLOSE])
     idx = eligible.groupby(PRICE_TICKER)[PRICE_DATE].idxmax()
-    return eligible.loc[idx, [PRICE_TICKER, PRICE_DATE, PRICE_CLOSE]].reset_index(
-        drop=True
-    )
+    return eligible.loc[idx, [PRICE_TICKER, PRICE_DATE, PRICE_CLOSE]].reset_index(drop=True)

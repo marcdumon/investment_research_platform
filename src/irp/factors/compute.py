@@ -9,9 +9,10 @@ from typing import Literal
 
 import pandas as pd
 
+from irp.core.config import config
 from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE, TICKER
-from irp.factors._pit import pit_latest, pit_price, pit_ttm
+from irp.factors._pit import pit_latest, pit_prepare, pit_price, pit_ttm
 from irp.factors.backtest import compute_backtest, compute_forward_returns
 from irp.factors.valuation import compute_valuation
 from irp.factors.profitability import compute_profitability
@@ -55,6 +56,39 @@ def _cross_section_from_raw(
         if f.positive_only and f.name in result.columns:
             result[f.name] = result[f.name].where(result[f.name] > 0)
     result.index.name = TICKER
+    return result
+
+
+def _compute_and_cache(
+    dates: list[datetime.date],
+    variant: str,
+    raw_income: pd.DataFrame,
+    raw_balance: pd.DataFrame,
+    raw_cashflow: pd.DataFrame,
+    raw_prices: pd.DataFrame,
+    write_cache: bool = True,
+) -> dict[datetime.date, pd.DataFrame]:
+    """Compute cross-sections for `dates` in parallel; optionally write to cache.
+
+    Returns dict of date → DataFrame (non-empty results only).
+    Cache writes are serialised through the calling thread so no lock is needed.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _one(d):
+        return d, _cross_section_from_raw(
+            raw_income, raw_balance, raw_cashflow, raw_prices, d, variant
+        )
+
+    result: dict[datetime.date, pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=config.factors.cache_workers) as ex:
+        futures = {ex.submit(_one, d): d for d in dates}
+        for fut in as_completed(futures):
+            d, xs = fut.result()
+            if not xs.empty:
+                result[d] = xs
+                if write_cache:
+                    _cache.store(d, variant, xs)
     return result
 
 
@@ -184,18 +218,19 @@ def run_composite_backtest(
         else:
             dates_to_compute.append(d)
 
-    raw_prices = yahoo_prices(tickers)
+    raw_prices = pit_prepare(yahoo_prices(tickers), 'price')
 
     if dates_to_compute:
         logger.info(f'composite backtest: computing {len(dates_to_compute)} uncached cross-sections')
-        raw_income   = fundamentals(tickers, 'income',   variant)
-        raw_balance  = fundamentals(tickers, 'balance',  variant)
-        raw_cashflow = fundamentals(tickers, 'cashflow', variant)
-        for d in dates_to_compute:
-            xs = _cross_section_from_raw(raw_income, raw_balance, raw_cashflow, raw_prices, d, variant)
-            if not xs.empty:
-                cross_sections_raw[d] = xs
-                _cache.store(d, variant, xs)
+        raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
+        raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
+        raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
+        cross_sections_raw.update(
+            _compute_and_cache(
+                dates_to_compute, variant,
+                raw_income, raw_balance, raw_cashflow, raw_prices,
+            )
+        )
 
     sector = None
     if use_sector_neutral:
@@ -263,10 +298,10 @@ def run_backtest(
             logger.info(f'backtest cache hit: {factor} h={horizon_days} {variant}/{freq} {start_date}–{end_date}')
             return cached
 
-    raw_income   = fundamentals(tickers, 'income',   variant)
-    raw_balance  = fundamentals(tickers, 'balance',  variant)
-    raw_cashflow = fundamentals(tickers, 'cashflow', variant)
-    raw_prices   = yahoo_prices(tickers)
+    raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
+    raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
+    raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
+    raw_prices   = pit_prepare(yahoo_prices(tickers),                      'price')
 
     pd_freq = 'QE' if freq == 'Q' else 'YE'
     rebalance_dates = [
@@ -294,14 +329,13 @@ def run_backtest(
         f'{n_cached}/{n_total} cross-sections from cache, {len(dates_to_compute)} to compute'
     )
 
-    for d in dates_to_compute:
-        xs = _cross_section_from_raw(
-            raw_income, raw_balance, raw_cashflow, raw_prices, d, variant
+    cross_sections.update(
+        _compute_and_cache(
+            dates_to_compute, variant,
+            raw_income, raw_balance, raw_cashflow, raw_prices,
+            write_cache=(tickers is None),
         )
-        if not xs.empty:
-            cross_sections[d] = xs
-            if tickers is None:
-                _cache.store(d, variant, xs)
+    )
 
     logger.info(f'backtest {factor}: computing IC series and quintile returns...')
     fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
