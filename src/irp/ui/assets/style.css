@@ -430,7 +430,6 @@ a { color: var(--accent); }
   flex-direction: column;
   padding: 24px 28px;
   gap: 24px;
-  max-width: 1200px;
 }
 
 .page-title {

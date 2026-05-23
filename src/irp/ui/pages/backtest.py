@@ -370,6 +370,18 @@ layout = html.Div(
                 ),
             ],
         ),
+        # Spread chart
+        html.Div(
+            className='chart-container',
+            children=[
+                html.H3('Quintile Excess Return vs EW', className='chart-title'),
+                dcc.Graph(
+                    id='bt-spread-chart',
+                    figure=_empty_figure('Run backtest to see results'),
+                    config={'displayModeBar': False},
+                ),
+            ],
+        ),
     ],
 )
 
@@ -660,4 +672,53 @@ def render_quintiles(data):
                     xanchor=xanchor, xshift=xshift,
                 )
     fig.update_layout(yaxis_title='Cumulative log return')
+    return fig
+
+
+@callback(
+    Output('bt-spread-chart', 'figure'),
+    Input('backtest-store', 'data'),
+)
+def render_spread(data):
+    if not data or 'error' in (data or {}) or not data.get('qcr'):
+        return _empty_figure('No quintile data')
+
+    df = pd.DataFrame(data['qcr'])
+    df['date'] = pd.to_datetime(df['date'])
+
+    ew_cols = [c for c in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'] if c in df.columns]
+    if not ew_cols:
+        return _empty_figure('No quintile data')
+
+    ew_vals = df[ew_cols].mean(axis=1)
+    fig = go.Figure(layout=_chart_layout())
+    for i, col in enumerate(['Q1', 'Q2', 'Q3', 'Q4', 'Q5']):
+        if col not in df.columns:
+            continue
+        spread = df[col] - ew_vals
+        fig.add_trace(
+            go.Scatter(
+                x=df['date'],
+                y=spread,
+                mode='lines',
+                name=col,
+                line=dict(color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1),
+                hovertemplate=f'{col}: %{{y:.3f}}<extra></extra>',
+            )
+        )
+    fig.add_hline(y=0, line_color=MUTED, line_width=1)
+    last_date = df['date'].iloc[-1]
+    for col, xanchor, xshift, i in [('Q1', 'right', -6, 0), ('Q5', 'left', 6, 4)]:
+        if col in df.columns:
+            series = (df[col] - ew_vals).dropna()
+            if not series.empty:
+                val = float(series.iloc[-1])
+                fig.add_annotation(
+                    x=last_date, y=val,
+                    text=f'{val:+.2f}',
+                    showarrow=False,
+                    font=dict(color=_QUINTILE_COLOURS[i], size=11),
+                    xanchor=xanchor, xshift=xshift,
+                )
+    fig.update_layout(yaxis_title='Excess cumulative log return vs EW')
     return fig
