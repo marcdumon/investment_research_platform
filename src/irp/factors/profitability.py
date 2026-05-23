@@ -20,13 +20,16 @@ from irp.factors._cols import (
 from irp.factors._utils import _safe_div
 from irp.factors.registry import register
 
-register('gross_margin', 'Gross Margin', pct=True, group='profitability')
-register('op_margin',    'Op. Margin',   pct=True, group='profitability')
-register('net_margin',   'Net Margin',   pct=True, group='profitability')
-register('roe',          'ROE',          pct=True, group='profitability')
-register('roa',          'ROA',          pct=True, group='profitability')
-register('roic',         'ROIC',         pct=True, group='profitability')
-register('fcf_margin',   'FCF Margin',   pct=True, group='profitability')
+register('gross_margin',   'Gross Margin',   pct=True, group='profitability')
+register('op_margin',      'Op. Margin',     pct=True, group='profitability')
+register('net_margin',     'Net Margin',     pct=True, group='profitability')
+register('roe',            'ROE',            pct=True, group='profitability')
+register('roa',            'ROA',            pct=True, group='profitability')
+register('roic',           'ROIC',           pct=True, group='profitability')
+register('fcf_margin',     'FCF Margin',     pct=True, group='profitability')
+register('asset_turnover', 'Asset Turnover',           group='profitability')
+register('cfo_ni_ratio',   'CFO/NI',                   group='quality')
+register('accruals',       'Accruals',                 group='quality')
 
 
 def compute_profitability(
@@ -78,12 +81,15 @@ def compute_profitability(
     w['ic']       = w[TOTAL_EQUITY] + w['net_debt']
 
     out = pd.DataFrame(index=w.index)
-    out['gross_margin'] = _safe_div(w[GROSS_PROFIT],     w[REVENUE])
-    out['op_margin']    = _safe_div(w[OPERATING_INCOME], w[REVENUE])
-    out['net_margin']   = _safe_div(w[NET_INCOME],       w[REVENUE])
-    out['roe']          = _safe_div(w[NET_INCOME],       w[TOTAL_EQUITY])
-    out['roa']          = _safe_div(w[NET_INCOME],       w[TOTAL_ASSETS])
-    out['roic']         = _safe_div(w[OPERATING_INCOME], w['ic'])
-    out['fcf_margin']   = _safe_div(w[CFO],              w[REVENUE])
-    out.index.name      = TICKER
+    out['gross_margin']   = _safe_div(w[GROSS_PROFIT],              w[REVENUE])
+    out['op_margin']      = _safe_div(w[OPERATING_INCOME],         w[REVENUE])
+    out['net_margin']     = _safe_div(w[NET_INCOME],               w[REVENUE])
+    out['roe']            = _safe_div(w[NET_INCOME],               w[TOTAL_EQUITY])
+    out['roa']            = _safe_div(w[NET_INCOME],               w[TOTAL_ASSETS])
+    out['roic']           = _safe_div(w[OPERATING_INCOME],         w['ic'])
+    out['fcf_margin']     = _safe_div(w[CFO],                      w[REVENUE])
+    out['asset_turnover'] = _safe_div(w[REVENUE],                  w[TOTAL_ASSETS])
+    out['cfo_ni_ratio']   = _safe_div(w[CFO],                      w[NET_INCOME])
+    out['accruals']       = _safe_div(w[NET_INCOME] - w[CFO],      w[TOTAL_ASSETS])
+    out.index.name        = TICKER
     return out
