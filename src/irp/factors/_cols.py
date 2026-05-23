@@ -19,12 +19,14 @@ NET_INCOME       = 'Net Income'
 INTEREST_EXPENSE = 'Interest Expense, Net'
 
 # ── Balance sheet ─────────────────────────────────────────────────────
-TOTAL_ASSETS            = 'Total Assets'
-TOTAL_EQUITY            = 'Total Equity'
-TOTAL_LIABILITIES       = 'Total Liabilities'
-CASH_AND_ST_INVESTMENTS = 'Cash, Cash Equivalents & Short Term Investments'
-SHORT_TERM_DEBT         = 'Short Term Debt'
-LONG_TERM_DEBT          = 'Long Term Debt'
+TOTAL_ASSETS               = 'Total Assets'
+TOTAL_EQUITY               = 'Total Equity'
+TOTAL_LIABILITIES          = 'Total Liabilities'
+TOTAL_CURRENT_ASSETS       = 'Total Current Assets'
+TOTAL_CURRENT_LIABILITIES  = 'Total Current Liabilities'
+CASH_AND_ST_INVESTMENTS    = 'Cash, Cash Equivalents & Short Term Investments'
+SHORT_TERM_DEBT            = 'Short Term Debt'
+LONG_TERM_DEBT             = 'Long Term Debt'
 # Shares outstanding at period end; same column name as in income statement.
 SHARES_DILUTED_BAL = 'Shares (Diluted)'
 

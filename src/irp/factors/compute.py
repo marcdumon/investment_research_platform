@@ -19,6 +19,7 @@ from irp.factors.profitability import compute_profitability
 from irp.factors.momentum import compute_momentum
 from irp.factors.leverage import compute_leverage
 from irp.factors.growth import compute_growth
+from irp.factors.piotroski import compute_piotroski
 from irp.factors.registry import all_factors
 from irp.query.simfin import fundamentals
 from irp.query.yahoo import prices as yahoo_prices
@@ -52,8 +53,9 @@ def _cross_section_from_raw(
     mom  = compute_momentum(raw_prices, as_of_date)
     lev  = compute_leverage(income, balance, cashflow)
     grow = compute_growth(raw_income, raw_cashflow, as_of_date, variant)
+    piot = compute_piotroski(raw_income, raw_balance, raw_cashflow, as_of_date, variant)
 
-    result = val.join(prof, how='outer').join(mom, how='outer').join(lev, how='outer').join(grow, how='outer')
+    result = val.join(prof, how='outer').join(mom, how='outer').join(lev, how='outer').join(grow, how='outer').join(piot, how='outer')
     for f in all_factors():
         if f.positive_only and f.name in result.columns:
             result[f.name] = result[f.name].where(result[f.name] > 0)
