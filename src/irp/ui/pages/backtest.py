@@ -122,10 +122,10 @@ def _filtered_tickers(market: str, sector: str | None) -> list[str] | None:
     c = _companies()[['Ticker', 'Sector']]
     df = u.merge(c, on='Ticker', how='left')
     if market:
-        df = df[df['Market'].str.lower() == market.lower()]
+        df = df[df['Market'].str.lower().str.contains(market.lower(), na=False)]
     if sector:
         df = df[df['Sector'] == sector]
-    tickers = df['Ticker'].tolist()
+    tickers = df['Ticker'].dropna().unique().tolist()
     return tickers if tickers else None
 
 
@@ -243,10 +243,10 @@ layout = html.Div(
                                     id='bt-market',
                                     options=[
                                         {'label': 'All markets', 'value': ''},
-                                        {'label': 'US', 'value': 'us'},
-                                        {'label': 'DE', 'value': 'de'},
+                                        {'label': 'Stocks only', 'value': 'stocks'},
+                                        {'label': 'ETFs only', 'value': 'etfs'},
                                     ],
-                                    value='us',
+                                    value='stocks',
                                     clearable=False,
                                     className='control-dropdown',
                                 ),
@@ -514,6 +514,7 @@ def run_bt(
                 })
         mean_ic = result['mean_ic']
         ic_tstat = result['ic_tstat']
+        n_tickers = len(tickers) if tickers is not None else None
         return {
             'ic': ic_records,
             'qcr': qcr_records,
@@ -521,6 +522,7 @@ def run_bt(
             'mean_ic': None if isnan(mean_ic) else float(mean_ic),
             'ic_tstat': None if isnan(ic_tstat) else float(ic_tstat),
             'n_dates': result['n_dates'],
+            'n_tickers': n_tickers,
             'label': label,
         }
     except PreventUpdate:
@@ -544,6 +546,7 @@ def render_ic(data):
     mean_ic = data.get('mean_ic')
     ic_tstat = data.get('ic_tstat')
     n_dates = data.get('n_dates', 0)
+    n_tickers = data.get('n_tickers')
 
     def _fmt_ic(v):
         return f'{v:.3f}' if v is not None and isfinite(v) else 'N/A'
@@ -559,12 +562,14 @@ def render_ic(data):
         else '#e05252' if (ic_tstat is not None and isfinite(ic_tstat))
         else MUTED
     )
+    tickers_label = str(n_tickers) if n_tickers is not None else 'All'
     chips = html.Div(
         className='stat-chips',
         children=[
             _stat_chip('Mean IC', _fmt_ic(mean_ic), ic_color),
             _stat_chip('IC t-stat', _fmt_ic(ic_tstat) if ic_tstat is not None else 'N/A', tstat_color),
             _stat_chip('Dates', str(n_dates)),
+            _stat_chip('Tickers', tickers_label),
         ],
     )
 
