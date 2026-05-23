@@ -111,7 +111,7 @@ def _base_layout(**extra: Any) -> go.Layout:
         xaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=11),
                    zeroline=False, showline=True),
         yaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=11),
-                   zeroline=True, showline=False),
+                   zeroline=False, showline=False),
         legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=10),
                     itemsizing='constant'),
         **extra,
