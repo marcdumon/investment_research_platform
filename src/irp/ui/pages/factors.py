@@ -15,6 +15,8 @@ from dash.exceptions import PreventUpdate
 from irp.factors import cross_section, ticker_factor_history
 from irp.query.simfin import companies as _companies
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
+from dash.dash_table.Format import Format, Scheme, Symbol
+
 from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')
@@ -34,6 +36,17 @@ _TOP_OPTIONS = [
 ]
 
 _DEFAULT_DATE = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
+
+
+def _col_fmt(c: str) -> dict:
+    if c == 'mktcap':
+        return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.fixed, symbol=Symbol.yes, symbol_prefix='$')}
+    if c in _PCT_FACTORS:
+        return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.percentage)}
+    if c in FACTOR_LABELS:
+        return {'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)}
+    return {}
+
 
 
 def _fmt(val: object, factor: str) -> str:
@@ -417,8 +430,6 @@ def render_xsection_table(store: dict | None) -> Any:
     display_cols = ['Ticker', 'Company Name', 'Sector', 'mktcap'] + _ALL_FACTOR_COLS
     display_cols = [c for c in display_cols if c in df.columns]
 
-    from dash.dash_table.Format import Format, Scheme, Symbol
-
     numeric_cols = {c for c in display_cols if c in FACTOR_LABELS or c == 'mktcap'}
 
     rows = []
@@ -435,15 +446,6 @@ def render_xsection_table(store: dict | None) -> Any:
             else:
                 row[c] = r.get(c, '')
         rows.append(row)
-
-    def _col_fmt(c: str) -> dict[str, Any]:
-        if c == 'mktcap':
-            return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.fixed, symbol=Symbol.yes, symbol_prefix='$')}
-        if c in _PCT_FACTORS:
-            return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.percentage)}
-        if c in FACTOR_LABELS:
-            return {'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)}
-        return {}
 
     mktcap_label = 'Mkt Cap ($B)'
     columns: list[Any] = [
@@ -560,21 +562,29 @@ def render_history_table(store: dict | None) -> Any:
     display_cols = [REPORT_DATE, 'mktcap'] + _ALL_FACTOR_COLS
     display_cols = [c for c in display_cols if c in df.columns]
 
+    numeric_cols = {c for c in display_cols if c in FACTOR_LABELS or c == 'mktcap'}
+
     rows = []
     for _, r in df.iterrows():
         row: dict = {}
         for c in display_cols:
-            row[c] = (
-                _fmt(r.get(c), c)
-                if c in FACTOR_LABELS or c == 'mktcap'
-                else str(r.get(c, ''))
-            )
+            if c in numeric_cols:
+                v = r.get(c)
+                try:
+                    fv = float(v)  # type: ignore[arg-type]
+                    row[c] = round(fv / 1e9, 2) if c == 'mktcap' else (round(fv, 4) if isfinite(fv) else None)
+                except (TypeError, ValueError):
+                    row[c] = None
+            else:
+                row[c] = str(r.get(c, ''))
         rows.append(row)
 
+    mktcap_label = 'Mkt Cap ($B)'
     columns: list[Any] = [
         {
-            'name': FACTOR_LABELS.get(c, 'Filing Date' if c == REPORT_DATE else c),
+            'name': mktcap_label if c == 'mktcap' else FACTOR_LABELS.get(c, 'Filing Date' if c == REPORT_DATE else c),
             'id': c,
+            **_col_fmt(c),
         }
         for c in display_cols
     ]
