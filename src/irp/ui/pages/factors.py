@@ -123,53 +123,65 @@ layout = html.Div(
                         html.Div(
                             className='factors-controls',
                             children=[
-                                dcc.DatePickerSingle(
-                                    id='xsection-date',
-                                    date=_DEFAULT_DATE,
-                                    display_format='YYYY-MM-DD',
-                                    style={'fontSize': '13px'},
+                                # Row 1: Snapshot params
+                                html.Div(
+                                    className='control-row',
+                                    children=[
+                                        dcc.DatePickerSingle(
+                                            id='xsection-date',
+                                            date=_DEFAULT_DATE,
+                                            display_format='YYYY-MM-DD',
+                                            style={'fontSize': '13px'},
+                                        ),
+                                        dcc.RadioItems(
+                                            id='xsection-variant',
+                                            options=_VARIANT_OPTIONS,
+                                            value='A',
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
+                                        dcc.Dropdown(
+                                            id='xsection-sector',
+                                            placeholder='All sectors',
+                                            clearable=True,
+                                            className='filter-dropdown',
+                                            style={'minWidth': '160px'},
+                                        ),
+                                        dcc.Dropdown(
+                                            id='xsection-market',
+                                            placeholder='All markets',
+                                            clearable=True,
+                                            className='filter-dropdown',
+                                            style={'minWidth': '130px'},
+                                        ),
+                                    ],
                                 ),
-                                dcc.RadioItems(
-                                    id='xsection-variant',
-                                    options=_VARIANT_OPTIONS,
-                                    value='A',
-                                    inline=True,
-                                    labelClassName='check-item',
-                                ),
-                                dcc.Dropdown(
-                                    id='xsection-sector',
-                                    placeholder='All sectors',
-                                    clearable=True,
-                                    className='filter-dropdown',
-                                    style={'minWidth': '160px'},
-                                ),
-                                dcc.Dropdown(
-                                    id='xsection-market',
-                                    placeholder='All markets',
-                                    clearable=True,
-                                    className='filter-dropdown',
-                                    style={'minWidth': '130px'},
-                                ),
-                                dcc.Dropdown(
-                                    id='ranking-factor',
-                                    options=FACTOR_OPTIONS,
-                                    value='pe',
-                                    clearable=False,
-                                    className='filter-dropdown',
-                                    style={'minWidth': '130px'},
-                                ),
-                                dcc.RadioItems(
-                                    id='ranking-top',
-                                    options=_TOP_OPTIONS,
-                                    value=50,
-                                    inline=True,
-                                    labelClassName='check-item',
-                                ),
-                                html.Button(
-                                    'Run',
-                                    id='xsection-run-btn',
-                                    className='run-btn',
-                                    n_clicks=0,
+                                # Row 2: Display params
+                                html.Div(
+                                    className='control-row',
+                                    children=[
+                                        dcc.Dropdown(
+                                            id='ranking-factor',
+                                            options=FACTOR_OPTIONS,
+                                            value='pe',
+                                            clearable=False,
+                                            className='filter-dropdown',
+                                            style={'minWidth': '130px'},
+                                        ),
+                                        dcc.RadioItems(
+                                            id='ranking-top',
+                                            options=_TOP_OPTIONS,
+                                            value=50,
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
+                                        html.Button(
+                                            'Run',
+                                            id='xsection-run-btn',
+                                            className='run-btn',
+                                            n_clicks=0,
+                                        ),
+                                    ],
                                 ),
                             ],
                         ),

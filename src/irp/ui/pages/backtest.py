@@ -49,7 +49,7 @@ _NORMALIZE_OPTIONS = [
 ]
 
 _HIDE = {'display': 'none'}
-_SHOW = {'display': 'flex', 'flexWrap': 'wrap', 'gap': '12px', 'alignItems': 'flex-end'}
+_SHOW = {'display': 'flex', 'flexWrap': 'wrap', 'gap': '12px', 'alignItems': 'flex-end', 'width': '100%'}
 
 
 def _empty_figure(message: str = 'No data') -> go.Figure:
@@ -101,12 +101,13 @@ def _chart_layout(**extra: Any) -> go.Layout:
     )
 
 
-def _stat_chip(label: str, value: str) -> html.Div:
+def _stat_chip(label: str, value: str, value_color: str | None = None) -> html.Div:
+    value_style = {'color': value_color} if value_color else {}
     return html.Div(
         className='stat-chip',
         children=[
             html.Span(label, className='stat-label'),
-            html.Span(value, className='stat-value'),
+            html.Span(value, className='stat-value', style=value_style),
         ],
     )
 
@@ -165,171 +166,177 @@ layout = html.Div(
         html.Div(
             className='bt-controls',
             children=[
-                # Single-factor controls (visible by default)
+                # Row 1: Signal
                 html.Div(
-                    id='bt-single-controls',
-                    style=_SHOW,
+                    className='control-row',
                     children=[
                         html.Div(
-                            className='bt-control-group',
+                            id='bt-single-controls',
+                            style=_SHOW,
                             children=[
-                                html.Label('Factor', className='control-label'),
-                                dcc.Dropdown(
-                                    id='bt-factor',
-                                    options=FACTOR_OPTIONS,
-                                    value='pe',
-                                    clearable=False,
-                                    className='control-dropdown',
+                                html.Div(
+                                    className='bt-control-group',
+                                    children=[
+                                        html.Label('Factor', className='control-label'),
+                                        dcc.Dropdown(
+                                            id='bt-factor',
+                                            options=FACTOR_OPTIONS,
+                                            value='pe',
+                                            clearable=False,
+                                            className='control-dropdown',
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            id='bt-composite-controls',
+                            style=_HIDE,
+                            children=[
+                                html.Div(
+                                    className='bt-control-group',
+                                    children=[
+                                        html.Label('Preset', className='control-label'),
+                                        dcc.Dropdown(
+                                            id='bt-preset',
+                                            options=_PRESET_OPTIONS,
+                                            value='composite',
+                                            clearable=False,
+                                            className='control-dropdown',
+                                            style={'minWidth': '260px'},
+                                        ),
+                                    ],
+                                ),
+                                html.Div(
+                                    className='bt-control-group',
+                                    children=[
+                                        html.Label('Normalize', className='control-label'),
+                                        dcc.Dropdown(
+                                            id='bt-normalize',
+                                            options=_NORMALIZE_OPTIONS,
+                                            value='zscore',
+                                            clearable=False,
+                                            className='control-dropdown',
+                                        ),
+                                    ],
+                                ),
+                                dcc.Checklist(
+                                    id='bt-sector-neutral',
+                                    options=[{'label': ' Sector neutral', 'value': 'sector_neutral'}],
+                                    value=[],
+                                    labelClassName='check-item',
+                                    style={'alignSelf': 'flex-end', 'paddingBottom': '6px'},
                                 ),
                             ],
                         ),
                     ],
                 ),
-                # Composite controls (hidden by default)
+                # Row 2: Universe + Period + Run
                 html.Div(
-                    id='bt-composite-controls',
-                    style=_HIDE,
+                    className='control-row',
                     children=[
                         html.Div(
                             className='bt-control-group',
                             children=[
-                                html.Label('Preset', className='control-label'),
+                                html.Label('Market', className='control-label'),
                                 dcc.Dropdown(
-                                    id='bt-preset',
-                                    options=_PRESET_OPTIONS,
-                                    value='composite',
+                                    id='bt-market',
+                                    options=[
+                                        {'label': 'All markets', 'value': ''},
+                                        {'label': 'US', 'value': 'us'},
+                                        {'label': 'DE', 'value': 'de'},
+                                    ],
+                                    value='us',
                                     clearable=False,
                                     className='control-dropdown',
-                                    style={'minWidth': '260px'},
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            className='bt-control-group',
+                            children=[
+                                html.Label('Sector', className='control-label'),
+                                dcc.Dropdown(
+                                    id='bt-sector',
+                                    placeholder='All sectors',
+                                    clearable=True,
+                                    className='control-dropdown',
+                                    style={'minWidth': '170px'},
                                 ),
                             ],
                         ),
                         html.Div(
                             className='bt-control-group',
                             children=[
-                                html.Label('Normalize', className='control-label'),
+                                html.Label('Horizon', className='control-label'),
                                 dcc.Dropdown(
-                                    id='bt-normalize',
-                                    options=_NORMALIZE_OPTIONS,
-                                    value='zscore',
+                                    id='bt-horizon',
+                                    options=_HORIZON_OPTIONS,
+                                    value=252,
                                     clearable=False,
                                     className='control-dropdown',
                                 ),
                             ],
                         ),
-                        dcc.Checklist(
-                            id='bt-sector-neutral',
-                            options=[
-                                {'label': ' Sector neutral', 'value': 'sector_neutral'}
+                        html.Div(
+                            className='bt-control-group',
+                            children=[
+                                html.Label('Filing', className='control-label'),
+                                dcc.Dropdown(
+                                    id='bt-variant',
+                                    options=_VARIANT_OPTIONS,
+                                    value='A',
+                                    clearable=False,
+                                    className='control-dropdown',
+                                ),
                             ],
-                            value=[],
-                            labelClassName='check-item',
-                            style={'alignSelf': 'flex-end', 'paddingBottom': '6px'},
                         ),
-                    ],
-                ),
-                # Universe filters (shared)
-                html.Div(
-                    className='bt-control-group',
-                    children=[
-                        html.Label('Market', className='control-label'),
-                        dcc.Dropdown(
-                            id='bt-market',
-                            options=[
-                                {'label': 'All markets', 'value': ''},
-                                {'label': 'US', 'value': 'us'},
-                                {'label': 'DE', 'value': 'de'},
+                        html.Div(
+                            className='bt-control-group',
+                            children=[
+                                html.Label('Rebalance', className='control-label'),
+                                dcc.Dropdown(
+                                    id='bt-freq',
+                                    options=_FREQ_OPTIONS,
+                                    value='Q',
+                                    clearable=False,
+                                    className='control-dropdown',
+                                ),
                             ],
-                            value='',
-                            clearable=False,
-                            className='control-dropdown',
                         ),
+                        html.Div(
+                            className='bt-control-group bt-control-narrow',
+                            children=[
+                                html.Label('Start year', className='control-label'),
+                                dcc.Input(
+                                    id='bt-start-year',
+                                    type='number',
+                                    value=1995,
+                                    min=1991,
+                                    max=_CURRENT_YEAR - 1,
+                                    step=1,
+                                    className='control-input',
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            className='bt-control-group bt-control-narrow',
+                            children=[
+                                html.Label('End year', className='control-label'),
+                                dcc.Input(
+                                    id='bt-end-year',
+                                    type='number',
+                                    value=_CURRENT_YEAR,
+                                    min=2001,
+                                    max=_CURRENT_YEAR,
+                                    step=1,
+                                    className='control-input',
+                                ),
+                            ],
+                        ),
+                        html.Button('Run', id='bt-run-btn', className='run-btn', n_clicks=0),
                     ],
                 ),
-                html.Div(
-                    className='bt-control-group',
-                    children=[
-                        html.Label('Sector', className='control-label'),
-                        dcc.Dropdown(
-                            id='bt-sector',
-                            placeholder='All sectors',
-                            clearable=True,
-                            className='control-dropdown',
-                            style={'minWidth': '170px'},
-                        ),
-                    ],
-                ),
-                # Shared controls
-                html.Div(
-                    className='bt-control-group',
-                    children=[
-                        html.Label('Horizon', className='control-label'),
-                        dcc.Dropdown(
-                            id='bt-horizon',
-                            options=_HORIZON_OPTIONS,
-                            value=252,
-                            clearable=False,
-                            className='control-dropdown',
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className='bt-control-group',
-                    children=[
-                        html.Label('Fundamentals', className='control-label'),
-                        dcc.Dropdown(
-                            id='bt-variant',
-                            options=_VARIANT_OPTIONS,
-                            value='A',
-                            clearable=False,
-                            className='control-dropdown',
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className='bt-control-group',
-                    children=[
-                        html.Label('Rebalance', className='control-label'),
-                        dcc.Dropdown(
-                            id='bt-freq',
-                            options=_FREQ_OPTIONS,
-                            value='Q',
-                            clearable=False,
-                            className='control-dropdown',
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className='bt-control-group bt-control-narrow',
-                    children=[
-                        html.Label('Start year', className='control-label'),
-                        dcc.Input(
-                            id='bt-start-year',
-                            type='number',
-                            value=2015,
-                            min=1991,
-                            max=_CURRENT_YEAR - 1,
-                            step=1,
-                            className='control-input',
-                        ),
-                    ],
-                ),
-                html.Div(
-                    className='bt-control-group bt-control-narrow',
-                    children=[
-                        html.Label('End year', className='control-label'),
-                        dcc.Input(
-                            id='bt-end-year',
-                            type='number',
-                            value=_CURRENT_YEAR,
-                            min=2001,
-                            max=_CURRENT_YEAR,
-                            step=1,
-                            className='control-input',
-                        ),
-                    ],
-                ),
-                html.Button('Run', id='bt-run-btn', className='run-btn', n_clicks=0),
             ],
         ),
         # Summary chips (populated by callback)
@@ -433,6 +440,8 @@ def run_bt(
     try:
         start_yr = int(start_yr or 2015)
         end_yr = int(end_yr or _CURRENT_YEAR)
+        if end_yr <= start_yr:
+            return {'error': f'End year ({end_yr}) must be after start year ({start_yr})'}
         tickers = _filtered_tickers(market or '', sector)
 
         if mode == 'composite':
@@ -527,13 +536,22 @@ def render_ic(data):
     def _fmt_ic(v):
         return f'{v:.3f}' if v is not None and isfinite(v) else 'N/A'
 
+    ic_color = (
+        ACCENT if (mean_ic is not None and isfinite(mean_ic) and mean_ic > 0.02)
+        else '#e05252' if (mean_ic is not None and isfinite(mean_ic) and mean_ic < -0.02)
+        else MUTED
+    )
+    tstat_color = (
+        '#3fb950' if (ic_tstat is not None and isfinite(ic_tstat) and abs(ic_tstat) > 2)
+        else '#d29922' if (ic_tstat is not None and isfinite(ic_tstat) and abs(ic_tstat) >= 1)
+        else '#e05252' if (ic_tstat is not None and isfinite(ic_tstat))
+        else MUTED
+    )
     chips = html.Div(
         className='stat-chips',
         children=[
-            _stat_chip('Mean IC', _fmt_ic(mean_ic)),
-            _stat_chip(
-                'IC t-stat', _fmt_ic(ic_tstat) if ic_tstat is not None else 'N/A'
-            ),
+            _stat_chip('Mean IC', _fmt_ic(mean_ic), ic_color),
+            _stat_chip('IC t-stat', _fmt_ic(ic_tstat) if ic_tstat is not None else 'N/A', tstat_color),
             _stat_chip('Dates', str(n_dates)),
         ],
     )
@@ -576,6 +594,12 @@ def render_ic(data):
             annotation_text=f'Mean {mean_ic:.3f}',
             annotation_font_color=MUTED,
         )
+    fig.add_hrect(y0=0.05, y1=1.0, fillcolor='rgba(63,185,80,0.04)', line_width=0, layer='below')
+    fig.add_hrect(y0=-1.0, y1=-0.05, fillcolor='rgba(224,82,82,0.04)', line_width=0, layer='below')
+    fig.add_hline(y=0.05, line_dash='dot', line_color='rgba(63,185,80,0.25)', line_width=1,
+                  annotation_text='0.05', annotation_font_color='rgba(63,185,80,0.5)',
+                  annotation_font_size=9, annotation_position='top right')
+    fig.add_hline(y=-0.05, line_dash='dot', line_color='rgba(224,82,82,0.25)', line_width=1)
     fig.update_layout(yaxis_title='Spearman IC', showlegend=True)
     return chips, fig
 
@@ -621,5 +645,19 @@ def render_quintiles(data):
                 hovertemplate='EW: %{y:.3f}<extra></extra>',
             )
         )
+    # Terminal value labels for Q1 and Q5
+    last_date = df['date'].iloc[-1]
+    for col, xanchor, xshift, i in [('Q1', 'right', -6, 0), ('Q5', 'left', 6, 4)]:
+        if col in df.columns:
+            series = df[col].dropna()
+            if not series.empty:
+                val = float(series.iloc[-1])
+                fig.add_annotation(
+                    x=last_date, y=val,
+                    text=f'{val:+.2f}',
+                    showarrow=False,
+                    font=dict(color=_QUINTILE_COLOURS[i], size=11),
+                    xanchor=xanchor, xshift=xshift,
+                )
     fig.update_layout(yaxis_title='Cumulative log return')
     return fig
