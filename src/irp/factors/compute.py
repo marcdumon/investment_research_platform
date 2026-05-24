@@ -308,16 +308,16 @@ def run_backtest(
             logger.info(f'backtest cache hit: {factor} h={horizon_days} {variant}/{freq} {start_date}–{end_date}')
             return cached
 
-    raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
-    raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
-    raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
-    raw_prices   = pit_prepare(yahoo_prices(tickers),                      'price')
-
     pd_freq = 'QE' if freq == 'Q' else 'YE'
     rebalance_dates = [
         ts.date()
         for ts in pd.date_range(start_date, end_date, freq=pd_freq)
     ]
+
+    # Date-filtered price fetch: momentum lookback (400d) + forward-return horizon
+    price_start = (start_date - datetime.timedelta(days=400)).isoformat()
+    price_end = (end_date + datetime.timedelta(days=horizon_days + 5)).isoformat()
+    raw_prices = pit_prepare(yahoo_prices(tickers, start=price_start, end=price_end), 'price')
 
     cross_sections: dict[datetime.date, pd.DataFrame] = {}
     dates_to_compute = []
@@ -339,13 +339,17 @@ def run_backtest(
         f'{n_cached}/{n_total} cross-sections from cache, {len(dates_to_compute)} to compute'
     )
 
-    cross_sections.update(
-        _compute_and_cache(
-            dates_to_compute, variant,
-            raw_income, raw_balance, raw_cashflow, raw_prices,
-            write_cache=(tickers is None),
+    if dates_to_compute:
+        raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
+        raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
+        raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
+        cross_sections.update(
+            _compute_and_cache(
+                dates_to_compute, variant,
+                raw_income, raw_balance, raw_cashflow, raw_prices,
+                write_cache=(tickers is None),
+            )
         )
-    )
 
     logger.info(f'backtest {factor}: computing IC series and quintile returns...')
     fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
@@ -397,7 +401,10 @@ def run_factor_decay(
     else:
         dates_to_compute = list(rebalance_dates)
 
-    raw_prices = pit_prepare(yahoo_prices(tickers), 'price')
+    max_horizon = max(horizons)
+    price_start = (start_date - datetime.timedelta(days=400)).isoformat()
+    price_end = (end_date + datetime.timedelta(days=max_horizon + 5)).isoformat()
+    raw_prices = pit_prepare(yahoo_prices(tickers, start=price_start, end=price_end), 'price')
 
     if dates_to_compute:
         logger.info(f'factor decay {factor}: computing {len(dates_to_compute)} uncached cross-sections')
