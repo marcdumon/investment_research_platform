@@ -14,18 +14,6 @@ from irp.core.config import config
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
 
 
-def _price_at(prices: pd.DataFrame, target: pd.Timestamp) -> pd.DataFrame:
-    """Most-recent (close, date) per ticker on or before `target`.
-
-    Returns DataFrame indexed by Ticker with columns [Close, Date].
-    """
-    eligible = prices.loc[prices[PRICE_DATE] <= target]
-    if eligible.empty:
-        return pd.DataFrame(columns=[PRICE_CLOSE, PRICE_DATE])
-    idx = eligible.groupby(PRICE_TICKER)[PRICE_DATE].idxmax()
-    return eligible.loc[idx].set_index(PRICE_TICKER)[[PRICE_CLOSE, PRICE_DATE]]
-
-
 def compute_forward_returns(
     prices: pd.DataFrame,
     rebalance_dates: list[datetime.date],
@@ -42,8 +30,7 @@ def compute_forward_returns(
     Returns
     -------
     DataFrame with columns [Ticker, Date, fwd_ret].
-    fwd_ret = log(P_{T+horizon} / P_T). NaN when either price is unavailable
-    or when no price strictly after T exists within the horizon.
+    fwd_ret = log(P_{T+horizon} / P_T). NaN dropped.
     """
     if prices.empty or not rebalance_dates:
         return pd.DataFrame(columns=[PRICE_TICKER, 'Date', 'fwd_ret'])
@@ -51,29 +38,33 @@ def compute_forward_returns(
     prices = prices.copy()
     prices[PRICE_DATE] = pd.to_datetime(prices[PRICE_DATE])
 
-    records = []
-    for d in rebalance_dates:
-        t0 = pd.Timestamp(d)
-        t1 = t0 + pd.Timedelta(days=horizon_days)
-        p0_info = _price_at(prices, t0)
-        p1_info = _price_at(prices, t1)
-        if p0_info.empty or p1_info.empty:
-            continue
-        for ticker in p0_info.index.intersection(p1_info.index):
-            entry_date = pd.Timestamp(p0_info.loc[ticker, PRICE_DATE])  # type: ignore[arg-type]
-            exit_date = pd.Timestamp(p1_info.loc[ticker, PRICE_DATE])  # type: ignore[arg-type]
-            if exit_date <= entry_date:
-                continue
-            p0 = float(p0_info.loc[ticker, PRICE_CLOSE])  # type: ignore[arg-type]
-            p1 = float(p1_info.loc[ticker, PRICE_CLOSE])  # type: ignore[arg-type]
-            if p0 > 0 and p1 > 0:
-                records.append({
-                    PRICE_TICKER: ticker,
-                    'Date': d,
-                    'fwd_ret': float(np.log(p1 / p0)),
-                })
+    # Pivot to (date × ticker) matrix; forward-fill trading gaps
+    pivot = (
+        prices.pivot_table(index=PRICE_DATE, columns=PRICE_TICKER, values=PRICE_CLOSE)
+        .sort_index()
+    )
 
-    return pd.DataFrame(records, columns=[PRICE_TICKER, 'Date', 'fwd_ret'])
+    entry_ts = pd.DatetimeIndex([pd.Timestamp(d) for d in rebalance_dates])
+    exit_ts = entry_ts + pd.Timedelta(days=horizon_days)
+
+    # Extend index to include target dates, then ffill to nearest prior price
+    all_targets = pivot.index.union(entry_ts).union(exit_ts)
+    extended = pivot.reindex(all_targets).ffill()
+
+    p0 = extended.reindex(entry_ts).values  # (n_dates, n_tickers)
+    p1 = extended.reindex(exit_ts).values
+
+    log_ret = np.log(p1 / p0)
+    log_ret[~np.isfinite(log_ret)] = np.nan
+
+    result = (
+        pd.DataFrame(log_ret, index=pd.Index(rebalance_dates, name='Date'), columns=pivot.columns)
+        .stack()
+        .dropna()
+        .reset_index()
+    )
+    result.columns = pd.Index(['Date', PRICE_TICKER, 'fwd_ret'])
+    return result
 
 
 def _turnover_series(tickers_list: list[set]) -> list[float]:
