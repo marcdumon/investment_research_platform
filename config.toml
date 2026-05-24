@@ -1,8 +1,10 @@
 
 
 [factors]
-cache_workers = 4   # threads for parallel cache precompute (ThreadPoolExecutor)
-min_ic_obs    = 20   # minimum tickers per date required to compute a valid IC
+cache_workers     = 4     # threads for parallel cache precompute (ThreadPoolExecutor)
+min_ic_obs        = 20    # minimum tickers per date required to compute a valid IC
+default_cost_bps  = 0     # default round-trip transaction cost assumption (basis points)
+decay_horizons    = [21, 63, 126, 252]   # forward horizons (days) shown in factor decay chart
 
 [database]
 path = "/mnt/Databases/investment_research_platform/data/irp.duckdb"

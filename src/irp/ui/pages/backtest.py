@@ -11,8 +11,9 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
+from irp.core.config import config
 from irp.features.composite import PRESETS
-from irp.factors.compute import run_backtest, run_composite_backtest
+from irp.factors.compute import run_backtest, run_composite_backtest, run_factor_decay
 from irp.query.watchlists import list_watchlists, load_watchlist
 from irp.ui.factor_meta import FACTOR_OPTIONS
 from irp.ui.theme import ACCENT, GRID, MUTED
@@ -138,6 +139,7 @@ layout = html.Div(
         dcc.Store(id='backtest-store'),
         dcc.Store(id='backtest-init', data=1),
         dcc.Store(id='backtest-wl-trigger', data=0),
+        dcc.Store(id='bt-decay-store'),
         html.H2('Factor Backtest', className='page-title'),
         html.P(
             'Spearman IC series and equal-weight quintile cumulative returns '
@@ -349,6 +351,21 @@ layout = html.Div(
                                 ),
                             ],
                         ),
+                        html.Div(
+                            className='bt-control-group bt-control-narrow',
+                            children=[
+                                html.Label('Cost (bps)', className='control-label'),
+                                dcc.Input(
+                                    id='bt-cost-bps',
+                                    type='number',
+                                    value=config.factors.default_cost_bps,
+                                    min=0,
+                                    max=200,
+                                    step=1,
+                                    className='control-input',
+                                ),
+                            ],
+                        ),
                         html.Button('Run', id='bt-run-btn', className='run-btn', n_clicks=0),
                     ],
                 ),
@@ -394,6 +411,52 @@ layout = html.Div(
                     id='bt-spread-chart',
                     figure=_empty_figure('Run backtest to see results'),
                     config={'displayModeBar': False},
+                ),
+            ],
+        ),
+        # Factor Decay section
+        html.Div(
+            className='chart-container',
+            children=[
+                html.H3('Factor Decay', className='chart-title'),
+                html.P(
+                    'IC and ICIR at multiple horizons — shows how quickly the signal decays.',
+                    className='page-subtitle',
+                    style={'marginBottom': '8px'},
+                ),
+                html.Div(
+                    className='control-row',
+                    style={'marginBottom': '12px'},
+                    children=[
+                        dcc.Checklist(
+                            id='bt-decay-horizons',
+                            options=[
+                                {'label': ' 1m (21d)', 'value': 21},
+                                {'label': ' 3m (63d)', 'value': 63},
+                                {'label': ' 6m (126d)', 'value': 126},
+                                {'label': ' 12m (252d)', 'value': 252},
+                            ],
+                            value=config.factors.decay_horizons,
+                            inline=True,
+                            labelClassName='check-item',
+                            style={'alignSelf': 'center'},
+                        ),
+                        html.Button(
+                            'Run Decay', id='bt-decay-btn',
+                            className='run-btn',
+                            n_clicks=0,
+                            style={'marginLeft': '16px'},
+                        ),
+                    ],
+                ),
+                dcc.Loading(
+                    type='circle',
+                    color=ACCENT,
+                    children=dcc.Graph(
+                        id='bt-decay-chart',
+                        figure=_empty_figure('Run decay analysis to see results'),
+                        config={'displayModeBar': False},
+                    ),
                 ),
             ],
         ),
@@ -461,6 +524,7 @@ def toggle_mode_controls(mode: str) -> tuple[dict, dict]:
     State('bt-market', 'value'),
     State('bt-sector', 'value'),
     State('bt-watchlist', 'value'),
+    State('bt-cost-bps', 'value'),
     running=[
         (Output('bt-run-btn', 'disabled'), True, False),
         (Output('bt-run-btn', 'children'), 'Running...', 'Run'),
@@ -482,12 +546,14 @@ def run_bt(
     market,
     sector,
     watchlist,
+    cost_bps_input,
 ):
     if not n_clicks or not horizon:
         raise PreventUpdate
     try:
         start_yr = int(start_yr or 2015)
         end_yr = int(end_yr or _CURRENT_YEAR)
+        cost_bps = float(cost_bps_input or 0)
         if end_yr <= start_yr:
             return {'error': f'End year ({end_yr}) must be after start year ({start_yr})'}
         if watchlist:
@@ -510,6 +576,7 @@ def run_bt(
                 normalize=normalize or 'zscore',
                 use_sector_neutral=bool(sector_neutral),
                 tickers=tickers,
+                cost_bps=cost_bps,
             )
             label = f'{preset or "composite"} ({normalize or "zscore"}{"  sector-neutral" if sector_neutral else ""})'
         else:
@@ -523,49 +590,76 @@ def run_bt(
                 variant=variant or 'A',
                 freq=freq or 'Q',
                 tickers=tickers,
+                cost_bps=cost_bps,
             )
             label = factor
 
-        ic = result['ic_series']
-        ic_records = [
-            {'date': d.isoformat(), 'ic': None if isnan(v) else float(v)}
-            for d, v in zip(ic.index, ic.values)
-        ]
-        qcr = result['quintile_cumret']
-        qcr_records = []
-        if not qcr.empty:
-            qcr = qcr.reset_index()
-            qcr.columns = ['date'] + list(qcr.columns[1:])
-            for row in qcr.itertuples(index=False):
+        def _ser_cumret(ser_or_df):
+            if ser_or_df is None or (hasattr(ser_or_df, 'empty') and ser_or_df.empty):
+                return []
+            if isinstance(ser_or_df, pd.Series):
+                return [
+                    {'date': pd.Timestamp(d).isoformat(),
+                     'v': None if (isinstance(v, float) and isnan(v)) else float(v)}
+                    for d, v in zip(ser_or_df.index, ser_or_df.values)
+                ]
+            df = ser_or_df.reset_index()
+            df.columns = ['date'] + list(df.columns[1:])
+            rows_out = []
+            for row in df.itertuples(index=False):
                 rec: dict[str, Any] = {'date': pd.Timestamp(row.date).isoformat()}
-                for col in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']:
-                    v = getattr(row, col, None)
-                    rec[col] = (
-                        None
-                        if v is None or (isinstance(v, float) and isnan(v))
-                        else float(v)
-                    )
-                qcr_records.append(rec)
-        ew = result.get('ew_cumret', pd.Series(dtype=float))
-        ew_records = []
-        if not ew.empty:
-            for d, v in zip(ew.index, ew.values):
-                ew_records.append({
-                    'date': pd.Timestamp(d).isoformat(),
-                    'ew': None if (isinstance(v, float) and isnan(v)) else float(v),
-                })
+                for c in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']:
+                    v = getattr(row, c, None)
+                    rec[c] = None if v is None or (isinstance(v, float) and isnan(v)) else float(v)
+                rows_out.append(rec)
+            return rows_out
+
+        def _safe(v):
+            return None if v is None or (isinstance(v, float) and (isnan(v) or not isfinite(v))) else float(v)
+
+        ic = result['ic_series']
+        n_tickers = len(tickers) if tickers is not None else None
         mean_ic = result['mean_ic']
         ic_tstat = result['ic_tstat']
-        n_tickers = len(tickers) if tickers is not None else None
+        icir = result.get('icir', float('nan'))
+
+        q_ann_ret = {q: _safe(v) for q, v in result.get('quintile_ann_ret', {}).items()}
+        q_sharpe  = {q: _safe(v) for q, v in result.get('quintile_sharpe', {}).items()}
+        q_max_dd  = {q: _safe(v) for q, v in result.get('quintile_max_dd', {}).items()}
+
+        ls = result.get('ls_cumret', pd.Series(dtype=float))
+        ls_records = []
+        if not ls.empty:
+            for d, v in zip(ls.index, ls.values):
+                ls_records.append({'date': pd.Timestamp(d).isoformat(),
+                                   'v': _safe(v)})
+
+        # Annualized L/S return from Q1 and Q5 annualized returns
+        q1_ann = q_ann_ret.get('Q1')
+        q5_ann = q_ann_ret.get('Q5')
+        ls_ann_ret = (q1_ann - q5_ann) if (q1_ann is not None and q5_ann is not None) else None
+
         return {
-            'ic': ic_records,
-            'qcr': qcr_records,
-            'ew': ew_records,
-            'mean_ic': None if isnan(mean_ic) else float(mean_ic),
-            'ic_tstat': None if isnan(ic_tstat) else float(ic_tstat),
+            'ic': [{'date': d.isoformat(), 'ic': _safe(v)} for d, v in zip(ic.index, ic.values)],
+            'qcr': _ser_cumret(result['quintile_cumret']),
+            'qcr_net': _ser_cumret(result.get('quintile_cumret_net')),
+            'ew': [{'date': pd.Timestamp(d).isoformat(), 'ew': _safe(v)}
+                   for d, v in zip(result.get('ew_cumret', pd.Series()).index,
+                                   result.get('ew_cumret', pd.Series()).values)],
+            'ls': ls_records,
+            'mean_ic': _safe(mean_ic),
+            'ic_tstat': _safe(ic_tstat),
+            'icir': _safe(icir),
             'n_dates': result['n_dates'],
             'n_tickers': n_tickers,
             'label': label,
+            'q_ann_ret': q_ann_ret,
+            'q_sharpe': q_sharpe,
+            'q_max_dd': q_max_dd,
+            'mean_turnover_q1': _safe(result.get('mean_turnover_q1', float('nan'))),
+            'mean_turnover_q5': _safe(result.get('mean_turnover_q5', float('nan'))),
+            'ls_ann_ret': ls_ann_ret,
+            'cost_bps': cost_bps,
         }
     except PreventUpdate:
         raise
@@ -604,14 +698,54 @@ def render_ic(data):
         else '#e05252' if (ic_tstat is not None and isfinite(ic_tstat))
         else MUTED
     )
+    icir = data.get('icir')
+    q_sharpe = data.get('q_sharpe', {})
+    q_ann_ret = data.get('q_ann_ret', {})
+    mean_to_q1 = data.get('mean_turnover_q1')
+    ls_ann_ret = data.get('ls_ann_ret')
+    cost_bps = data.get('cost_bps', 0)
+
+    def _fmt_pct(v, decimals=1):
+        return f'{v * 100:+.{decimals}f}%' if v is not None and isfinite(v) else 'N/A'
+
+    icir_color = (
+        '#3fb950' if (icir is not None and isfinite(icir) and icir > 0.5)
+        else '#d29922' if (icir is not None and isfinite(icir) and icir > 0.3)
+        else '#e05252' if (icir is not None and isfinite(icir))
+        else MUTED
+    )
     tickers_label = str(n_tickers) if n_tickers is not None else 'All'
+    chips_row1 = [
+        _stat_chip('Mean IC', _fmt_ic(mean_ic), ic_color),
+        _stat_chip('IC t-stat', _fmt_ic(ic_tstat) if ic_tstat is not None else 'N/A', tstat_color),
+        _stat_chip('ICIR', _fmt_ic(icir), icir_color),
+        _stat_chip('Dates', str(n_dates)),
+        _stat_chip('Tickers', tickers_label),
+    ]
+
+    q1_sharpe = q_sharpe.get('Q1')
+    q5_sharpe = q_sharpe.get('Q5')
+    q1_sharpe_color = (
+        '#3fb950' if (q1_sharpe is not None and isfinite(q1_sharpe) and q1_sharpe > 0.5)
+        else '#d29922' if (q1_sharpe is not None and isfinite(q1_sharpe) and q1_sharpe > 0)
+        else '#e05252' if (q1_sharpe is not None and isfinite(q1_sharpe))
+        else MUTED
+    )
+    chips_row2 = [
+        _stat_chip('Q1 Ann Ret', _fmt_pct(q_ann_ret.get('Q1')), '#3fb950' if (q_ann_ret.get('Q1') or 0) > 0 else '#e05252'),
+        _stat_chip('Q5 Ann Ret', _fmt_pct(q_ann_ret.get('Q5'))),
+        _stat_chip('Q1 Sharpe', _fmt_ic(q1_sharpe), q1_sharpe_color),
+        _stat_chip('Q5 Sharpe', _fmt_ic(q5_sharpe)),
+        _stat_chip('L/S Ann Ret', _fmt_pct(ls_ann_ret), '#3fb950' if (ls_ann_ret or 0) > 0 else '#e05252'),
+        _stat_chip('Q1 Turnover', f'{mean_to_q1 * 100:.0f}%' if mean_to_q1 is not None and isfinite(mean_to_q1) else 'N/A'),
+    ]
+    if cost_bps:
+        chips_row2.append(_stat_chip('Cost bps', str(int(cost_bps)), MUTED))
+
     chips = html.Div(
-        className='stat-chips',
         children=[
-            _stat_chip('Mean IC', _fmt_ic(mean_ic), ic_color),
-            _stat_chip('IC t-stat', _fmt_ic(ic_tstat) if ic_tstat is not None else 'N/A', tstat_color),
-            _stat_chip('Dates', str(n_dates)),
-            _stat_chip('Tickers', tickers_label),
+            html.Div(className='stat-chips', children=chips_row1),
+            html.Div(className='stat-chips', style={'marginTop': '6px'}, children=chips_row2),
         ],
     )
 
@@ -675,6 +809,12 @@ def render_quintiles(data):
     df = pd.DataFrame(qcr_records)
     df['date'] = pd.to_datetime(df['date'])
 
+    cost_bps = data.get('cost_bps', 0)
+    qcr_net = data.get('qcr_net', [])
+    df_net = pd.DataFrame(qcr_net) if qcr_net else pd.DataFrame()
+    if not df_net.empty:
+        df_net['date'] = pd.to_datetime(df_net['date'])
+
     fig = go.Figure(layout=_chart_layout())
     for i, col in enumerate(['Q1', 'Q2', 'Q3', 'Q4', 'Q5']):
         if col not in df.columns:
@@ -685,12 +825,23 @@ def render_quintiles(data):
                 y=df[col],
                 mode='lines',
                 name=col,
-                line=dict(
-                    color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1
-                ),
+                line=dict(color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1),
                 hovertemplate=f'{col}: %{{y:.3f}}<extra></extra>',
             )
         )
+        # Net (cost-adjusted) traces for Q1 and Q5 only
+        if cost_bps and col in ('Q1', 'Q5') and not df_net.empty and col in df_net.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=df_net['date'],
+                    y=df_net[col],
+                    mode='lines',
+                    name=f'{col} net',
+                    line=dict(color=_QUINTILE_COLOURS[i], width=1, dash='dot'),
+                    hovertemplate=f'{col} net: %{{y:.3f}}<extra></extra>',
+                )
+            )
+
     ew_cols = [c for c in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'] if c in df.columns]
     if ew_cols:
         ew_vals = df[ew_cols].mean(axis=1)
@@ -704,6 +855,23 @@ def render_quintiles(data):
                 hovertemplate='EW: %{y:.3f}<extra></extra>',
             )
         )
+
+    # L/S spread (Q1 − Q5)
+    ls_records = data.get('ls', [])
+    if ls_records:
+        ls_df = pd.DataFrame(ls_records)
+        ls_df['date'] = pd.to_datetime(ls_df['date'])
+        fig.add_trace(
+            go.Scatter(
+                x=ls_df['date'],
+                y=ls_df['v'],
+                mode='lines',
+                name='L/S (Q1−Q5)',
+                line=dict(color='#ffffff', width=1.5, dash='longdash'),
+                hovertemplate='L/S: %{y:.3f}<extra></extra>',
+            )
+        )
+
     # Terminal value labels for Q1 and Q5
     last_date = df['date'].iloc[-1]
     for col, xanchor, xshift, i in [('Q1', 'right', -6, 0), ('Q5', 'left', 6, 4)]:
@@ -768,4 +936,112 @@ def render_spread(data):
                     xanchor=xanchor, xshift=xshift,
                 )
     fig.update_layout(yaxis_title='Excess cumulative log return vs EW')
+    return fig
+
+
+@callback(
+    Output('bt-decay-store', 'data'),
+    Input('bt-decay-btn', 'n_clicks'),
+    State('bt-decay-horizons', 'value'),
+    State('bt-mode-tabs', 'value'),
+    State('bt-factor', 'value'),
+    State('bt-variant', 'value'),
+    State('bt-freq', 'value'),
+    State('bt-start-year', 'value'),
+    State('bt-end-year', 'value'),
+    State('bt-market', 'value'),
+    State('bt-sector', 'value'),
+    State('bt-watchlist', 'value'),
+    running=[
+        (Output('bt-decay-btn', 'disabled'), True, False),
+        (Output('bt-decay-btn', 'children'), 'Running...', 'Run Decay'),
+    ],
+    prevent_initial_call=True,
+)
+def run_decay_analysis(n_clicks, horizons, mode, factor, variant, freq,
+                       start_yr, end_yr, market, sector, watchlist):
+    if not n_clicks or not horizons or mode == 'composite' or not factor:
+        raise PreventUpdate
+    try:
+        start_yr = int(start_yr or 2015)
+        end_yr = int(end_yr or _CURRENT_YEAR)
+        if watchlist:
+            try:
+                tickers = load_watchlist(watchlist)
+            except KeyError:
+                return {'error': f'Watchlist "{watchlist}" not found.'}
+        else:
+            tickers = _filtered_tickers(market or '', sector)
+        df = run_factor_decay(
+            factor=factor,
+            horizons=sorted(horizons),
+            start_date=datetime.date(start_yr, 1, 1),
+            end_date=datetime.date(end_yr, 12, 31),
+            variant=variant or 'A',
+            freq=freq or 'Q',
+            tickers=tickers,
+        )
+        return df.to_dict(orient='records')
+    except PreventUpdate:
+        raise
+    except Exception as exc:
+        logger.exception(f'Decay analysis error: {exc}')
+        return {'error': str(exc)}
+
+
+@callback(
+    Output('bt-decay-chart', 'figure'),
+    Input('bt-decay-store', 'data'),
+)
+def render_decay(data):
+    if not data:
+        return _empty_figure('Run decay analysis to see results')
+    if isinstance(data, dict) and 'error' in data:
+        return _empty_figure(data['error'])
+    df = pd.DataFrame(data)
+    if df.empty:
+        return _empty_figure('No data')
+
+    valid_ic = df['mean_ic'].dropna()
+    valid_icir = df['icir'].dropna()
+
+    fig = go.Figure(layout=_chart_layout())
+    fig.add_trace(
+        go.Scatter(
+            x=df['horizon'],
+            y=df['mean_ic'],
+            mode='lines+markers',
+            name='Mean IC',
+            line=dict(color=ACCENT, width=2),
+            marker=dict(size=8),
+            hovertemplate='Horizon %{x}d<br>Mean IC: %{y:.3f}<extra></extra>',
+        )
+    )
+    if not valid_icir.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df['horizon'],
+                y=df['icir'],
+                mode='lines+markers',
+                name='ICIR',
+                line=dict(color='#3fb950', width=2),
+                marker=dict(size=8),
+                yaxis='y2',
+                hovertemplate='Horizon %{x}d<br>ICIR: %{y:.2f}<extra></extra>',
+            )
+        )
+        fig.update_layout(
+            yaxis2=dict(
+                title='ICIR',
+                overlaying='y',
+                side='right',
+                gridcolor='rgba(0,0,0,0)',
+                tickfont=dict(color=MUTED, size=11),
+                zeroline=False,
+            ),
+        )
+    fig.update_layout(
+        xaxis_title='Horizon (days)',
+        yaxis_title='Mean IC',
+    )
     return fig

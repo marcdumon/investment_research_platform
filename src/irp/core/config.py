@@ -65,6 +65,8 @@ class ProvidersConfig(BaseModel):
 class FactorsConfig(BaseModel):
     cache_workers: int = 4
     min_ic_obs: int = 20
+    default_cost_bps: int = 0
+    decay_horizons: list[int] = [21, 63, 126, 252]
 
 
 class Config(BaseModel):

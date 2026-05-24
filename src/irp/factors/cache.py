@@ -9,8 +9,11 @@ Layout:
         backtest/
             <factor>_h<horizon>_<variant>_<freq>_<start>_<end>/
                 ic.parquet              # ic_series as single-column DataFrame
-                qcr.parquet             # quintile_cumret DataFrame
+                qcr.parquet             # quintile_cumret DataFrame (gross)
+                ew.parquet              # ew_cumret Series
+                ls.parquet              # ls_cumret Series (Q1-Q5 long-short)
                 meta.parquet            # mean_ic, ic_tstat, n_dates (one row)
+                meta2.parquet           # extended metrics: icir, turnover, quintile risk
 """
 import datetime
 import logging
@@ -64,6 +67,10 @@ def _bt_path(
     return _CACHE_ROOT / 'backtest' / name
 
 
+_QUINTILE_LABELS = [f'Q{i + 1}' for i in range(5)]
+_NAN = float('nan')
+
+
 def load_backtest(
     factor: str,
     horizon_days: int,
@@ -80,13 +87,47 @@ def load_backtest(
     qcr = pd.read_parquet(d / 'qcr.parquet')
     qcr.index = pd.to_datetime(qcr.index).date
     meta = pd.read_parquet(d / 'meta.parquet').iloc[0]
-    return {
+    result: dict = {
         'ic_series': ic,
         'quintile_cumret': qcr,
+        'quintile_cumret_net': None,
+        'ew_cumret': pd.Series(dtype=float),
+        'ls_cumret': pd.Series(dtype=float),
         'mean_ic': float(meta['mean_ic']),
         'ic_tstat': float(meta['ic_tstat']),
+        'icir': _NAN,
         'n_dates': int(meta['n_dates']),
+        'quintile_ann_ret': {},
+        'quintile_ann_vol': {},
+        'quintile_sharpe': {},
+        'quintile_max_dd': {},
+        'turnover_q1': pd.Series(dtype=float),
+        'turnover_q5': pd.Series(dtype=float),
+        'mean_turnover_q1': _NAN,
+        'mean_turnover_q5': _NAN,
     }
+    # Extended metrics (written by new store_backtest; absent in old cache entries)
+    if (d / 'ew.parquet').exists():
+        ew = pd.read_parquet(d / 'ew.parquet')['ew']
+        ew.index = pd.to_datetime(ew.index).date
+        result['ew_cumret'] = ew
+    if (d / 'ls.parquet').exists():
+        ls = pd.read_parquet(d / 'ls.parquet')['ls']
+        ls.index = pd.to_datetime(ls.index).date
+        result['ls_cumret'] = ls
+    if (d / 'meta2.parquet').exists():
+        m2 = pd.read_parquet(d / 'meta2.parquet').iloc[0]
+        result['icir'] = float(m2.get('icir', _NAN))
+        result['mean_turnover_q1'] = float(m2.get('mean_turnover_q1', _NAN))
+        result['mean_turnover_q5'] = float(m2.get('mean_turnover_q5', _NAN))
+        for pfx, key in [
+            ('ann_ret', 'quintile_ann_ret'),
+            ('ann_vol', 'quintile_ann_vol'),
+            ('sharpe',  'quintile_sharpe'),
+            ('max_dd',  'quintile_max_dd'),
+        ]:
+            result[key] = {q: float(m2.get(f'{pfx}_{q}', _NAN)) for q in _QUINTILE_LABELS}
+    return result
 
 
 def store_backtest(
@@ -107,6 +148,29 @@ def store_backtest(
         'ic_tstat': result['ic_tstat'],
         'n_dates': result['n_dates'],
     }]).to_parquet(d / 'meta.parquet')
+
+    ew = result.get('ew_cumret', pd.Series(dtype=float))
+    if not ew.empty:
+        ew.rename('ew').to_frame().to_parquet(d / 'ew.parquet')
+    ls = result.get('ls_cumret', pd.Series(dtype=float))
+    if not ls.empty:
+        ls.rename('ls').to_frame().to_parquet(d / 'ls.parquet')
+
+    meta2: dict = {
+        'icir': result.get('icir', _NAN),
+        'mean_turnover_q1': result.get('mean_turnover_q1', _NAN),
+        'mean_turnover_q5': result.get('mean_turnover_q5', _NAN),
+    }
+    for pfx, key in [
+        ('ann_ret', 'quintile_ann_ret'),
+        ('ann_vol', 'quintile_ann_vol'),
+        ('sharpe',  'quintile_sharpe'),
+        ('max_dd',  'quintile_max_dd'),
+    ]:
+        qd = result.get(key, {})
+        for q in _QUINTILE_LABELS:
+            meta2[f'{pfx}_{q}'] = qd.get(q, _NAN)
+    pd.DataFrame([meta2]).to_parquet(d / 'meta2.parquet')
 
 
 def precompute_all(

@@ -185,6 +185,7 @@ def run_composite_backtest(
     normalize: str = 'zscore',
     use_sector_neutral: bool = False,
     tickers: list[str] | None = None,
+    cost_bps: float = 0,
 ) -> dict:
     """IC series and quintile cumulative returns for a multi-factor composite.
 
@@ -261,10 +262,14 @@ def run_composite_backtest(
 
     fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
     logger.info('composite backtest: computing IC series and quintile returns...')
-    result = compute_backtest('__composite__', cross_sections_enriched, fwd_returns)
+    result = compute_backtest(
+        '__composite__', cross_sections_enriched, fwd_returns,
+        horizon_days=horizon_days, cost_bps=cost_bps,
+    )
     logger.info(
         f'composite backtest: done — mean IC={result["mean_ic"]:.3f}, '
-        f't-stat={result["ic_tstat"]:.2f}, n={result["n_dates"]} dates'
+        f't-stat={result["ic_tstat"]:.2f}, ICIR={result.get("icir", float("nan")):.2f}, '
+        f'n={result["n_dates"]} dates'
     )
     return result
 
@@ -277,6 +282,7 @@ def run_backtest(
     variant: Literal['A', 'Q'] = 'A',
     tickers: list[str] | None = None,
     freq: Literal['Q', 'A'] = 'Q',
+    cost_bps: float = 0,
 ) -> dict:
     """IC series and quintile cumulative returns for one factor over a date range.
 
@@ -296,7 +302,7 @@ def run_backtest(
     -------
     dict from compute_backtest(): ic_series, quintile_cumret, mean_ic, ic_tstat, n_dates.
     """
-    if tickers is None:
+    if tickers is None and cost_bps == 0:
         cached = _cache.load_backtest(factor, horizon_days, variant, freq, start_date, end_date)
         if cached is not None:
             logger.info(f'backtest cache hit: {factor} h={horizon_days} {variant}/{freq} {start_date}–{end_date}')
@@ -343,11 +349,82 @@ def run_backtest(
 
     logger.info(f'backtest {factor}: computing IC series and quintile returns...')
     fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
-    result = compute_backtest(factor, cross_sections, fwd_returns)
-    if tickers is None and result['n_dates'] > 0:
+    result = compute_backtest(
+        factor, cross_sections, fwd_returns,
+        horizon_days=horizon_days, cost_bps=cost_bps,
+    )
+    if tickers is None and cost_bps == 0 and result['n_dates'] > 0:
         _cache.store_backtest(factor, horizon_days, variant, freq, start_date, end_date, result)
         logger.info(
             f'backtest {factor}: done — mean IC={result["mean_ic"]:.3f}, '
-            f't-stat={result["ic_tstat"]:.2f}, n={result["n_dates"]} dates (result cached)'
+            f't-stat={result["ic_tstat"]:.2f}, ICIR={result.get("icir", float("nan")):.2f}, '
+            f'n={result["n_dates"]} dates (result cached)'
         )
     return result
+
+
+def run_factor_decay(
+    factor: str,
+    horizons: list[int],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    variant: Literal['A', 'Q'] = 'A',
+    freq: Literal['Q', 'A'] = 'Q',
+    tickers: list[str] | None = None,
+) -> pd.DataFrame:
+    """Compute mean IC and ICIR across multiple forward-return horizons.
+
+    Reuses cached cross-sections. Fetches raw fundamentals only for dates
+    not in cache. Raw price data is always fetched (needed for all horizons).
+
+    Returns
+    -------
+    DataFrame with columns: horizon, mean_ic, icir, n_dates.
+    """
+    pd_freq = 'QE' if freq == 'Q' else 'YE'
+    rebalance_dates = [ts.date() for ts in pd.date_range(start_date, end_date, freq=pd_freq)]
+
+    cross_sections: dict[datetime.date, pd.DataFrame] = {}
+    dates_to_compute: list[datetime.date] = []
+
+    if tickers is None:
+        for d in rebalance_dates:
+            cached = _cache.load(d, variant)
+            if cached is not None:
+                cross_sections[d] = cached
+            else:
+                dates_to_compute.append(d)
+    else:
+        dates_to_compute = list(rebalance_dates)
+
+    raw_prices = pit_prepare(yahoo_prices(tickers), 'price')
+
+    if dates_to_compute:
+        logger.info(f'factor decay {factor}: computing {len(dates_to_compute)} uncached cross-sections')
+        raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
+        raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
+        raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
+        cross_sections.update(
+            _compute_and_cache(
+                dates_to_compute, variant,
+                raw_income, raw_balance, raw_cashflow, raw_prices,
+                write_cache=(tickers is None),
+            )
+        )
+
+    if tickers is not None:
+        cross_sections = {d: xs[xs.index.isin(tickers)] for d, xs in cross_sections.items()}
+
+    rows = []
+    for h in sorted(horizons):
+        fwd = compute_forward_returns(raw_prices, rebalance_dates, h)
+        res = compute_backtest(factor, cross_sections, fwd, horizon_days=h)
+        rows.append({
+            'horizon': h,
+            'mean_ic': res['mean_ic'],
+            'icir': res.get('icir', float('nan')),
+            'n_dates': res['n_dates'],
+        })
+        logger.info(f'factor decay {factor} h={h}: mean_ic={res["mean_ic"]:.3f}, ICIR={res.get("icir", float("nan")):.2f}')
+
+    return pd.DataFrame(rows)
