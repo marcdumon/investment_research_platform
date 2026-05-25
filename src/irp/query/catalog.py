@@ -74,6 +74,10 @@ def refresh() -> int:
     yp_queried = _load_json_set(_raw_dir / 'queried_prices.json')
     yp_errors  = _load_json_set(_raw_dir / 'error_tickers.json')
     ya_queried = _load_json_set(_raw_dir / 'queried_actions.json')
+    logger.debug(
+        f'catalog.refresh: yp_queried={len(yp_queried)}, yp_errors={len(yp_errors)}, '
+        f'ya_queried={len(ya_queried)}'
+    )
 
     with duckdb.connect(config.database.path) as con:
         for view, items, col in [
@@ -88,6 +92,9 @@ def refresh() -> int:
             'prices', 'yahoo_prices', 'dividends', 'splits',
             'income', 'balance', 'cashflow', 'companies',
         ]}
+        present = [t for t, ok in ex.items() if ok]
+        absent  = [t for t, ok in ex.items() if not ok]
+        logger.debug(f'catalog.refresh: tables present={present}, absent={absent}')
 
         stooq_body = (
             'SELECT Ticker, MIN(Date) AS stooq_first, MAX(Date) AS stooq_last, COUNT(*) AS stooq_rows FROM prices GROUP BY Ticker'
@@ -192,6 +199,7 @@ def refresh() -> int:
             LEFT JOIN comp     ON b.Ticker = comp.Ticker
         """)
         count: int = con.execute('SELECT COUNT(*) FROM catalog').fetchone()[0]  # type: ignore[index]
+    logger.info(f'catalog rebuilt: {count:,} tickers')
     return count
 
 

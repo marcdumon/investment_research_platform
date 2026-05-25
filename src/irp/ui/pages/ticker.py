@@ -12,6 +12,7 @@ from plotly.basedatatypes import BaseTraceType
 
 from irp.ui.services import price_service, universe_service
 from irp.ui.theme import ACCENT, DIV_COLOR, GRID, HOVER_LABEL, MUTED, SPLIT_COLOR, TABLE_STYLE
+from irp.ui import tables as _tables
 from irp.ui.ticker_fmt import date_range_for_preset, fmt_price_table, fmt_statement
 
 logger = logging.getLogger(__name__)
@@ -655,30 +656,27 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
 
     fmt_df, note = fmt_statement(df)
 
-    header = html.Tr(
-        [
-            html.Th('', className='stmt-th stmt-th--item'),
-            *[html.Th(str(c), className='stmt-th') for c in fmt_df.columns],
-        ]
-    )
-    rows = [
-        html.Tr(
-            [
-                html.Td(str(item), className='stmt-td stmt-td--item'),
-                *[
-                    html.Td(str(fmt_df.loc[item, c]), className='stmt-td')
-                    for c in fmt_df.columns
-                ],
-            ]
-        )
-        for item in fmt_df.index
+    table_df = fmt_df.reset_index(names='Metric')
+    period_cols = [c for c in fmt_df.columns]
+    columns = [{'name': 'Metric', 'id': 'Metric'}] + [
+        {'name': str(c), 'id': str(c)} for c in period_cols
     ]
-    table = html.Table(
-        className='stmt-table',
-        children=[
-            html.Thead(header),
-            html.Tbody(rows),
-        ],
+    # Rename any columns that duplicate to avoid DataTable id collisions
+    for col in columns:
+        col['id'] = col['id']
+    table_df.columns = [c['id'] for c in columns]
+
+    style = dict(TABLE_STYLE)
+    style['style_cell_conditional'] = [
+        {'if': {'column_id': 'Metric'}, 'textAlign': 'left', 'fontWeight': '500'},
+    ]
+
+    table = _dt.DataTable(
+        data=table_df.to_dict('records'),
+        columns=columns,
+        sort_action='native',
+        page_size=40,
+        **{k: v for k, v in style.items()},
     )
     return table, note
 

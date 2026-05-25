@@ -51,7 +51,7 @@ def load_prices_wide(metric: Literal['Close', 'Volume'] = 'Close') -> PricePanel
     """
     src = panel_root() / 'prices.parquet'
     t0 = time.time()
-    logger.info(f'loading prices panel: {src}')
+    logger.debug(f'loading prices panel: {src}')
     long = pl.read_parquet(src, columns=['Ticker', 'Date', metric])
 
     dates_unique  = long['Date'].unique().sort()

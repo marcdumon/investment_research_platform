@@ -349,12 +349,15 @@ def cross_section_panel(
     Output: DataFrame indexed by Ticker with columns in `_FACTOR_COLS_ORDER`.
     Empty DataFrame when no ticker satisfies the inner-join constraints.
     """
+    logger.debug(f'cross_section_panel: {as_of_date} {variant}')
     curr, prev = _pit_align(as_of_date, variant)
     snaps = _price_snapshots(as_of_date)
     combined = _assemble(curr, prev, snaps)
     if combined.empty:
+        logger.debug(f'cross_section_panel: {as_of_date} {variant} — empty (no inner-join matches)')
         return combined
     out = _apply_formulas(combined)
     if tickers is not None:
         out = out[out.index.isin(tickers)]
+    logger.debug(f'cross_section_panel: {as_of_date} {variant} → {len(out)} tickers, {len(out.columns)} factors')
     return out

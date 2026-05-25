@@ -595,3 +595,43 @@ a { color: var(--accent); }
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* === Control group labels (backtest grouping, correlation page) === */
+.control-group-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  align-self: flex-end;
+  padding-bottom: 8px;
+  opacity: 0.65;
+  user-select: none;
+}
+
+.control-row-sep {
+  width: 1px;
+  background: var(--border);
+  height: 32px;
+  align-self: flex-end;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+/* === Correlation page === */
+.corr-page {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sticky-controls {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 5;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}

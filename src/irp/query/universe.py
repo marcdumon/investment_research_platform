@@ -127,6 +127,7 @@ def refresh(universe_csv: Path | None = None) -> int:
     """
     csv_path = universe_csv or _universe_csv
     if csv_path.exists():
+        logger.debug(f'universe.refresh: reading {csv_path}')
         df = pd.read_csv(csv_path)
     else:
         logger.info('universe.csv not found, falling back to existing universe DB table')
@@ -139,10 +140,12 @@ def refresh(universe_csv: Path | None = None) -> int:
             ),
         )
 
+    logger.debug(f'universe.refresh: {len(df):,} rows read, writing to DB')
     with duckdb.connect(config.database.path) as con:
         con.register('_universe_new', df)
         con.execute('CREATE OR REPLACE TABLE universe AS SELECT * FROM _universe_new')
         count: int = con.execute('SELECT COUNT(*) FROM main.universe').fetchone()[0]  # type: ignore[index]
+    logger.info(f'universe rebuilt: {count:,} tickers')
     return count
 
 

@@ -1,5 +1,3 @@
-import logging
-
 import questionary
 from questionary import Choice, Style
 
@@ -18,7 +16,7 @@ STYLE = Style([
 
 
 def main() -> None:
-    configure_logging(level=logging.DEBUG)
+    configure_logging()
     providers = questionary.checkbox(
         'Providers:',
         choices=[Choice('simfin', checked=True), Choice('stooq', checked=True), Choice('yahoo', checked=False)],

@@ -67,6 +67,7 @@ class FactorsConfig(BaseModel):
     min_ic_obs: int = 20
     default_cost_bps: int = 0
     decay_horizons: list[int] = [21, 63, 126, 252]
+    max_return_tickers: int = 200
 
 
 class Config(BaseModel):
@@ -74,6 +75,7 @@ class Config(BaseModel):
     data: DataConfig
     providers: ProvidersConfig
     factors: FactorsConfig = Field(default_factory=FactorsConfig)
+    log_level: str = 'INFO'
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> 'Config':

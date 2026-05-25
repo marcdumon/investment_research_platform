@@ -30,18 +30,29 @@ def compute_and_cache(
     Runs in a thread pool sized by `config.factors.cache_workers`.
     Writes non-empty results to the snapshot cache when `write_cache` is True.
     """
+    # Warm panel caches serially before spawning threads.
+    # lru_cache has no mutex on first call: N concurrent misses each load
+    # the full 1.2 GB price matrix independently (thundering herd).
+    from irp.panel.load import load_fundamentals, load_prices_wide
+    load_prices_wide('Close')
+    for _stmt in ('income', 'balance', 'cashflow'):
+        load_fundamentals(_stmt, variant)  # type: ignore[arg-type]
+
     def _one(d: datetime.date) -> tuple[datetime.date, pd.DataFrame]:
         return d, cross_section_panel(d, variant, tickers)
 
+    n_total = len(dates)
     result: dict[datetime.date, pd.DataFrame] = {}
     with ThreadPoolExecutor(max_workers=config.factors.cache_workers) as ex:
         futures = {ex.submit(_one, d): d for d in dates}
-        for fut in as_completed(futures):
+        for i, fut in enumerate(as_completed(futures), 1):
             d, xs = fut.result()
             if not xs.empty:
                 result[d] = xs
                 if write_cache:
                     _cache.store(d, variant, xs)
+            if i % 10 == 0 or i == n_total:
+                logger.info(f'compute_and_cache {variant}: {i}/{n_total} done')
     return result
 
 
