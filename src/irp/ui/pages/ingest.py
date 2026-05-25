@@ -29,7 +29,7 @@ layout = html.Div(className='ingest-page', children=[
                 {'label': ' stooq', 'value': 'stooq'},
                 {'label': ' yahoo', 'value': 'yahoo'},
             ],
-            value=['simfin', 'stooq'],
+            value=[],
             labelClassName='check-item',
         ),
 
@@ -68,8 +68,15 @@ layout = html.Div(className='ingest-page', children=[
             value='bulk',
             labelClassName='check-item',
         ),
+        dcc.Checklist(
+            id='force',
+            options=[{'label': ' force re-run (delete markers)', 'value': 'force'}],
+            value=[],
+            labelClassName='check-item',
+            style={'marginTop': '6px'},
+        ),
 
-        html.Label('Steps', className='section-label'),
+        html.Label('Pipeline steps', className='section-label'),
         dcc.Checklist(
             id='steps',
             options=[
@@ -77,23 +84,24 @@ layout = html.Div(className='ingest-page', children=[
                 {'label': ' transform', 'value': 'transform'},
                 {'label': ' store', 'value': 'store'},
                 {'label': ' cleanup', 'value': 'cleanup'},
-                {'label': ' seed-universe', 'value': 'seed-universe'},
-                {'label': ' universe', 'value': 'universe'},
-                {'label': ' catalog', 'value': 'catalog'},
+            ],
+            value=[],
+            labelClassName='check-item',
+        ),
+
+        html.Label('Maintenance tasks', className='section-label'),
+        dcc.Checklist(
+            id='maintenance-steps',
+            options=[
+                {'label': ' seed universe', 'value': 'seed-universe'},
+                {'label': ' refresh universe', 'value': 'universe'},
+                {'label': ' refresh catalog', 'value': 'catalog'},
                 {'label': ' rebuild panel', 'value': 'rebuild-panel'},
                 {'label': ' clear factor cache', 'value': 'clear-factor-cache'},
                 {'label': ' rebuild factor cache', 'value': 'rebuild-factor-cache'},
             ],
-            value=['fetch', 'transform', 'store'],
-            labelClassName='check-item',
-        ),
-
-        dcc.Checklist(
-            id='force',
-            options=[{'label': ' Force re-run', 'value': 'force'}],
             value=[],
             labelClassName='check-item',
-            style={'marginTop': '12px'},
         ),
 
         html.Div(style={'marginTop': '16px', 'display': 'flex', 'gap': '8px'}, children=[
@@ -138,6 +146,7 @@ def toggle_prices_mode(yahoo_content: list[str]) -> dict:
     State('yahoo-prices-mode', 'value'),
     State('feed', 'value'),
     State('steps', 'value'),
+    State('maintenance-steps', 'value'),
     State('force', 'value'),
     prevent_initial_call=True,
 )
@@ -148,6 +157,7 @@ def start_run(
     yahoo_prices_mode: str,
     feed: str,
     steps: list[str],
+    maintenance_steps: list[str],
     force: list[str],
 ) -> tuple[Any, ...]:
     if not n_clicks:
@@ -172,7 +182,7 @@ def start_run(
                 yahoo_content or ['actions', 'prices'],
                 yahoo_prices_mode or 'batch',
                 feed or 'bulk',
-                steps or [],
+                (steps or []) + (maintenance_steps or []),
                 bool(force),
             )
         except Exception as exc:

@@ -125,6 +125,7 @@ layout = html.Div(
                 html.Div(
                     className='control-row',
                     children=[
+                        html.Span('Signal', className='control-group-label'),
                         html.Div(
                             id='bt-single-controls',
                             style=_SHOW,
@@ -200,6 +201,7 @@ layout = html.Div(
                 html.Div(
                     className='control-row',
                     children=[
+                        html.Span('Universe', className='control-group-label'),
                         html.Div(
                             className='bt-control-group',
                             children=[
@@ -243,6 +245,8 @@ layout = html.Div(
                                 ),
                             ],
                         ),
+                        html.Div(className='control-row-sep'),
+                        html.Span('Period', className='control-group-label'),
                         html.Div(
                             className='bt-control-group',
                             children=[

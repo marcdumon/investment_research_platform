@@ -82,6 +82,7 @@ layout = html.Div(
         dcc.Store(id='screener-result-store'),
         dcc.Store(id='screener-selection-store', data=[]),
         dcc.Store(id='screener-wl-trigger', data=0),
+        dcc.Store(id='screener-wl-pending-delete', data=None),
         html.H2('Stock Screener', className='page-title'),
         html.P(
             'Build a filter stack to narrow the universe. '
@@ -1047,29 +1048,51 @@ def save_watchlist_action(
 
 
 @callback(
+    Output('screener-wl-pending-delete', 'data'),
     Output('screener-wl-trigger', 'data', allow_duplicate=True),
     Input({'type': 'wl-delete-btn', 'index': ALL}, 'n_clicks'),
+    Input({'type': 'wl-confirm-btn', 'index': ALL}, 'n_clicks'),
+    State('screener-wl-pending-delete', 'data'),
     State('screener-wl-trigger', 'data'),
     prevent_initial_call=True,
 )
-def delete_watchlist_action(n_clicks: list, trigger: int) -> int:
+def delete_watchlist_action(
+    delete_clicks: list,
+    confirm_clicks: list,
+    pending: str | None,
+    trigger: int,
+) -> tuple:
     triggered = ctx.triggered_id
-    if not isinstance(triggered, dict) or not any(n_clicks):
+    if not isinstance(triggered, dict):
         raise PreventUpdate
-    name = triggered['index']
-    try:
-        watchlist_service.delete_watchlist(name)
-    except Exception:
-        raise PreventUpdate
-    return (trigger or 0) + 1
+
+    btn_type = triggered.get('type')
+    name = triggered.get('index')
+
+    if btn_type == 'wl-delete-btn' and any(delete_clicks):
+        # Cancel button clears pending state
+        if isinstance(name, str) and name.startswith('__cancel__'):
+            return None, trigger or 0
+        # First click: enter pending state
+        return name, trigger or 0
+
+    if btn_type == 'wl-confirm-btn' and any(confirm_clicks) and pending:
+        try:
+            watchlist_service.delete_watchlist(pending)
+        except Exception:
+            pass
+        return None, (trigger or 0) + 1
+
+    raise PreventUpdate
 
 
 @callback(
     Output('screener-watchlists-container', 'children'),
     Input('screener-init', 'data'),
     Input('screener-wl-trigger', 'data'),
+    Input('screener-wl-pending-delete', 'data'),
 )
-def render_watchlists_table(_init: Any, _trigger: Any) -> Any:
+def render_watchlists_table(_init: Any, _trigger: Any, pending: str | None) -> Any:
     wl = watchlist_service.list_watchlists()
     if wl.empty:
         return html.P(
@@ -1114,16 +1137,48 @@ def render_watchlists_table(_init: Any, _trigger: Any) -> Any:
                                 'cursor': 'pointer',
                             },
                         ),
-                        html.Button(
-                            'Delete',
-                            id={'type': 'wl-delete-btn', 'index': r['name']},
-                            n_clicks=0,
-                            style={
-                                'fontSize': '11px',
-                                'padding': '2px 8px',
-                                'color': '#e05252',
-                                'cursor': 'pointer',
-                            },
+                        *(
+                            [
+                                html.Button(
+                                    'Confirm delete',
+                                    id={'type': 'wl-confirm-btn', 'index': r['name']},
+                                    n_clicks=0,
+                                    style={
+                                        'fontSize': '11px',
+                                        'padding': '2px 8px',
+                                        'color': '#fff',
+                                        'background': '#e05252',
+                                        'border': '1px solid #e05252',
+                                        'cursor': 'pointer',
+                                        'borderRadius': '4px',
+                                        'marginRight': '4px',
+                                    },
+                                ),
+                                html.Button(
+                                    'Cancel',
+                                    id={'type': 'wl-delete-btn', 'index': f'__cancel__{r["name"]}'},
+                                    n_clicks=0,
+                                    style={
+                                        'fontSize': '11px',
+                                        'padding': '2px 8px',
+                                        'cursor': 'pointer',
+                                    },
+                                ),
+                            ]
+                            if pending == r['name']
+                            else [
+                                html.Button(
+                                    'Delete',
+                                    id={'type': 'wl-delete-btn', 'index': r['name']},
+                                    n_clicks=0,
+                                    style={
+                                        'fontSize': '11px',
+                                        'padding': '2px 8px',
+                                        'color': '#e05252',
+                                        'cursor': 'pointer',
+                                    },
+                                ),
+                            ]
                         ),
                     ],
                     style={'padding': '4px 10px'},

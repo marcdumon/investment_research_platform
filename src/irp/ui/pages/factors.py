@@ -12,6 +12,7 @@ from dash import Input, Output, State, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
+from irp.ui.charts import base_chart_layout as _base_chart_layout
 from irp.ui.charts import empty_figure as _empty_figure
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import factors_service, universe_service, watchlist_service
@@ -38,31 +39,6 @@ _TOP_OPTIONS = [
 _DEFAULT_DATE = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
 
 
-
-
-def _chart_layout(**extra: Any) -> go.Layout:
-    return go.Layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(128,128,128,0.05)',
-        font=dict(color=MUTED, size=11),
-        margin=dict(l=0, r=0, t=24, b=0),
-        hovermode='closest',
-        xaxis=dict(
-            gridcolor=GRID,
-            linecolor=GRID,
-            tickfont=dict(color=MUTED, size=11),
-            zeroline=False,
-            showline=True,
-        ),
-        yaxis=dict(
-            gridcolor=GRID,
-            linecolor=GRID,
-            tickfont=dict(color=MUTED, size=11),
-            zeroline=True,
-            showline=False,
-        ),
-        **extra,
-    )
 
 
 # ── Layout ────────────────────────────────────────────────────────────
@@ -295,7 +271,7 @@ def toggle_xsection_filters(watchlist: str | None) -> tuple[bool, bool]:
 @callback(
     Output('xsection-store', 'data'),
     Input('xsection-run-btn', 'n_clicks'),
-    Input('companies-store', 'data'),
+    State('companies-store', 'data'),
     State('xsection-date', 'date'),
     State('xsection-variant', 'value'),
     State('xsection-sector', 'value'),
@@ -307,6 +283,7 @@ def toggle_xsection_filters(watchlist: str | None) -> tuple[bool, bool]:
         (Output('xsection-run-btn', 'disabled'), True, False),
         (Output('xsection-run-btn', 'children'), 'Running...', 'Run'),
     ],
+    prevent_initial_call=True,
 )
 def compute_xsection(
     n_clicks: int,
@@ -355,7 +332,7 @@ def compute_xsection(
 def render_ranking_chart(store: dict | None) -> go.Figure:
     """Horizontal bar chart of tickers ranked by selected factor."""
     if not store or not store.get('records'):
-        return _empty_figure()
+        return _empty_figure('Select date and click Run')
 
     data = store['records']
     factor: str = store.get('factor', 'pe')
@@ -363,12 +340,12 @@ def render_ranking_chart(store: dict | None) -> go.Figure:
 
     df = pd.DataFrame(data)
     if factor not in df.columns:
-        return _empty_figure()
+        return _empty_figure(f'Factor "{factor}" not in data')
 
     df = df.dropna(subset=[factor])
     df = df[df[factor].apply(lambda v: isfinite(float(v)) if v is not None else False)]
     if df.empty:
-        return _empty_figure()
+        return _empty_figure('No tickers with valid data — try a different date or filter')
 
     df = df.sort_values(factor, ascending=False)
     if top_n:
@@ -391,7 +368,7 @@ def render_ranking_chart(store: dict | None) -> go.Figure:
             hoverinfo='text',
             hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
         ),
-        layout=_chart_layout(
+        layout=_base_chart_layout(
             title=dict(
                 text=f'{label} — cross-section',
                 font=dict(color=MUTED, size=12),
@@ -507,7 +484,7 @@ def render_history_chart(store: dict | None) -> go.Figure:
     from irp.factors._cols import REPORT_DATE
 
     if REPORT_DATE not in df.columns or factor not in df.columns:
-        return _empty_figure()
+        return _empty_figure(f'Factor "{factor}" not available for this ticker')
 
     df = df.dropna(subset=[factor]).sort_values(REPORT_DATE)
     if df.empty:
@@ -530,7 +507,7 @@ def render_history_chart(store: dict | None) -> go.Figure:
             hoverinfo='text',
             hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
         ),
-        layout=_chart_layout(
+        layout=_base_chart_layout(
             yaxis_title=label,
             xaxis_title='Filing Date',
         ),

@@ -30,5 +30,6 @@ layout = html.Div(className='home-page', children=[
         _card('\U0001f4ca', 'Factors',  'Cross-section screening and factor history.', '/factors'),
         _card('\U0001f4c8', 'Backtest', 'IC and quintile return analysis for any factor.', '/backtest'),
         _card('\U0001f50e', 'Screener', 'Progressive filter stack, scatter/histogram charts, watchlists.', '/screener'),
+        _card('\U0001f9ee', 'Correlation', 'Factor collinearity and price-return co-movement heatmaps.', '/correlation'),
     ]),
 ])
