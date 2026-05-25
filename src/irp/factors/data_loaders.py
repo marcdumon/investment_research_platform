@@ -52,31 +52,27 @@ def load_cross_sections(
 ) -> dict[datetime.date, pd.DataFrame]:
     """Cache-first cross-section retrieval for a list of rebalance dates.
 
-    For full-universe runs (`tickers is None`), checks the parquet cache
-    per date and only computes misses. For filtered runs, recomputes every
-    date because per-date results aren't keyed by ticker subset.
-
-    Writes the cache only for full-universe runs (filtered results would
-    contaminate the full-universe key).
+    Cache is keyed by `(date, variant)` only — always full universe.
+    Filtered runs reuse the cached full-universe snapshots and post-filter
+    the result, so a sector/market backtest doesn't trigger recomputation.
     """
     result: dict[datetime.date, pd.DataFrame] = {}
     to_compute: list[datetime.date] = []
 
-    if tickers is None:
-        for d in dates:
-            cached = _cache.load(d, variant)
-            if cached is not None:
-                result[d] = cached
-            else:
-                to_compute.append(d)
-    else:
-        to_compute = list(dates)
+    for d in dates:
+        cached = _cache.load(d, variant)
+        if cached is not None:
+            result[d] = cached
+        else:
+            to_compute.append(d)
 
     if to_compute:
-        result.update(
-            compute_and_cache(
-                to_compute, variant, tickers,
-                write_cache=(tickers is None),
-            )
-        )
+        # Always compute full universe so the cache stays useful across filters.
+        result.update(compute_and_cache(to_compute, variant, tickers=None))
+
+    if tickers is not None:
+        ticker_set = set(tickers)
+        result = {
+            d: df[df.index.isin(ticker_set)] for d, df in result.items()
+        }
     return result

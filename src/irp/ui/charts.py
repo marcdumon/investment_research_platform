@@ -34,7 +34,7 @@ def empty_figure(message: str = 'No data') -> go.Figure:
 
 def base_chart_layout(**extra: Any) -> go.Layout:
     """Standard themed Plotly Layout. Extra kwargs override defaults."""
-    return go.Layout(
+    defaults: dict[str, Any] = dict(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(128,128,128,0.05)',
         font=dict(color=MUTED, size=11),
@@ -55,8 +55,9 @@ def base_chart_layout(**extra: Any) -> go.Layout:
             showline=False,
         ),
         legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=11)),
-        **extra,
     )
+    defaults.update(extra)
+    return go.Layout(**defaults)
 
 
 def scatter_chart_layout(**extra: Any) -> go.Layout:
