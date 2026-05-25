@@ -171,11 +171,14 @@ def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
 class StooqSource:
     SUPPORTED_FEEDS: frozenset[Feed] = frozenset({'bulk', 'update'})
 
+    def __init__(self) -> None:
+        from irp.core.markers import MarkerSet
+        self.markers = MarkerSet(raw_dir)
+
     def fetch_bulk(self) -> None:
         """Stooq bulk zips must be manually downloaded and placed in raw_dir. Unzips and builds the price dataset."""
-        marker = raw_dir / '.fetched'
         zip_paths = [raw_dir / f for f in stooq_cfg.bulk_files]
-        if is_fresh(marker, *zip_paths):
+        if self.markers.is_fresh('fetched', *zip_paths):
             logger.info('fetch: already up to date, skipping')
             return
         logger.debug('Fetching Stooq price data...')
@@ -186,7 +189,7 @@ class StooqSource:
         )
         _unzip_bulk_files()
         _build_price_dataset()
-        marker.touch()
+        self.markers.touch('fetched')
         logger.debug('Stooq price data fetched successfully.')
 
     def update(self) -> None:
@@ -200,25 +203,22 @@ class StooqSource:
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
         spec = FEED_SPECS[feed]
-        marker = raw_dir / f'.transformed_{feed}'
-        upstream = raw_dir / '.fetched' if feed == 'bulk' else spec.input_path
-        if is_fresh(marker, upstream):
+        upstream = self.markers.path('fetched') if feed == 'bulk' else spec.input_path
+        if self.markers.is_fresh(f'transformed_{feed}', upstream):
             logger.info(f'transform({feed}): already up to date, skipping')
             return
         conn = duckdb.connect()
         _transform_prices(conn, spec)
-        marker.touch()
+        self.markers.touch(f'transformed_{feed}')
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
-        marker = raw_dir / f'.stored_{feed}'
-        upstream = raw_dir / f'.transformed_{feed}'
-        if is_fresh(marker, upstream):
+        if self.markers.is_fresh(f'stored_{feed}', f'transformed_{feed}'):
             logger.info(f'store({feed}): already up to date, skipping')
             return
         spec = FEED_SPECS[feed]
         with duckdb.connect(config.database.path) as con:
             _store_prices(con, spec)
-        marker.touch()
+        self.markers.touch(f'stored_{feed}')
         logger.debug(f'Stooq {feed} data stored successfully.')
 
     def cleanup(self) -> None:

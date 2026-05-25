@@ -1,0 +1,71 @@
+"""Universe + sector lookups for the UI layer.
+
+Wraps `irp.query.universe` and `irp.query.simfin.companies`. Owns the
+market/sector/watchlist ticker-filter logic that was previously
+duplicated in `backtest.py` and `screener.py`.
+"""
+import pandas as pd
+
+from irp.query.simfin import companies as _companies
+from irp.query.simfin import sector_map as _sector_map
+from irp.query.simfin import statement as _statement
+from irp.query.universe import universe as _universe
+from irp.ui.services.watchlist_service import load_watchlist
+
+
+def get_universe(tickers: str | list[str] | None = None) -> pd.DataFrame:
+    """Editable universe table (Ticker, Market, stooq_ticker, yahoo_ticker).
+
+    Optionally filter to one or more tickers; None = full table.
+    """
+    return _universe(tickers) if tickers else _universe()
+
+
+def get_companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
+    """SimFin companies metadata (Ticker, Sector, ISIN, ...).
+
+    Optionally filter to one or more tickers; None = full table.
+    """
+    return _companies(tickers) if tickers else _companies()
+
+
+def get_sectors() -> list[str]:
+    """Sorted unique sectors from the SimFin companies table."""
+    return sorted(_sector_map().dropna().unique().tolist())
+
+
+def get_statement(ticker: str, kind: str, variant: str = 'A') -> pd.DataFrame:
+    """Fundamental statement for one ticker.
+
+    `kind` ∈ {'income', 'balance', 'cashflow'}, `variant` ∈ {'A', 'Q'}.
+    """
+    return _statement([ticker], kind, variant)
+
+
+def filter_tickers(
+    market: str | None = None,
+    sector: str | None = None,
+    watchlist: str | None = None,
+) -> list[str] | None:
+    """Resolve a market/sector/watchlist combination to a ticker list.
+
+    Returns None when no filter is active (caller treats as "all tickers").
+    Returns [] when filters produce an empty set (caller still respects this
+    distinct from None).
+    """
+    if not (market or sector or watchlist):
+        return None
+
+    if watchlist:
+        wl = load_watchlist(watchlist)
+        return list(wl) if wl else []
+
+    u = get_universe()[['Ticker', 'Market']]
+    c = get_companies()[['Ticker', 'Sector']]
+    df = u.merge(c, on='Ticker', how='left')
+    if market:
+        df = df[df['Market'].str.lower().str.contains(market.lower(), na=False)]
+    if sector:
+        df = df[df['Sector'] == sector]
+    tickers = df['Ticker'].dropna().unique().tolist()
+    return tickers if tickers else None

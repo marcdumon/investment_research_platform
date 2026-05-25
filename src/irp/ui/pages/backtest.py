@@ -13,9 +13,15 @@ from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
 from irp.features.composite import PRESETS
-from irp.factors.compute import run_backtest, run_composite_backtest, run_factor_decay
-from irp.query.watchlists import list_watchlists, load_watchlist
+from irp.ui.charts import base_chart_layout as _chart_layout
+from irp.ui.charts import empty_figure as _empty_figure
 from irp.ui.factor_meta import FACTOR_OPTIONS
+from irp.ui.services import (
+    backtest_service,
+    factors_service,
+    universe_service,
+    watchlist_service,
+)
 from irp.ui.theme import ACCENT, GRID, MUTED
 
 dash.register_page(__name__, path='/backtest', name='Backtest')
@@ -51,56 +57,13 @@ _NORMALIZE_OPTIONS = [
 ]
 
 _HIDE = {'display': 'none'}
-_SHOW = {'display': 'flex', 'flexWrap': 'wrap', 'gap': '12px', 'alignItems': 'flex-end', 'width': '100%'}
-
-
-def _empty_figure(message: str = 'No data') -> go.Figure:
-    fig = go.Figure()
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        annotations=[
-            dict(
-                text=message,
-                x=0.5,
-                y=0.5,
-                xref='paper',
-                yref='paper',
-                showarrow=False,
-                font=dict(color=MUTED, size=13),
-            )
-        ],
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        margin=dict(l=0, r=0, t=8, b=0),
-    )
-    return fig
-
-
-def _chart_layout(**extra: Any) -> go.Layout:
-    return go.Layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(128,128,128,0.05)',
-        font=dict(color=MUTED, size=11),
-        margin=dict(l=0, r=0, t=28, b=0),
-        hovermode='x unified',
-        xaxis=dict(
-            gridcolor=GRID,
-            linecolor=GRID,
-            tickfont=dict(color=MUTED, size=11),
-            zeroline=False,
-            showline=True,
-        ),
-        yaxis=dict(
-            gridcolor=GRID,
-            linecolor=GRID,
-            tickfont=dict(color=MUTED, size=11),
-            zeroline=True,
-            showline=False,
-        ),
-        legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=11)),
-        **extra,
-    )
+_SHOW = {
+    'display': 'flex',
+    'flexWrap': 'wrap',
+    'gap': '12px',
+    'alignItems': 'flex-end',
+    'width': '100%',
+}
 
 
 def _stat_chip(label: str, value: str, value_color: str | None = None) -> html.Div:
@@ -115,20 +78,8 @@ def _stat_chip(label: str, value: str, value_color: str | None = None) -> html.D
 
 
 def _filtered_tickers(market: str, sector: str | None) -> list[str] | None:
-    if not market and not sector:
-        return None
-    from irp.query.simfin import companies as _companies
-    from irp.query.universe import universe
-
-    u = universe()[['Ticker', 'Market']]
-    c = _companies()[['Ticker', 'Sector']]
-    df = u.merge(c, on='Ticker', how='left')
-    if market:
-        df = df[df['Market'].str.lower().str.contains(market.lower(), na=False)]
-    if sector:
-        df = df[df['Sector'] == sector]
-    tickers = df['Ticker'].dropna().unique().tolist()
-    return tickers if tickers else None
+    """Backwards-compatible shim — delegates to universe_service.filter_tickers."""
+    return universe_service.filter_tickers(market=market or None, sector=sector)
 
 
 # ── Layout ────────────────────────────────────────────────────────────
@@ -214,7 +165,9 @@ layout = html.Div(
                                 html.Div(
                                     className='bt-control-group',
                                     children=[
-                                        html.Label('Normalize', className='control-label'),
+                                        html.Label(
+                                            'Normalize', className='control-label'
+                                        ),
                                         dcc.Dropdown(
                                             id='bt-normalize',
                                             options=_NORMALIZE_OPTIONS,
@@ -226,10 +179,18 @@ layout = html.Div(
                                 ),
                                 dcc.Checklist(
                                     id='bt-sector-neutral',
-                                    options=[{'label': ' Sector neutral', 'value': 'sector_neutral'}],
+                                    options=[
+                                        {
+                                            'label': ' Sector neutral',
+                                            'value': 'sector_neutral',
+                                        }
+                                    ],
                                     value=[],
                                     labelClassName='check-item',
-                                    style={'alignSelf': 'flex-end', 'paddingBottom': '6px'},
+                                    style={
+                                        'alignSelf': 'flex-end',
+                                        'paddingBottom': '6px',
+                                    },
                                 ),
                             ],
                         ),
@@ -366,7 +327,9 @@ layout = html.Div(
                                 ),
                             ],
                         ),
-                        html.Button('Run', id='bt-run-btn', className='run-btn', n_clicks=0),
+                        html.Button(
+                            'Run', id='bt-run-btn', className='run-btn', n_clicks=0
+                        ),
                     ],
                 ),
             ],
@@ -442,7 +405,8 @@ layout = html.Div(
                             style={'alignSelf': 'center'},
                         ),
                         html.Button(
-                            'Run Decay', id='bt-decay-btn',
+                            'Run Decay',
+                            id='bt-decay-btn',
                             className='run-btn',
                             n_clicks=0,
                             style={'marginLeft': '16px'},
@@ -474,15 +438,16 @@ layout = html.Div(
     Input('backtest-wl-trigger', 'data'),
 )
 def load_sector_options(_: Any, _wl: Any) -> tuple[list, list]:
-    from irp.query.simfin import sector_map
-
-    sectors = sorted(sector_map().dropna().unique().tolist())
+    sectors = universe_service.get_sectors()
     sector_opts = [{'label': s, 'value': s} for s in sectors]
-    wl_df = list_watchlists()
+    wl_df = watchlist_service.list_watchlists()
     wl_opts = (
-        [{'label': f'{r["name"]} ({r["n"]})', 'value': r['name']}
-         for _, r in wl_df.iterrows()]
-        if not wl_df.empty else []
+        [
+            {'label': f'{r["name"]} ({r["n"]})', 'value': r['name']}
+            for _, r in wl_df.iterrows()
+        ]
+        if not wl_df.empty
+        else []
     )
     return sector_opts, wl_opts
 
@@ -555,42 +520,47 @@ def run_bt(
         end_yr = int(end_yr or _CURRENT_YEAR)
         cost_bps = float(cost_bps_input or 0)
         if end_yr <= start_yr:
-            return {'error': f'End year ({end_yr}) must be after start year ({start_yr})'}
+            return {
+                'error': f'End year ({end_yr}) must be after start year ({start_yr})'
+            }
         if watchlist:
             try:
-                tickers = load_watchlist(watchlist)
+                # Validate watchlist exists; service handles the actual filtering
+                watchlist_service.load_watchlist(watchlist)
             except KeyError:
                 return {'error': f'Watchlist "{watchlist}" not found.'}
-        else:
-            tickers = _filtered_tickers(market or '', sector)
 
         if mode == 'composite':
             weights = PRESETS.get(preset or 'composite', PRESETS['composite'])
-            result = run_composite_backtest(
+            result = backtest_service.run_composite(
+                weights=weights,
                 horizon_days=int(horizon),
                 start_date=datetime.date(start_yr, 1, 1),
                 end_date=datetime.date(end_yr, 12, 31),
                 variant=variant or 'A',
                 freq=freq or 'Q',
-                weights=weights,
                 normalize=normalize or 'zscore',
                 use_sector_neutral=bool(sector_neutral),
-                tickers=tickers,
                 cost_bps=cost_bps,
+                market=market or None,
+                sector=sector,
+                watchlist=watchlist,
             )
             label = f'{preset or "composite"} ({normalize or "zscore"}{"  sector-neutral" if sector_neutral else ""})'
         else:
             if not factor:
                 raise PreventUpdate
-            result = run_backtest(
+            result = backtest_service.run_factor(
                 factor=factor,
                 horizon_days=int(horizon),
                 start_date=datetime.date(start_yr, 1, 1),
                 end_date=datetime.date(end_yr, 12, 31),
                 variant=variant or 'A',
                 freq=freq or 'Q',
-                tickers=tickers,
                 cost_bps=cost_bps,
+                market=market or None,
+                sector=sector,
+                watchlist=watchlist,
             )
             label = factor
 
@@ -599,8 +569,10 @@ def run_bt(
                 return []
             if isinstance(ser_or_df, pd.Series):
                 return [
-                    {'date': pd.Timestamp(d).isoformat(),
-                     'v': None if (isinstance(v, float) and isnan(v)) else float(v)}
+                    {
+                        'date': pd.Timestamp(d).isoformat(),
+                        'v': None if (isinstance(v, float) and isnan(v)) else float(v),
+                    }
                     for d, v in zip(ser_or_df.index, ser_or_df.values)
                 ]
             df = ser_or_df.reset_index()
@@ -610,42 +582,61 @@ def run_bt(
                 rec: dict[str, Any] = {'date': pd.Timestamp(row.date).isoformat()}
                 for c in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']:
                     v = getattr(row, c, None)
-                    rec[c] = None if v is None or (isinstance(v, float) and isnan(v)) else float(v)
+                    rec[c] = (
+                        None
+                        if v is None or (isinstance(v, float) and isnan(v))
+                        else float(v)
+                    )
                 rows_out.append(rec)
             return rows_out
 
         def _safe(v):
-            return None if v is None or (isinstance(v, float) and (isnan(v) or not isfinite(v))) else float(v)
+            return (
+                None
+                if v is None or (isinstance(v, float) and (isnan(v) or not isfinite(v)))
+                else float(v)
+            )
 
         ic = result['ic_series']
-        n_tickers = len(tickers) if tickers is not None else None
+        filtered = universe_service.filter_tickers(
+            market=market or None, sector=sector, watchlist=watchlist,
+        )
+        n_tickers = len(filtered) if filtered is not None else None
         mean_ic = result['mean_ic']
         ic_tstat = result['ic_tstat']
         icir = result.get('icir', float('nan'))
 
         q_ann_ret = {q: _safe(v) for q, v in result.get('quintile_ann_ret', {}).items()}
-        q_sharpe  = {q: _safe(v) for q, v in result.get('quintile_sharpe', {}).items()}
-        q_max_dd  = {q: _safe(v) for q, v in result.get('quintile_max_dd', {}).items()}
+        q_sharpe = {q: _safe(v) for q, v in result.get('quintile_sharpe', {}).items()}
+        q_max_dd = {q: _safe(v) for q, v in result.get('quintile_max_dd', {}).items()}
 
         ls = result.get('ls_cumret', pd.Series(dtype=float))
         ls_records = []
         if not ls.empty:
             for d, v in zip(ls.index, ls.values):
-                ls_records.append({'date': pd.Timestamp(d).isoformat(),
-                                   'v': _safe(v)})
+                ls_records.append({'date': pd.Timestamp(d).isoformat(), 'v': _safe(v)})
 
         # Annualized L/S return from Q1 and Q5 annualized returns
         q1_ann = q_ann_ret.get('Q1')
         q5_ann = q_ann_ret.get('Q5')
-        ls_ann_ret = (q1_ann - q5_ann) if (q1_ann is not None and q5_ann is not None) else None
+        ls_ann_ret = (
+            (q1_ann - q5_ann) if (q1_ann is not None and q5_ann is not None) else None
+        )
 
         return {
-            'ic': [{'date': d.isoformat(), 'ic': _safe(v)} for d, v in zip(ic.index, ic.values)],
+            'ic': [
+                {'date': d.isoformat(), 'ic': _safe(v)}
+                for d, v in zip(ic.index, ic.values)
+            ],
             'qcr': _ser_cumret(result['quintile_cumret']),
             'qcr_net': _ser_cumret(result.get('quintile_cumret_net')),
-            'ew': [{'date': pd.Timestamp(d).isoformat(), 'ew': _safe(v)}
-                   for d, v in zip(result.get('ew_cumret', pd.Series()).index,
-                                   result.get('ew_cumret', pd.Series()).values)],
+            'ew': [
+                {'date': pd.Timestamp(d).isoformat(), 'ew': _safe(v)}
+                for d, v in zip(
+                    result.get('ew_cumret', pd.Series()).index,
+                    result.get('ew_cumret', pd.Series()).values,
+                )
+            ],
             'ls': ls_records,
             'mean_ic': _safe(mean_ic),
             'ic_tstat': _safe(ic_tstat),
@@ -688,14 +679,19 @@ def render_ic(data):
         return f'{v:.3f}' if v is not None and isfinite(v) else 'N/A'
 
     ic_color = (
-        ACCENT if (mean_ic is not None and isfinite(mean_ic) and mean_ic > 0.02)
-        else '#e05252' if (mean_ic is not None and isfinite(mean_ic) and mean_ic < -0.02)
+        ACCENT
+        if (mean_ic is not None and isfinite(mean_ic) and mean_ic > 0.02)
+        else '#e05252'
+        if (mean_ic is not None and isfinite(mean_ic) and mean_ic < -0.02)
         else MUTED
     )
     tstat_color = (
-        '#3fb950' if (ic_tstat is not None and isfinite(ic_tstat) and abs(ic_tstat) > 2)
-        else '#d29922' if (ic_tstat is not None and isfinite(ic_tstat) and abs(ic_tstat) >= 1)
-        else '#e05252' if (ic_tstat is not None and isfinite(ic_tstat))
+        '#3fb950'
+        if (ic_tstat is not None and isfinite(ic_tstat) and abs(ic_tstat) > 2)
+        else '#d29922'
+        if (ic_tstat is not None and isfinite(ic_tstat) and abs(ic_tstat) >= 1)
+        else '#e05252'
+        if (ic_tstat is not None and isfinite(ic_tstat))
         else MUTED
     )
     icir = data.get('icir')
@@ -709,15 +705,22 @@ def render_ic(data):
         return f'{v * 100:+.{decimals}f}%' if v is not None and isfinite(v) else 'N/A'
 
     icir_color = (
-        '#3fb950' if (icir is not None and isfinite(icir) and icir > 0.5)
-        else '#d29922' if (icir is not None and isfinite(icir) and icir > 0.3)
-        else '#e05252' if (icir is not None and isfinite(icir))
+        '#3fb950'
+        if (icir is not None and isfinite(icir) and icir > 0.5)
+        else '#d29922'
+        if (icir is not None and isfinite(icir) and icir > 0.3)
+        else '#e05252'
+        if (icir is not None and isfinite(icir))
         else MUTED
     )
     tickers_label = str(n_tickers) if n_tickers is not None else 'All'
     chips_row1 = [
         _stat_chip('Mean IC', _fmt_ic(mean_ic), ic_color),
-        _stat_chip('IC t-stat', _fmt_ic(ic_tstat) if ic_tstat is not None else 'N/A', tstat_color),
+        _stat_chip(
+            'IC t-stat',
+            _fmt_ic(ic_tstat) if ic_tstat is not None else 'N/A',
+            tstat_color,
+        ),
         _stat_chip('ICIR', _fmt_ic(icir), icir_color),
         _stat_chip('Dates', str(n_dates)),
         _stat_chip('Tickers', tickers_label),
@@ -726,18 +729,34 @@ def render_ic(data):
     q1_sharpe = q_sharpe.get('Q1')
     q5_sharpe = q_sharpe.get('Q5')
     q1_sharpe_color = (
-        '#3fb950' if (q1_sharpe is not None and isfinite(q1_sharpe) and q1_sharpe > 0.5)
-        else '#d29922' if (q1_sharpe is not None and isfinite(q1_sharpe) and q1_sharpe > 0)
-        else '#e05252' if (q1_sharpe is not None and isfinite(q1_sharpe))
+        '#3fb950'
+        if (q1_sharpe is not None and isfinite(q1_sharpe) and q1_sharpe > 0.5)
+        else '#d29922'
+        if (q1_sharpe is not None and isfinite(q1_sharpe) and q1_sharpe > 0)
+        else '#e05252'
+        if (q1_sharpe is not None and isfinite(q1_sharpe))
         else MUTED
     )
     chips_row2 = [
-        _stat_chip('Q1 Ann Ret', _fmt_pct(q_ann_ret.get('Q1')), '#3fb950' if (q_ann_ret.get('Q1') or 0) > 0 else '#e05252'),
+        _stat_chip(
+            'Q1 Ann Ret',
+            _fmt_pct(q_ann_ret.get('Q1')),
+            '#3fb950' if (q_ann_ret.get('Q1') or 0) > 0 else '#e05252',
+        ),
         _stat_chip('Q5 Ann Ret', _fmt_pct(q_ann_ret.get('Q5'))),
         _stat_chip('Q1 Sharpe', _fmt_ic(q1_sharpe), q1_sharpe_color),
         _stat_chip('Q5 Sharpe', _fmt_ic(q5_sharpe)),
-        _stat_chip('L/S Ann Ret', _fmt_pct(ls_ann_ret), '#3fb950' if (ls_ann_ret or 0) > 0 else '#e05252'),
-        _stat_chip('Q1 Turnover', f'{mean_to_q1 * 100:.0f}%' if mean_to_q1 is not None and isfinite(mean_to_q1) else 'N/A'),
+        _stat_chip(
+            'L/S Ann Ret',
+            _fmt_pct(ls_ann_ret),
+            '#3fb950' if (ls_ann_ret or 0) > 0 else '#e05252',
+        ),
+        _stat_chip(
+            'Q1 Turnover',
+            f'{mean_to_q1 * 100:.0f}%'
+            if mean_to_q1 is not None and isfinite(mean_to_q1)
+            else 'N/A',
+        ),
     ]
     if cost_bps:
         chips_row2.append(_stat_chip('Cost bps', str(int(cost_bps)), MUTED))
@@ -745,7 +764,9 @@ def render_ic(data):
     chips = html.Div(
         children=[
             html.Div(className='stat-chips', children=chips_row1),
-            html.Div(className='stat-chips', style={'marginTop': '6px'}, children=chips_row2),
+            html.Div(
+                className='stat-chips', style={'marginTop': '6px'}, children=chips_row2
+            ),
         ],
     )
 
@@ -787,12 +808,25 @@ def render_ic(data):
             annotation_text=f'Mean {mean_ic:.3f}',
             annotation_font_color=MUTED,
         )
-    fig.add_hrect(y0=0.05, y1=1.0, fillcolor='rgba(63,185,80,0.04)', line_width=0, layer='below')
-    fig.add_hrect(y0=-1.0, y1=-0.05, fillcolor='rgba(224,82,82,0.04)', line_width=0, layer='below')
-    fig.add_hline(y=0.05, line_dash='dot', line_color='rgba(63,185,80,0.25)', line_width=1,
-                  annotation_text='0.05', annotation_font_color='rgba(63,185,80,0.5)',
-                  annotation_font_size=9, annotation_position='top right')
-    fig.add_hline(y=-0.05, line_dash='dot', line_color='rgba(224,82,82,0.25)', line_width=1)
+    fig.add_hrect(
+        y0=0.05, y1=1.0, fillcolor='rgba(63,185,80,0.04)', line_width=0, layer='below'
+    )
+    fig.add_hrect(
+        y0=-1.0, y1=-0.05, fillcolor='rgba(224,82,82,0.04)', line_width=0, layer='below'
+    )
+    fig.add_hline(
+        y=0.05,
+        line_dash='dot',
+        line_color='rgba(63,185,80,0.25)',
+        line_width=1,
+        annotation_text='0.05',
+        annotation_font_color='rgba(63,185,80,0.5)',
+        annotation_font_size=9,
+        annotation_position='top right',
+    )
+    fig.add_hline(
+        y=-0.05, line_dash='dot', line_color='rgba(224,82,82,0.25)', line_width=1
+    )
     fig.update_layout(yaxis_title='Spearman IC', showlegend=True)
     return chips, fig
 
@@ -825,12 +859,19 @@ def render_quintiles(data):
                 y=df[col],
                 mode='lines',
                 name=col,
-                line=dict(color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1),
+                line=dict(
+                    color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1
+                ),
                 hovertemplate=f'{col}: %{{y:.3f}}<extra></extra>',
             )
         )
         # Net (cost-adjusted) traces for Q1 and Q5 only
-        if cost_bps and col in ('Q1', 'Q5') and not df_net.empty and col in df_net.columns:
+        if (
+            cost_bps
+            and col in ('Q1', 'Q5')
+            and not df_net.empty
+            and col in df_net.columns
+        ):
             fig.add_trace(
                 go.Scatter(
                     x=df_net['date'],
@@ -880,11 +921,13 @@ def render_quintiles(data):
             if not series.empty:
                 val = float(series.iloc[-1])
                 fig.add_annotation(
-                    x=last_date, y=val,
+                    x=last_date,
+                    y=val,
                     text=f'{val:+.2f}',
                     showarrow=False,
                     font=dict(color=_QUINTILE_COLOURS[i], size=11),
-                    xanchor=xanchor, xshift=xshift,
+                    xanchor=xanchor,
+                    xshift=xshift,
                 )
     fig.update_layout(yaxis_title='Cumulative log return')
     return fig
@@ -917,7 +960,9 @@ def render_spread(data):
                 y=spread,
                 mode='lines',
                 name=col,
-                line=dict(color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1),
+                line=dict(
+                    color=_QUINTILE_COLOURS[i], width=1.5 if col in ('Q1', 'Q5') else 1
+                ),
                 hovertemplate=f'{col}: %{{y:.3f}}<extra></extra>',
             )
         )
@@ -929,11 +974,13 @@ def render_spread(data):
             if not series.empty:
                 val = float(series.iloc[-1])
                 fig.add_annotation(
-                    x=last_date, y=val,
+                    x=last_date,
+                    y=val,
                     text=f'{val:+.2f}',
                     showarrow=False,
                     font=dict(color=_QUINTILE_COLOURS[i], size=11),
-                    xanchor=xanchor, xshift=xshift,
+                    xanchor=xanchor,
+                    xshift=xshift,
                 )
     fig.update_layout(yaxis_title='Excess cumulative log return vs EW')
     return fig
@@ -958,8 +1005,19 @@ def render_spread(data):
     ],
     prevent_initial_call=True,
 )
-def run_decay_analysis(n_clicks, horizons, mode, factor, variant, freq,
-                       start_yr, end_yr, market, sector, watchlist):
+def run_decay_analysis(
+    n_clicks,
+    horizons,
+    mode,
+    factor,
+    variant,
+    freq,
+    start_yr,
+    end_yr,
+    market,
+    sector,
+    watchlist,
+):
     if not n_clicks or not horizons or mode == 'composite' or not factor:
         raise PreventUpdate
     try:
@@ -967,19 +1025,19 @@ def run_decay_analysis(n_clicks, horizons, mode, factor, variant, freq,
         end_yr = int(end_yr or _CURRENT_YEAR)
         if watchlist:
             try:
-                tickers = load_watchlist(watchlist)
+                watchlist_service.load_watchlist(watchlist)
             except KeyError:
                 return {'error': f'Watchlist "{watchlist}" not found.'}
-        else:
-            tickers = _filtered_tickers(market or '', sector)
-        df = run_factor_decay(
+        df = backtest_service.run_decay(
             factor=factor,
             horizons=sorted(horizons),
             start_date=datetime.date(start_yr, 1, 1),
             end_date=datetime.date(end_yr, 12, 31),
             variant=variant or 'A',
             freq=freq or 'Q',
-            tickers=tickers,
+            market=market or None,
+            sector=sector,
+            watchlist=watchlist,
         )
         return df.to_dict(orient='records')
     except PreventUpdate:

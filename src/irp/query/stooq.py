@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from irp.query._common import db, ticker_filter
+from irp.query._common import build_where, db
 
 
 def prices(
@@ -12,21 +12,10 @@ def prices(
     src: str | None = None,
 ) -> pd.DataFrame:
     """OHLCV prices. `start` / `end` as 'YYYY-MM-DD'."""
-    filters, params = [], []
-    clause, vals = ticker_filter(tickers)
-    if clause:
-        filters.append(clause)
-        params.extend(vals)
-    if start is not None:
-        filters.append('Date >= ?')
-        params.append(start)
-    if end is not None:
-        filters.append('Date <= ?')
-        params.append(end)
+    where, params = build_where(tickers, start, end)
     if src is not None:
-        filters.append('Src = ?')
+        where = f'{where} AND Src = ?' if where else 'WHERE Src = ?'
         params.append(src)
-    where = f'WHERE {" AND ".join(filters)}' if filters else ''
     return (
         db().execute(f'SELECT * FROM prices {where} ORDER BY Ticker, Date', params).df()
     )

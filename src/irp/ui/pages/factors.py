@@ -12,12 +12,11 @@ from dash import Input, Output, State, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
-from irp.factors import cross_section, ticker_factor_history
-from irp.query.simfin import companies as _companies
-from irp.query.watchlists import list_watchlists, load_watchlist
+from irp.ui.charts import empty_figure as _empty_figure
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
-from dash.dash_table.Format import Format, Scheme, Symbol
-
+from irp.ui.services import factors_service, universe_service, watchlist_service
+from irp.ui.tables import column_format as _col_fmt
+from irp.ui.tables import format_factor_value as _fmt
 from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')
@@ -39,53 +38,6 @@ _TOP_OPTIONS = [
 _DEFAULT_DATE = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
 
 
-def _col_fmt(c: str) -> dict:
-    if c == 'mktcap':
-        return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.fixed, symbol=Symbol.yes, symbol_prefix='$')}
-    if c in _PCT_FACTORS:
-        return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.percentage)}
-    if c in FACTOR_LABELS:
-        return {'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)}
-    return {}
-
-
-
-def _fmt(val: object, factor: str) -> str:
-    """Format a factor value for table cells and hover text."""
-    try:
-        v = float(val)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return '—'
-    if pd.isna(v) or not isfinite(v):
-        return '—'
-    if factor == 'mktcap':
-        return f'${v / 1e9:.1f}B'
-    if factor in _PCT_FACTORS:
-        return f'{v * 100:.1f}%'
-    return f'{v:.1f}x'
-
-
-def _empty_figure(message: str = 'No data') -> go.Figure:
-    fig = go.Figure()
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        annotations=[
-            dict(
-                text=message,
-                x=0.5,
-                y=0.5,
-                xref='paper',
-                yref='paper',
-                showarrow=False,
-                font=dict(color=MUTED, size=13),
-            )
-        ],
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        margin=dict(l=0, r=0, t=8, b=0),
-    )
-    return fig
 
 
 def _chart_layout(**extra: Any) -> go.Layout:
@@ -299,9 +251,9 @@ layout = html.Div(
 def load_options(_: Any, _wl: Any) -> tuple[Any, list, list, list, list]:
     """Populate filter dropdowns from SimFin companies table on page load."""
     try:
-        df = _companies()
+        df = universe_service.get_companies()
     except Exception:
-        logger.exception('load_options: _companies() failed')
+        logger.exception('load_options: get_companies() failed')
         return None, [], [], []
     if df.empty:
         logger.warning('load_options: companies() returned empty DataFrame')
@@ -316,7 +268,7 @@ def load_options(_: Any, _wl: Any) -> tuple[Any, list, list, list, list]:
         {'label': f'{r["Ticker"]} – {r["Company Name"]}', 'value': r['Ticker']}
         for _, r in df.sort_values('Ticker').iterrows()
     ]
-    wl_df = list_watchlists()
+    wl_df = watchlist_service.list_watchlists()
     wl_opts = (
         [{'label': f'{r["name"]} ({r["n"]})', 'value': r['name']}
          for _, r in wl_df.iterrows()]
@@ -375,11 +327,14 @@ def compute_xsection(
     tickers = None
     if watchlist:
         try:
-            tickers = load_watchlist(watchlist)
+            tickers = watchlist_service.load_watchlist(watchlist)
         except KeyError:
             logger.warning(f'compute_xsection: watchlist "{watchlist}" not found')
 
-    df = cross_section(as_of, variant, tickers=tickers)  # type: ignore[arg-type]
+    df = factors_service.load_cross_section(as_of, variant, watchlist=None,
+                                            enrich_company_columns=False)
+    if tickers is not None:
+        df = df[df.index.isin(tickers)]
     if df.empty:
         return {}
     df = df.reset_index()
@@ -527,7 +482,7 @@ def compute_history(n_clicks: int, ticker: str | None, variant: str, factor: str
     """Compute per-ticker factor history on Run click."""
     if not ticker:
         raise PreventUpdate
-    df = ticker_factor_history(ticker, variant)  # type: ignore[arg-type]
+    df = factors_service.load_ticker_history(ticker, variant)  # type: ignore[arg-type]
     if df.empty:
         return {}
     df = df.copy()

@@ -122,14 +122,12 @@ def main() -> None:
 
 
 def _delete_markers(name: str, feed: str) -> None:
+    from irp.core.markers import MarkerSet
     cfg = getattr(config.providers, name)
     raw_dir = config.data.root_dir / cfg.raw_dir
-    fetch_marker = raw_dir / ('.fetched_update' if feed == 'update' else '.fetched')
-    markers = [fetch_marker, raw_dir / f'.transformed_{feed}', raw_dir / f'.stored_{feed}']
-    for m in markers:
-        if m.exists():
-            m.unlink()
-            print(f'  deleted {name}/{m.name}')
+    n = MarkerSet(raw_dir).clear_feed(feed)
+    if n:
+        print(f'  deleted {n} {name}/{feed} marker{"s" if n != 1 else ""}')
 
 
 def _make_source(

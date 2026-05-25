@@ -48,7 +48,7 @@ def sector_neutral(
     cols: list[str] | None = None,
     method: str = 'zscore',
 ) -> pd.DataFrame:
-    """Normalize each column within its sector group.
+    """Normalize each column within its sector group (vectorized).
 
     Parameters
     ----------
@@ -57,17 +57,24 @@ def sector_neutral(
     cols   : Columns to normalize; defaults to standard factor cols.
     method : 'zscore' or 'rank'.
 
-    Tickers absent from sector or in a singleton sector get NaN for all cols.
+    Tickers absent from sector get NaN for all cols. Singleton sectors get
+    NaN (zero variance) for z-score, and centered rank for rank-norm.
     """
     resolved = _cols(df, cols)
     out = df.copy()
     aligned = sector.reindex(df.index)
-    fn = zscore if method == 'zscore' else rank_norm
+    groups = aligned.dropna()
 
-    for sect in aligned.dropna().unique():
-        mask = aligned == sect
-        normed = fn(out.loc[mask], resolved)
-        out.loc[mask, resolved] = normed[resolved]
+    if method == 'zscore':
+        for c in resolved:
+            mean = df[c].groupby(groups).transform('mean')
+            std  = df[c].groupby(groups).transform('std')
+            out[c] = ((df[c] - mean) / std).clip(-3, 3)
+    else:
+        for c in resolved:
+            n = df[c].groupby(groups).transform('count')
+            ranks = df[c].groupby(groups).rank(method='average', na_option='keep')
+            out[c] = ranks / (n + 1) - 0.5
 
     out.loc[aligned.isna(), resolved] = float('nan')
     return out

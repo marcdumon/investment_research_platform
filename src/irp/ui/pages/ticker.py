@@ -10,13 +10,7 @@ from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 from plotly.basedatatypes import BaseTraceType
 
-from irp.query.simfin import companies as _companies
-from irp.query.simfin import statement as _stmt
-from irp.query.stooq import prices as _stooq_prices
-from irp.query.universe import universe as _universe
-from irp.query.yahoo import dividends as _divs
-from irp.query.yahoo import prices as _yahoo_prices
-from irp.query.yahoo import splits as _splits
+from irp.ui.services import price_service, universe_service
 from irp.ui.theme import ACCENT, DIV_COLOR, GRID, HOVER_LABEL, MUTED, SPLIT_COLOR, TABLE_STYLE
 from irp.ui.ticker_fmt import date_range_for_preset, fmt_price_table, fmt_statement
 
@@ -211,12 +205,12 @@ layout = html.Div(
 def load_ticker_data(_: Any) -> tuple[Any, ...]:
 
     try:
-        uni = _universe()
+        uni = universe_service.get_universe()
     except Exception:
         return [], [], [], []
 
     try:
-        comp = _companies()[['Ticker', 'Company Name', 'Sector', 'Industry']]
+        comp = universe_service.get_companies()[['Ticker', 'Company Name', 'Sector', 'Industry']]
     except Exception:
         comp = pd.DataFrame(columns=['Ticker', 'Company Name', 'Sector', 'Industry'])
 
@@ -311,12 +305,12 @@ def render_header(ticker: str | None) -> list:
         raise PreventUpdate
 
     try:
-        uni_row = _universe(ticker)
+        uni_row = universe_service.get_universe(ticker)
     except Exception:
         uni_row = pd.DataFrame()
 
     try:
-        comp_row = _companies(ticker)
+        comp_row = universe_service.get_companies(ticker)
     except Exception:
         comp_row = pd.DataFrame()
 
@@ -420,12 +414,8 @@ def render_prices(
         raise PreventUpdate
 
     try:
-        if source == 'stooq':
-            df = _stooq_prices(ticker, start=start, end=end)
-            close_col = 'C'
-        else:
-            df = _yahoo_prices(ticker, start=start, end=end)
-            close_col = 'Close'
+        df = price_service.get_prices(ticker, source=source, start=start, end=end)
+        close_col = 'C' if source == 'stooq' else 'Close'
     except Exception as exc:
         logger.warning(f'Price query failed for {ticker}: {exc}')
         return empty_fig, no_data
@@ -441,17 +431,14 @@ def render_prices(
     shapes: list[dict] = []
 
     try:
-        divs = _divs(ticker, start=start, end=end)
-        spls = _splits(ticker, start=start, end=end)
+        divs = price_service.get_dividends(ticker)
+        spls = price_service.get_splits(ticker)
 
         if not divs.empty:
             div_dates = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
             price_at_div = (
                 df.set_index('_date_str')[close_col].reindex(div_dates).values
             )
-            div_col = next((c for c in ('Amount', 'Dividends') if c in divs.columns), None)
-        if div_col is None:
-            div_col = 'Amount'
             div_traces.append(
                 go.Scatter(
                     x=div_dates,
@@ -460,7 +447,7 @@ def render_prices(
                     marker=dict(symbol='triangle-up', size=10, color=DIV_COLOR),
                     name='Dividend',
                     hovertemplate='<b>%{x}</b><br>Div: $%{customdata:.4f}<extra></extra>',
-                    customdata=divs[div_col],
+                    customdata=divs['Amount'],
                     hoverlabel=dict(**HOVER_LABEL, bordercolor=DIV_COLOR),
                 )
             )
@@ -623,7 +610,7 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
     if not ticker:
         raise PreventUpdate
     try:
-        df = _stmt(ticker, name)  # type: ignore[arg-type]
+        df = universe_service.get_statement(ticker, name)  # type: ignore[arg-type]
     except Exception as exc:
         logger.warning(f'Statement query failed {ticker}/{name}: {exc}')
         return html.P('Failed to load data.', className='no-data'), ''
@@ -691,8 +678,8 @@ def render_actions(ticker: str | None) -> Any:
         raise PreventUpdate
 
     try:
-        divs = _divs(ticker)
-        spls = _splits(ticker)
+        divs = price_service.get_dividends(ticker)
+        spls = price_service.get_splits(ticker)
     except Exception as exc:
         logger.warning(f'Actions query failed {ticker}: {exc}')
         return html.P('Failed to load data.', className='no-data')
@@ -703,14 +690,11 @@ def render_actions(ticker: str | None) -> Any:
         div_block = html.P('No dividend history.', className='no-data')
     else:
         divs = divs.sort_values('Date', ascending=False).reset_index(drop=True)
-        div_col = next((c for c in ('Amount', 'Dividends') if c in divs.columns), None)
-        if div_col is None:
-            div_col = 'Amount'
         rows = [
             html.Tr(
                 [
                     html.Td(str(row['Date'])[:10], className='stmt-td stmt-td--item'),
-                    html.Td(f'{float(row[div_col]):,.4f}' if row[div_col] is not None and str(row[div_col]) not in ('', 'nan') else '—', className='stmt-td'),
+                    html.Td(f'{float(row["Amount"]):,.4f}' if row['Amount'] is not None and str(row['Amount']) not in ('', 'nan') else '—', className='stmt-td'),
                 ]
             )
             for _, row in divs.iterrows()

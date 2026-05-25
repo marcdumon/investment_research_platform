@@ -36,11 +36,13 @@ def db_close() -> None:
     Increments a generation counter so threads that try to use a stale
     connection will reopen on next db() call.
     """
+    import logging
+    log = logging.getLogger(__name__)
     with _registry_lock:
         for con in list(_registry):
             try:
                 con.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug(f'db_close: ignoring error closing stale connection: {exc}')
         _registry.clear()
     _local.con = None

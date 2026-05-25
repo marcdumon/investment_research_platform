@@ -63,7 +63,7 @@ def compute_piotroski(
 
     Parameters
     ----------
-    raw_income, raw_balance, raw_cashflow : Full-history DataFrames, pit_prepare'd or raw.
+    raw_income, raw_balance, raw_cashflow : Full-history DataFrames.
     as_of_date : Snapshot date.
     variant    : 'Q' → TTM flow statements; 'A' → latest annual filing.
 
@@ -146,3 +146,49 @@ def compute_piotroski(
     out['piotroski_fscore'] = signals.sum(axis=1, min_count=1)
     out.index.name = TICKER
     return out
+
+
+def compute_piotroski_panel(df: pd.DataFrame) -> pd.Series:
+    """Piotroski F-Score from a combined cross-section DataFrame.
+
+    Takes the assembled per-ticker frame used by `cross_section_panel`
+    (one row per ticker, columns include current + prior year values
+    already PIT-aligned). Returns a Series of f-scores 0..9 (or NaN
+    when all signals are missing).
+
+    Required columns (current): ni, ta, rev, gp, cl, ca, cfo, shares, lt_debt
+    Required columns (prior):   ni_p, ta_p, rev_p, gp_p, cl_p, ca_p, shares_p, ltd_p
+    """
+    def _binary(condition: pd.Series, gate: pd.Series) -> pd.Series:
+        out = pd.Series(np.nan, index=condition.index, dtype='float64')
+        out[gate & condition] = 1.0
+        out[gate & ~condition] = 0.0
+        return out
+
+    ta_ok   = df['ta'].notna()   & (df['ta']   != 0)
+    tap_ok  = df['ta_p'].notna() & (df['ta_p'] != 0)
+    rev_ok  = df['rev'].notna()  & (df['rev']  != 0)
+    revp_ok = df['rev_p'].notna() & (df['rev_p'] != 0)
+    cl_ok   = df['cl'].notna()   & (df['cl']   != 0)
+    clp_ok  = df['cl_p'].notna() & (df['cl_p'] != 0)
+
+    f1 = _binary((df['ni'] / df['ta']) > 0, ta_ok & df['ni'].notna())
+    f2 = _binary(df['cfo'] > 0, df['cfo'].notna())
+    f3 = _binary((df['ni'] / df['ta']) > (df['ni_p'] / df['ta_p']),
+                 ta_ok & tap_ok & df['ni_p'].notna())
+    f4 = _binary((df['cfo'] / df['ta']) > (df['ni'] / df['ta']),
+                 ta_ok & df['cfo'].notna() & df['ni'].notna())
+    f5 = _binary((df['lt_debt'] / df['ta']) < (df['ltd_p'] / df['ta_p']),
+                 ta_ok & tap_ok)
+    f6 = _binary((df['ca'] / df['cl']) > (df['ca_p'] / df['cl_p']),
+                 cl_ok & clp_ok & df['ca'].notna() & df['ca_p'].notna())
+    f7 = _binary(df['shares'] < df['shares_p'], df['shares_p'].notna())
+    f8 = _binary((df['gp'] / df['rev']) > (df['gp_p'] / df['rev_p']),
+                 rev_ok & revp_ok & df['gp_p'].notna())
+    f9 = _binary((df['rev'] / df['ta']) > (df['rev_p'] / df['ta_p']),
+                 ta_ok & tap_ok & df['rev_p'].notna())
+
+    sig_stack = pd.concat([f1, f2, f3, f4, f5, f6, f7, f8, f9], axis=1)
+    all_null = sig_stack.isna().all(axis=1)
+    score = sig_stack.fillna(0).sum(axis=1)
+    return score.where(~all_null, np.nan)
