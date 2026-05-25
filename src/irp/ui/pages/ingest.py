@@ -80,6 +80,7 @@ layout = html.Div(className='ingest-page', children=[
                 {'label': ' seed-universe', 'value': 'seed-universe'},
                 {'label': ' universe', 'value': 'universe'},
                 {'label': ' catalog', 'value': 'catalog'},
+                {'label': ' rebuild panel', 'value': 'rebuild-panel'},
                 {'label': ' clear factor cache', 'value': 'clear-factor-cache'},
                 {'label': ' rebuild factor cache', 'value': 'rebuild-factor-cache'},
             ],
@@ -286,6 +287,14 @@ def _run_pipeline(
         logger.info('-- catalog --')
         n = _refresh_catalog()
         logger.info(f'{n:,} tickers')
+
+    if 'rebuild-panel' in steps and not cancelled():
+        from irp.panel.build import build_panels
+        from irp.panel.load import clear_cache as _clear_panel_cache
+        logger.info('-- rebuild panel --')
+        paths = build_panels()
+        _clear_panel_cache()
+        logger.info(f'panel rebuilt ({len(paths)} parquet{"s" if len(paths) != 1 else ""} written)')
 
     if 'clear-factor-cache' in steps and not cancelled():
         from irp.factors.cache import clear as _clear_cache
