@@ -22,7 +22,7 @@ def zscore(df: pd.DataFrame, cols: list[str] | None = None) -> pd.DataFrame:
     out = df.copy()
     for c in _cols(df, cols):
         s = out[c]
-        std = s.std()
+        std = s.std() if s.count() > 1 else 0.0
         if std > 0:
             out[c] = ((s - s.mean()) / std).clip(-3, 3)
     return out
