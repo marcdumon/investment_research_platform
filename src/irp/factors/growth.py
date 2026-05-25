@@ -27,7 +27,7 @@ def compute_growth(
 
     Parameters
     ----------
-    raw_income   : Full income-statement history (all dates), pit_prepare'd or raw.
+    raw_income   : Full income-statement history (all dates).
     raw_cashflow : Full cashflow history (reserved for future FCF growth factor).
     as_of_date   : Snapshot date for the cross-section.
     variant      : 'Q' → TTM comparison; 'A' → latest annual filing comparison.

@@ -8,12 +8,17 @@ import pandas as pd
 import pytest
 
 import irp.factors.cache as cache_mod
+from irp.factors.cache import snapshot as _snapshot_mod
 
 
 @pytest.fixture(autouse=True)
 def patch_cache_root(tmp_path, monkeypatch):
-    """Redirect _CACHE_ROOT to tmp_path for every test."""
-    monkeypatch.setattr(cache_mod, '_CACHE_ROOT', tmp_path / 'factor_cache')
+    """Redirect CACHE_ROOT to tmp_path for every test.
+
+    `cache/backtest.py` reads via `_snapshot.CACHE_ROOT`, so patching the
+    snapshot module's attribute updates both subpackages.
+    """
+    monkeypatch.setattr(_snapshot_mod, 'CACHE_ROOT', tmp_path / 'factor_cache')
 
 
 _DATE = datetime.date(2024, 12, 31)
@@ -73,7 +78,7 @@ def test_cross_section_writes_to_cache(tmp_path, monkeypatch):
     """cross_section() stores result on first call when tickers=None."""
     import irp.factors.compute as compute_mod
 
-    monkeypatch.setattr(cache_mod, '_CACHE_ROOT', tmp_path / 'fc')
+    monkeypatch.setattr(_snapshot_mod, 'CACHE_ROOT', tmp_path / 'fc')
 
     dummy = _DF.copy()
     with (
@@ -90,7 +95,7 @@ def test_cross_section_uses_cache_without_db(tmp_path, monkeypatch):
     """cross_section() returns cached value and skips SQL on second call."""
     import irp.factors.compute as compute_mod
 
-    monkeypatch.setattr(cache_mod, '_CACHE_ROOT', tmp_path / 'fc')
+    monkeypatch.setattr(_snapshot_mod, 'CACHE_ROOT', tmp_path / 'fc')
     cache_mod.store(_DATE, 'A', _DF)
 
     mock_sql = MagicMock()
@@ -122,13 +127,15 @@ _QCR = pd.DataFrame(
      'Q4': [0.0, 0.08], 'Q5': [0.0, 0.15]},
     index=[datetime.date(2020, 3, 31), datetime.date(2020, 6, 30)],
 )
-_BT_RESULT = {
-    'ic_series': _IC,
-    'quintile_cumret': _QCR,
-    'mean_ic': 0.055,
-    'ic_tstat': 1.8,
-    'n_dates': 4,
-}
+from irp.factors.models import BacktestResult
+
+_BT_RESULT = BacktestResult(
+    ic_series=_IC,
+    quintile_cumret=_QCR,
+    mean_ic=0.055,
+    ic_tstat=1.8,
+    n_dates=4,
+)
 _BT_KWARGS = dict(factor='pe', horizon_days=252, variant='A', freq='Q',
                   start_date=_START, end_date=_END)
 
@@ -149,7 +156,7 @@ def test_load_backtest_returns_none_on_miss():
 
 
 def test_store_backtest_nan_scalars():
-    result = {**_BT_RESULT, 'mean_ic': float('nan'), 'ic_tstat': float('nan')}
+    result = _BT_RESULT.model_copy(update={'mean_ic': float('nan'), 'ic_tstat': float('nan')})
     cache_mod.store_backtest(**_BT_KWARGS, result=result)
     r = cache_mod.load_backtest(**_BT_KWARGS)
     assert r is not None

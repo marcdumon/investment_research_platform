@@ -208,6 +208,10 @@ def _store_companies(con: duckdb.DuckDBPyConnection) -> None:
 class SimFinSource:
     SUPPORTED_FEEDS: frozenset[Feed] = frozenset({'bulk'})
 
+    def __init__(self) -> None:
+        from irp.core.markers import MarkerSet
+        self.markers = MarkerSet(raw_dir)
+
     def fetch_bulk(self) -> None:
         _configure_sf()
         before = {f: f.stat().st_mtime for f in raw_dir.glob('*.csv')}
@@ -226,13 +230,12 @@ class SimFinSource:
         if failures:
             logger.warning(f'SimFin fetch: {len(failures)} of {len(BULK_DATASETS)} datasets failed')
 
-        marker = raw_dir / '.fetched'
         after = {f: f.stat().st_mtime for f in raw_dir.glob('*.csv')}
         if after != before:
-            marker.touch()
+            self.markers.touch('fetched')
             logger.debug('SimFin data updated, touching .fetched marker.')
-        elif not marker.exists():
-            marker.touch()
+        elif not self.markers.exists('fetched'):
+            self.markers.touch('fetched')
             logger.debug('SimFin data already on disk, creating baseline .fetched marker.')
         else:
             logger.info('fetch: no new data downloaded, skipping marker update')
@@ -242,26 +245,22 @@ class SimFinSource:
         raise NotImplementedError('SimFin does not support incremental update')
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
-        marker = raw_dir / '.transformed_bulk'
-        upstream = raw_dir / '.fetched'
-        if is_fresh(marker, upstream):
+        if self.markers.is_fresh('transformed_bulk', 'fetched'):
             logger.info('transform(bulk): already up to date, skipping')
             return
         conn = duckdb.connect()
         _transform_fundamentals(conn)
         _transform_companies(conn)
-        marker.touch()
+        self.markers.touch('transformed_bulk')
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
-        marker = raw_dir / '.stored_bulk'
-        upstream = raw_dir / '.transformed_bulk'
-        if is_fresh(marker, upstream):
+        if self.markers.is_fresh('stored_bulk', 'transformed_bulk'):
             logger.info('store(bulk): already up to date, skipping')
             return
         with duckdb.connect(config.database.path) as con:
             _store_fundamentals(con)
             _store_companies(con)
-        marker.touch()
+        self.markers.touch('stored_bulk')
         logger.debug('SimFin bulk data stored.')
 
     def cleanup(self) -> None:

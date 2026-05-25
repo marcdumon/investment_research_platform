@@ -1,7 +1,16 @@
 """Row accessors for Yahoo tables (`yahoo_prices`, `dividends`, `splits`)."""
 import pandas as pd
 
-from irp.query._common import db, ticker_filter
+from irp.query._common import build_where, db
+
+
+def _select(table: str, tickers, start, end) -> pd.DataFrame:
+    where, params = build_where(tickers, start, end)
+    return (
+        db()
+        .execute(f'SELECT * FROM {table} {where} ORDER BY Ticker, Date', params)
+        .df()
+    )
 
 
 def prices(
@@ -10,23 +19,7 @@ def prices(
     end: str | None = None,
 ) -> pd.DataFrame:
     """Auto-adjusted OHLCV prices from Yahoo Finance. `start` / `end` as 'YYYY-MM-DD'."""
-    filters, params = [], []
-    clause, vals = ticker_filter(tickers)
-    if clause:
-        filters.append(clause)
-        params.extend(vals)
-    if start is not None:
-        filters.append('Date >= ?')
-        params.append(start)
-    if end is not None:
-        filters.append('Date <= ?')
-        params.append(end)
-    where = f'WHERE {" AND ".join(filters)}' if filters else ''
-    return (
-        db()
-        .execute(f'SELECT * FROM yahoo_prices {where} ORDER BY Ticker, Date', params)
-        .df()
-    )
+    return _select('yahoo_prices', tickers, start, end)
 
 
 def dividends(
@@ -35,23 +28,7 @@ def dividends(
     end: str | None = None,
 ) -> pd.DataFrame:
     """Cash dividend events. `start` / `end` as 'YYYY-MM-DD'."""
-    filters, params = [], []
-    clause, vals = ticker_filter(tickers)
-    if clause:
-        filters.append(clause)
-        params.extend(vals)
-    if start is not None:
-        filters.append('Date >= ?')
-        params.append(start)
-    if end is not None:
-        filters.append('Date <= ?')
-        params.append(end)
-    where = f'WHERE {" AND ".join(filters)}' if filters else ''
-    return (
-        db()
-        .execute(f'SELECT * FROM dividends {where} ORDER BY Ticker, Date', params)
-        .df()
-    )
+    return _select('dividends', tickers, start, end)
 
 
 def splits(
@@ -60,20 +37,4 @@ def splits(
     end: str | None = None,
 ) -> pd.DataFrame:
     """Stock split events. `start` / `end` as 'YYYY-MM-DD'."""
-    filters, params = [], []
-    clause, vals = ticker_filter(tickers)
-    if clause:
-        filters.append(clause)
-        params.extend(vals)
-    if start is not None:
-        filters.append('Date >= ?')
-        params.append(start)
-    if end is not None:
-        filters.append('Date <= ?')
-        params.append(end)
-    where = f'WHERE {" AND ".join(filters)}' if filters else ''
-    return (
-        db()
-        .execute(f'SELECT * FROM splits {where} ORDER BY Ticker, Date', params)
-        .df()
-    )
+    return _select('splits', tickers, start, end)

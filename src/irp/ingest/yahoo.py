@@ -72,7 +72,11 @@ def _load_last_prices_dates() -> dict[str, date]:
                 'SELECT Ticker, MAX(Date) FROM yahoo_prices GROUP BY Ticker'
             ).fetchall()
         return {ticker: d for ticker, d in rows}
-    except Exception:
+    except duckdb.CatalogException:
+        # yahoo_prices table absent on first-time load
+        return {}
+    except duckdb.IOException as exc:
+        logger.warning(f'_load_last_prices_dates: DB unreachable, treating as empty: {exc}')
         return {}
 
 
@@ -462,9 +466,11 @@ class YahooSource:
         fetch_prices: bool = True,
         prices_mode: Literal['batch', 'ticker'] = 'batch',
     ) -> None:
+        from irp.core.markers import MarkerSet
         self._fetch_actions = fetch_actions
         self._fetch_prices = fetch_prices
         self._prices_mode = prices_mode
+        self.markers = MarkerSet(raw_dir)
 
     def fetch_bulk(self) -> None:
         """Pull dividends, splits, and/or OHLCV prices for every eligible ticker.
@@ -477,7 +483,7 @@ class YahooSource:
         Resume-safe: progress is tracked in `queried_actions.json`,
         `queried_prices.json`, and `error_tickers.json` under raw_dir. Interrupt
         any time with Ctrl-C; rerun skips already-fetched and known-error tickers."""
-        marker = raw_dir / '.fetched'
+        marker = self.markers.path('fetched')
         actions_fresh = not self._fetch_actions or (
             is_fresh(marker, _QUERIED_ACTIONS.path) and _ACTIONS_FILE.exists()
         )
@@ -493,7 +499,7 @@ class YahooSource:
             fetch_prices=self._fetch_prices,
             prices_mode=self._prices_mode, # type: ignore (pylance widens instance attribute type)
         )
-        marker.touch()
+        self.markers.touch('fetched')
         logger.debug('Yahoo ticker data fetched.')
 
     def update(self) -> None:
@@ -516,30 +522,26 @@ class YahooSource:
             prices_mode=self._prices_mode, # type: ignore (pylance widens instance attribute type)
             last_dates=last_dates,
         )
-        (raw_dir / '.fetched').touch()
+        self.markers.touch('fetched')
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:
-        marker = raw_dir / f'.transformed_{feed}'
-        upstream = raw_dir / '.fetched'
-        if is_fresh(marker, upstream):
+        if self.markers.is_fresh(f'transformed_{feed}', 'fetched'):
             logger.info(f'transform({feed}): already up to date, skipping')
             return
         conn = duckdb.connect()
         _transform_actions(conn)
         _transform_prices(conn)
-        marker.touch()
+        self.markers.touch(f'transformed_{feed}')
 
     def store(self, feed: Literal['bulk', 'update']) -> None:
-        marker = raw_dir / f'.stored_{feed}'
-        upstream = raw_dir / f'.transformed_{feed}'
-        if is_fresh(marker, upstream):
+        if self.markers.is_fresh(f'stored_{feed}', f'transformed_{feed}'):
             logger.info(f'store({feed}): already up to date, skipping')
             return
         with duckdb.connect(config.database.path) as con:
             _store_dividends(con)
             _store_splits(con)
             _store_prices(con)
-        marker.touch()
+        self.markers.touch(f'stored_{feed}')
         logger.debug(f'Yahoo {feed} data stored.')
 
     def cleanup(self) -> None:

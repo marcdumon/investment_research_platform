@@ -2,16 +2,17 @@
 
 Output schema: DataFrame indexed by Ticker with all factor columns.
 
-Pipeline (all polars/numpy, all small DataFrames):
-    1. PIT-align fundamentals (income/balance/cashflow at as_of and prior year)
-    2. Price snapshots at as_of, -30d, -182d, -365d
-    3. Window stats: vol_21d, ma200 from wide panel slice
-    4. Combine into one DataFrame indexed by Ticker
-    5. Apply factor formulas (pure pandas/numpy)
+Pipeline stages (all small in-memory DataFrames):
+    1. `_pit_align`        — current + prior-year fundamentals (polars → pandas)
+    2. `_price_snapshots`  — close at as_of plus 1m/6m/12m lookbacks + vol/ma200
+    3. `_assemble`         — combine pit + prices into one wide pandas frame
+    4. `_apply_formulas`   — pure pandas factor calculations
+    5. Piotroski signals delegated to `irp.factors.piotroski.compute_piotroski_panel`
 """
 import datetime
 import logging
 import warnings
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -25,7 +26,10 @@ from irp.panel.pit import pit_latest, pit_ttm, pit_price_row, pit_price_at_offse
 logger = logging.getLogger(__name__)
 
 
-# Columns aggregated for TTM (Q variant) — income + cashflow only; balance uses latest filing
+# ---------------------------------------------------------------------------
+# Column lists (TTM sums — Q variant). Balance always uses latest filing.
+# ---------------------------------------------------------------------------
+
 _INCOME_TTM_COLS = [
     'Revenue', 'Gross Profit', 'Operating Income (Loss)', 'Net Income',
     'Interest Expense, Net', 'Depreciation & Amortization',
@@ -35,78 +39,134 @@ _CASHFLOW_TTM_COLS = [
     'Depreciation & Amortization',
 ]
 
+_INCOME_COLS = [
+    'Ticker', 'Revenue', 'Gross Profit', 'Operating Income (Loss)',
+    'Net Income', 'Interest Expense, Net', 'Depreciation & Amortization',
+]
+_CASHFLOW_COLS = [
+    'Ticker', 'Net Cash from Operating Activities',
+    'Net Cash from Investing Activities', 'Depreciation & Amortization',
+]
+_BALANCE_COLS = [
+    'Ticker', 'Total Assets', 'Total Equity',
+    'Total Current Assets', 'Total Current Liabilities',
+    'Cash, Cash Equivalents & Short Term Investments',
+    'Short Term Debt', 'Long Term Debt', 'Shares (Diluted)',
+]
+
+_FACTOR_COLS_ORDER = [
+    'mktcap',
+    'pe', 'pb', 'ps', 'ev_ebitda', 'ev_ebit', 'ev_sales', 'fcf_yield', 'rand',
+    'gross_margin', 'op_margin', 'net_margin', 'roe', 'roa', 'roic', 'fcf_margin',
+    'asset_turnover', 'cfo_ni_ratio', 'accruals',
+    'debt_equity', 'net_debt_ebitda', 'interest_coverage',
+    'mom_12_1', 'mom_6_1', 'vol_21d', 'ma200_ratio',
+    'rev_growth_1y', 'earn_growth_1y',
+    'piotroski_fscore',
+]
+
 
 # ---------------------------------------------------------------------------
-# PIT for fundamentals (variant-aware)
+# Per-statement PIT (variant-aware)
 # ---------------------------------------------------------------------------
 
-def _income_pit(
-    df: pl.DataFrame, as_of: datetime.date, variant: Literal['A', 'Q'],
-) -> pl.DataFrame:
+def _income_pit(df: pl.DataFrame, as_of: datetime.date, variant: Literal['A', 'Q']) -> pl.DataFrame:
     if variant == 'A':
-        return pit_latest(df, as_of).select(
-            ['Ticker', 'Revenue', 'Gross Profit', 'Operating Income (Loss)',
-             'Net Income', 'Interest Expense, Net', 'Depreciation & Amortization']
-        )
+        return pit_latest(df, as_of).select(_INCOME_COLS)
     return pit_ttm(df, as_of, _INCOME_TTM_COLS, n=4)
 
 
-def _cashflow_pit(
-    df: pl.DataFrame, as_of: datetime.date, variant: Literal['A', 'Q'],
-) -> pl.DataFrame:
+def _cashflow_pit(df: pl.DataFrame, as_of: datetime.date, variant: Literal['A', 'Q']) -> pl.DataFrame:
     if variant == 'A':
-        return pit_latest(df, as_of).select(
-            ['Ticker',
-             'Net Cash from Operating Activities',
-             'Net Cash from Investing Activities',
-             'Depreciation & Amortization']
-        )
+        return pit_latest(df, as_of).select(_CASHFLOW_COLS)
     return pit_ttm(df, as_of, _CASHFLOW_TTM_COLS, n=4)
 
 
 def _balance_pit(df: pl.DataFrame, as_of: datetime.date) -> pl.DataFrame:
-    """Latest balance filing — same for both A and Q."""
-    return pit_latest(df, as_of).select(
-        ['Ticker', 'Total Assets', 'Total Equity',
-         'Total Current Assets', 'Total Current Liabilities',
-         'Cash, Cash Equivalents & Short Term Investments',
-         'Short Term Debt', 'Long Term Debt', 'Shares (Diluted)']
+    return pit_latest(df, as_of).select(_BALANCE_COLS)
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 — fundamentals at as_of + prior year
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PitFundamentals:
+    income:   pd.DataFrame
+    balance:  pd.DataFrame
+    cashflow: pd.DataFrame
+
+
+def _pit_align(
+    as_of: datetime.date, variant: Literal['A', 'Q'],
+) -> tuple[PitFundamentals, PitFundamentals]:
+    """Return PIT-aligned fundamentals at `as_of` and one year prior."""
+    inc_lf = load_fundamentals('income',   variant)
+    bal_lf = load_fundamentals('balance',  variant)
+    cf_lf  = load_fundamentals('cashflow', variant)
+
+    prior = as_of - relativedelta(years=1)
+
+    curr = PitFundamentals(
+        income   = _income_pit(inc_lf, as_of, variant).to_pandas().set_index('Ticker'),
+        balance  = _balance_pit(bal_lf, as_of).to_pandas().set_index('Ticker'),
+        cashflow = _cashflow_pit(cf_lf, as_of, variant).to_pandas().set_index('Ticker'),
+    )
+    prev = PitFundamentals(
+        income   = _income_pit(inc_lf, prior, variant).to_pandas().set_index('Ticker'),
+        balance  = _balance_pit(bal_lf, prior).to_pandas().set_index('Ticker'),
+        cashflow = _cashflow_pit(cf_lf, prior, variant).to_pandas().set_index('Ticker'),
+    )
+    return curr, prev
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 — price snapshots
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PriceSnapshots:
+    p0:      dict[str, float]
+    p_1m:    dict[str, float]
+    p_6m:    dict[str, float]
+    p_12m:   dict[str, float]
+    vol_21d: dict[str, float]
+    ma200:   dict[str, float]
+
+
+def _price_snapshots(as_of: datetime.date) -> PriceSnapshots:
+    """Close price at `as_of` + calendar-day lookbacks + window stats."""
+    panel = load_prices_wide('Close')
+    vol, ma = _window_stats(panel, as_of)
+    return PriceSnapshots(
+        p0      = pit_price_row(panel, as_of),
+        p_1m    = pit_price_at_offset(panel, as_of, 30),
+        p_6m    = pit_price_at_offset(panel, as_of, 182),
+        p_12m   = pit_price_at_offset(panel, as_of, 365),
+        vol_21d = vol,
+        ma200   = ma,
     )
 
-
-# ---------------------------------------------------------------------------
-# Window stats from wide price panel
-# ---------------------------------------------------------------------------
 
 def _window_stats(
     panel, as_of: datetime.date,
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Compute vol_21d and ma200 for all tickers as of `as_of`.
-
-    vol_21d = stddev(daily log returns, last 22 trading days) × sqrt(252).
-    ma200   = mean of last 200 trading-day closes.
-    Both NaN if not enough observations.
+    """vol_21d = stddev(daily log returns, last 22 trading days) × sqrt(252).
+    ma200  = mean of last 200 trading-day closes. Both NaN if insufficient obs.
+    Union-calendar safe: counts only non-NaN per ticker within a wider window.
     """
     i = int(np.searchsorted(panel.dates, np.datetime64(as_of, 'D'), side='right')) - 1
     if i < 0:
         return {}, {}
 
-    # vol_21d: stddev of 21 log returns × sqrt(252). Per ticker take last 22
-    # non-NaN closes within a wider window (~50 panel rows is plenty even for
-    # a US ticker with interleaved DE-only union-calendar days).
+    # vol_21d: take last 22 non-NaN closes per ticker within a 50-row window
     vol_start = max(0, i + 1 - 50)
     vol_slice = panel.values[vol_start:i + 1].astype('float64')
     valid_c = np.isfinite(vol_slice)
     cum_c = np.flip(np.cumsum(np.flip(valid_c, axis=0), axis=0), axis=0)
-    # Take last 22 non-NaN closes per ticker
     keep = (cum_c >= 1) & (cum_c <= 22) & valid_c
-    # Compact each column: pull selected closes into a (22, n_tickers) array.
-    # Equivalent vectorized form: for each col, np.take last 22 valid.
-    # Build per-column index lists via argpartition on keep mask.
     n_tickers = vol_slice.shape[1]
     compact = np.full((22, n_tickers), np.nan, dtype='float64')
-    # `keep` rows have variable count per column; for cols with exactly 22 keeps,
-    # extract them in original order.
     for col in range(n_tickers):
         idx = np.flatnonzero(keep[:, col])
         if idx.size == 22:
@@ -118,14 +178,9 @@ def _window_stats(
         warnings.simplefilter('ignore', RuntimeWarning)
         sd = np.nanstd(log_ret, axis=0, ddof=0)
     vol = sd * np.sqrt(252)
-    # Cols without 22 closes already have all-NaN compact → sd NaN. Belt+braces:
     vol[~np.isfinite(vol)] = np.nan
 
-    # ma200: mean of last 200 non-NaN closes per ticker.
-    # Wide-format wrinkle: the panel uses a union calendar across markets, so a
-    # row may be NaN for a US ticker on a DE-only trading day. SQL counts only
-    # rows that exist per ticker. To match, pick the last 200 non-NaN per col
-    # within a wider window (~400 panel rows ≈ all available history we need).
+    # ma200: last 200 non-NaN closes per ticker within a 400-row window
     ma_start = max(0, i + 1 - 400)
     ma_slice = panel.values[ma_start:i + 1].astype('float64')
     valid = np.isfinite(ma_slice)
@@ -140,78 +195,23 @@ def _window_stats(
 
 
 # ---------------------------------------------------------------------------
-# Combine + compute factors
+# Stage 3 — assemble combined working frame
 # ---------------------------------------------------------------------------
 
-def _safe_log_ratio(num: pd.Series, denom: pd.Series) -> pd.Series:
-    """log(num/denom) when both > 0, else NaN."""
-    valid = (num > 0) & (denom > 0)
-    result = pd.Series(np.nan, index=num.index, dtype='float64')
-    result[valid] = np.log(num[valid] / denom[valid])
-    return result
-
-
-def _positive_only(series: pd.Series) -> pd.Series:
-    """Replace non-positive values with NaN — matches SQL `CASE WHEN x > 0 THEN x END`."""
-    out = series.astype('float64').copy()
-    out[~(out > 0)] = np.nan
-    return out
-
-
-def _div(num, denom):
-    """Safe division: denom==0 → NaN, also masks inf."""
-    out = num / denom.replace(0, np.nan)
-    return out.where(np.isfinite(out), np.nan)
-
-
-def cross_section_panel(
-    as_of_date: datetime.date,
-    variant: Literal['A', 'Q'] = 'A',
-    tickers: list[str] | None = None,
+def _assemble(
+    curr: PitFundamentals, prev: PitFundamentals, snaps: PriceSnapshots,
 ) -> pd.DataFrame:
-    """Compute all factors cross-sectionally at a point in time.
-
-    Output schema:
-        index = Ticker
-        columns = mktcap, pe, pb, ps, ev_ebitda, ev_ebit, ev_sales, fcf_yield, rand,
-                  gross_margin, op_margin, net_margin, roe, roa, roic, fcf_margin,
-                  asset_turnover, cfo_ni_ratio, accruals,
-                  debt_equity, net_debt_ebitda, interest_coverage,
-                  mom_12_1, mom_6_1, vol_21d, ma200_ratio,
-                  rev_growth_1y, earn_growth_1y,
-                  piotroski_fscore
-    """
-    prior_aod = as_of_date - relativedelta(years=1)
-
-    # 1. PIT-aligned fundamentals
-    inc_lf = load_fundamentals('income', variant)
-    bal_lf = load_fundamentals('balance', variant)
-    cf_lf  = load_fundamentals('cashflow', variant)
-
-    inc = _income_pit(inc_lf, as_of_date, variant).to_pandas().set_index('Ticker')
-    bal = _balance_pit(bal_lf, as_of_date).to_pandas().set_index('Ticker')
-    cf  = _cashflow_pit(cf_lf, as_of_date, variant).to_pandas().set_index('Ticker')
-
-    inc_p = _income_pit(inc_lf, prior_aod, variant).to_pandas().set_index('Ticker')
-    bal_p = _balance_pit(bal_lf, prior_aod).to_pandas().set_index('Ticker')
-    cf_p  = _cashflow_pit(cf_lf, prior_aod, variant).to_pandas().set_index('Ticker')
-
-    # 2. Prices: snapshot + lookbacks
-    panel = load_prices_wide('Close')
-    p0_dict   = pit_price_row(panel, as_of_date)
-    p1m_dict  = pit_price_at_offset(panel, as_of_date, 30)
-    p6m_dict  = pit_price_at_offset(panel, as_of_date, 182)
-    p12m_dict = pit_price_at_offset(panel, as_of_date, 365)
-    vol_dict, ma_dict = _window_stats(panel, as_of_date)
-
-    # 3. Build a single combined frame (inner join on Ticker for required fields,
-    #    left join for optional/momentum/prior)
-    p0 = pd.Series(p0_dict, name='p0', dtype='float64')
+    """Inner-join required statements + prices on Ticker; left-join prior/momentum."""
+    p0 = pd.Series(snaps.p0, name='p0', dtype='float64')
     if p0.empty:
         return pd.DataFrame()
 
-    # Required: ticker must have income, balance, cashflow, and price
-    tickers_common = inc.index.intersection(bal.index).intersection(cf.index).intersection(p0.index)
+    tickers_common = (
+        curr.income.index
+        .intersection(curr.balance.index)
+        .intersection(curr.cashflow.index)
+        .intersection(p0.index)
+    )
     if len(tickers_common) == 0:
         return pd.DataFrame()
 
@@ -219,47 +219,73 @@ def cross_section_panel(
     df.index.name = 'Ticker'
 
     # Income (current)
-    df['rev']  = inc['Revenue'].astype('float64')
-    df['gp']   = inc['Gross Profit'].astype('float64')
-    df['ebit'] = inc['Operating Income (Loss)'].astype('float64')
-    df['ni']   = inc['Net Income'].astype('float64')
-    df['interest_exp'] = inc['Interest Expense, Net'].fillna(0).astype('float64')
+    df['rev']  = curr.income['Revenue'].astype('float64')
+    df['gp']   = curr.income['Gross Profit'].astype('float64')
+    df['ebit'] = curr.income['Operating Income (Loss)'].astype('float64')
+    df['ni']   = curr.income['Net Income'].astype('float64')
+    df['interest_exp'] = curr.income['Interest Expense, Net'].fillna(0).astype('float64')
 
     # Balance (current)
-    df['ta']      = bal['Total Assets'].astype('float64')
-    df['equity']  = bal['Total Equity'].astype('float64')
-    df['cash']    = bal['Cash, Cash Equivalents & Short Term Investments'].fillna(0).astype('float64')
-    df['st_debt'] = bal['Short Term Debt'].fillna(0).astype('float64')
-    df['lt_debt'] = bal['Long Term Debt'].fillna(0).astype('float64')
-    df['ca']      = bal['Total Current Assets'].astype('float64')
-    df['cl']      = bal['Total Current Liabilities'].astype('float64')
-    df['shares']  = bal['Shares (Diluted)'].astype('float64')
+    df['ta']      = curr.balance['Total Assets'].astype('float64')
+    df['equity']  = curr.balance['Total Equity'].astype('float64')
+    df['cash']    = curr.balance['Cash, Cash Equivalents & Short Term Investments'].fillna(0).astype('float64')
+    df['st_debt'] = curr.balance['Short Term Debt'].fillna(0).astype('float64')
+    df['lt_debt'] = curr.balance['Long Term Debt'].fillna(0).astype('float64')
+    df['ca']      = curr.balance['Total Current Assets'].astype('float64')
+    df['cl']      = curr.balance['Total Current Liabilities'].astype('float64')
+    df['shares']  = curr.balance['Shares (Diluted)'].astype('float64')
 
     # Cashflow (current) — D&A always from cashflow
-    df['cfo'] = cf['Net Cash from Operating Activities'].astype('float64')
-    df['cfi'] = cf['Net Cash from Investing Activities'].astype('float64')
-    df['da']  = cf['Depreciation & Amortization'].fillna(0).astype('float64')
+    df['cfo'] = curr.cashflow['Net Cash from Operating Activities'].astype('float64')
+    df['cfi'] = curr.cashflow['Net Cash from Investing Activities'].astype('float64')
+    df['da']  = curr.cashflow['Depreciation & Amortization'].fillna(0).astype('float64')
 
-    # Prices (current + lookbacks) — LEFT join (NaN if missing)
+    # Prices (current + lookbacks) — LEFT join, NaN if missing
     df['p0']    = p0.reindex(df.index).astype('float64')
-    df['p_1m']  = pd.Series(p1m_dict).reindex(df.index).astype('float64')
-    df['p_6m']  = pd.Series(p6m_dict).reindex(df.index).astype('float64')
-    df['p_12m'] = pd.Series(p12m_dict).reindex(df.index).astype('float64')
-    df['vol_21d_raw']    = pd.Series(vol_dict).reindex(df.index).astype('float64')
-    df['ma200']          = pd.Series(ma_dict).reindex(df.index).astype('float64')
+    df['p_1m']  = pd.Series(snaps.p_1m).reindex(df.index).astype('float64')
+    df['p_6m']  = pd.Series(snaps.p_6m).reindex(df.index).astype('float64')
+    df['p_12m'] = pd.Series(snaps.p_12m).reindex(df.index).astype('float64')
+    df['vol_21d_raw'] = pd.Series(snaps.vol_21d).reindex(df.index).astype('float64')
+    df['ma200']       = pd.Series(snaps.ma200).reindex(df.index).astype('float64')
 
     # Prior-year (LEFT joins — NaN if missing for that ticker)
-    df['rev_p']    = inc_p['Revenue'].reindex(df.index).astype('float64')
-    df['ni_p']     = inc_p['Net Income'].reindex(df.index).astype('float64')
-    df['gp_p']     = inc_p['Gross Profit'].reindex(df.index).astype('float64')
-    df['ta_p']     = bal_p['Total Assets'].reindex(df.index).astype('float64')
-    df['ltd_p']    = bal_p['Long Term Debt'].fillna(0).reindex(df.index).astype('float64')
-    df['ca_p']     = bal_p['Total Current Assets'].reindex(df.index).astype('float64')
-    df['cl_p']     = bal_p['Total Current Liabilities'].reindex(df.index).astype('float64')
-    df['shares_p'] = bal_p['Shares (Diluted)'].reindex(df.index).astype('float64')
-    df['cfo_p']   = cf_p['Net Cash from Operating Activities'].reindex(df.index).astype('float64')
+    df['rev_p']    = prev.income['Revenue'].reindex(df.index).astype('float64')
+    df['ni_p']     = prev.income['Net Income'].reindex(df.index).astype('float64')
+    df['gp_p']     = prev.income['Gross Profit'].reindex(df.index).astype('float64')
+    df['ta_p']     = prev.balance['Total Assets'].reindex(df.index).astype('float64')
+    df['ltd_p']    = prev.balance['Long Term Debt'].fillna(0).reindex(df.index).astype('float64')
+    df['ca_p']     = prev.balance['Total Current Assets'].reindex(df.index).astype('float64')
+    df['cl_p']     = prev.balance['Total Current Liabilities'].reindex(df.index).astype('float64')
+    df['shares_p'] = prev.balance['Shares (Diluted)'].reindex(df.index).astype('float64')
+    df['cfo_p']    = prev.cashflow['Net Cash from Operating Activities'].reindex(df.index).astype('float64')
 
-    # 4. Factor formulas
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 — factor formulas (pure pandas/numpy)
+# ---------------------------------------------------------------------------
+
+def _safe_log_ratio(num: pd.Series, denom: pd.Series) -> pd.Series:
+    valid = (num > 0) & (denom > 0)
+    result = pd.Series(np.nan, index=num.index, dtype='float64')
+    result[valid] = np.log(num[valid] / denom[valid])
+    return result
+
+
+def _positive_only(series: pd.Series) -> pd.Series:
+    out = series.astype('float64').copy()
+    out[~(out > 0)] = np.nan
+    return out
+
+
+def _div(num, denom):
+    out = num / denom.replace(0, np.nan)
+    return out.where(np.isfinite(out), np.nan)
+
+
+def _apply_formulas(df: pd.DataFrame) -> pd.DataFrame:
+    """All factor formulas on the assembled frame; returns the final cross-section."""
     out = pd.DataFrame(index=df.index)
     mktcap = df['p0'] * df['shares']
     out['mktcap'] = mktcap
@@ -302,55 +328,33 @@ def cross_section_panel(
     out['rev_growth_1y']  = _div(df['rev'] - df['rev_p'], df['rev_p'].abs())
     out['earn_growth_1y'] = _div(df['ni']  - df['ni_p'],  df['ni_p'].abs())
 
-    # Piotroski signals (binary, NULL when inputs missing)
-    def _binary(condition: pd.Series, gate: pd.Series) -> pd.Series:
-        """1 where condition true; 0 where false; NaN where gate is False."""
-        out = pd.Series(np.nan, index=condition.index, dtype='float64')
-        out[gate & condition] = 1.0
-        out[gate & ~condition] = 0.0
-        return out
+    # Piotroski — shared impl with single-ticker path
+    from irp.factors.piotroski import compute_piotroski_panel
+    out['piotroski_fscore'] = compute_piotroski_panel(df)
 
-    ta_ok      = df['ta'].notna() & (df['ta'] != 0)
-    tap_ok     = df['ta_p'].notna() & (df['ta_p'] != 0)
-    rev_ok     = df['rev'].notna() & (df['rev'] != 0)
-    revp_ok    = df['rev_p'].notna() & (df['rev_p'] != 0)
-    cl_ok      = df['cl'].notna() & (df['cl'] != 0)
-    clp_ok     = df['cl_p'].notna() & (df['cl_p'] != 0)
+    return out[_FACTOR_COLS_ORDER]
 
-    f1 = _binary((df['ni'] / df['ta']) > 0, ta_ok & df['ni'].notna())
-    f2 = _binary(df['cfo'] > 0, df['cfo'].notna())
-    f3 = _binary((df['ni'] / df['ta']) > (df['ni_p'] / df['ta_p']),
-                 ta_ok & tap_ok & df['ni_p'].notna())
-    f4 = _binary((df['cfo'] / df['ta']) > (df['ni'] / df['ta']),
-                 ta_ok & df['cfo'].notna() & df['ni'].notna())
-    f5 = _binary((df['lt_debt'] / df['ta']) < (df['ltd_p'] / df['ta_p']),
-                 ta_ok & tap_ok)
-    f6 = _binary((df['ca'] / df['cl']) > (df['ca_p'] / df['cl_p']),
-                 cl_ok & clp_ok & df['ca'].notna() & df['ca_p'].notna())
-    f7 = _binary(df['shares'] < df['shares_p'], df['shares_p'].notna())
-    f8 = _binary((df['gp'] / df['rev']) > (df['gp_p'] / df['rev_p']),
-                 rev_ok & revp_ok & df['gp_p'].notna())
-    f9 = _binary((df['rev'] / df['ta']) > (df['rev_p'] / df['ta_p']),
-                 ta_ok & tap_ok & df['rev_p'].notna())
 
-    sig_stack = pd.concat([f1, f2, f3, f4, f5, f6, f7, f8, f9], axis=1)
-    all_null = sig_stack.isna().all(axis=1)
-    score = sig_stack.fillna(0).sum(axis=1)
-    out['piotroski_fscore'] = score.where(~all_null, np.nan)
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
-    # Filter to requested tickers if any
+def cross_section_panel(
+    as_of_date: datetime.date,
+    variant: Literal['A', 'Q'] = 'A',
+    tickers: list[str] | None = None,
+) -> pd.DataFrame:
+    """Compute all factors cross-sectionally at a point in time.
+
+    Output: DataFrame indexed by Ticker with columns in `_FACTOR_COLS_ORDER`.
+    Empty DataFrame when no ticker satisfies the inner-join constraints.
+    """
+    curr, prev = _pit_align(as_of_date, variant)
+    snaps = _price_snapshots(as_of_date)
+    combined = _assemble(curr, prev, snaps)
+    if combined.empty:
+        return combined
+    out = _apply_formulas(combined)
     if tickers is not None:
         out = out[out.index.isin(tickers)]
-
-    # Match SQL column order
-    out = out[[
-        'mktcap',
-        'pe', 'pb', 'ps', 'ev_ebitda', 'ev_ebit', 'ev_sales', 'fcf_yield', 'rand',
-        'gross_margin', 'op_margin', 'net_margin', 'roe', 'roa', 'roic', 'fcf_margin',
-        'asset_turnover', 'cfo_ni_ratio', 'accruals',
-        'debt_equity', 'net_debt_ebitda', 'interest_coverage',
-        'mom_12_1', 'mom_6_1', 'vol_21d', 'ma200_ratio',
-        'rev_growth_1y', 'earn_growth_1y',
-        'piotroski_fscore',
-    ]]
     return out

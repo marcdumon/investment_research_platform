@@ -13,18 +13,13 @@ from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
-from irp.factors import cross_section
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
-from irp.query.simfin import companies as _companies
-from irp.query.watchlists import (
-    delete_watchlist,
-    list_watchlists,
-    load_watchlist,
-    save_watchlist,
-)
+from irp.ui.charts import empty_figure as _empty_figure
+from irp.ui.charts import scatter_chart_layout as _base_layout
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
+from irp.ui.services import factors_service, universe_service, watchlist_service
+from irp.ui.tables import column_format as _col_fmt
 from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
-from dash.dash_table.Format import Format, Scheme, Symbol
 
 dash.register_page(__name__, path='/screener', name='Screener')
 
@@ -76,48 +71,6 @@ def _auto_name(steps: list[dict], as_of_date: str | None) -> str:
     return '_'.join(parts) if parts else f'screener_{suffix}'
 
 
-def _col_fmt(c: str) -> dict:
-    if c == 'mktcap':
-        return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.fixed,
-                                                     symbol=Symbol.yes, symbol_prefix='$')}
-    if c in _PCT_FACTORS:
-        return {'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.percentage)}
-    if c in FACTOR_LABELS:
-        return {'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)}
-    return {}
-
-
-def _empty_figure(message: str = 'No data') -> go.Figure:
-    fig = go.Figure()
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        annotations=[dict(text=message, x=0.5, y=0.5, xref='paper', yref='paper',
-                          showarrow=False, font=dict(color=MUTED, size=13))],
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        margin=dict(l=0, r=0, t=8, b=0),
-    )
-    return fig
-
-
-def _base_layout(**extra: Any) -> go.Layout:
-    return go.Layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(128,128,128,0.05)',
-        font=dict(color=MUTED, size=11),
-        margin=dict(l=0, r=0, t=24, b=0),
-        hovermode='closest',
-        xaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=11),
-                   zeroline=False, showline=True),
-        yaxis=dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=11),
-                   zeroline=False, showline=False),
-        legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=10),
-                    itemsizing='constant'),
-        **extra,
-    )
-
-
 # ── Layout ────────────────────────────────────────────────────────────
 
 layout = html.Div(
@@ -129,14 +82,12 @@ layout = html.Div(
         dcc.Store(id='screener-result-store'),
         dcc.Store(id='screener-selection-store', data=[]),
         dcc.Store(id='screener-wl-trigger', data=0),
-
         html.H2('Stock Screener', className='page-title'),
         html.P(
             'Build a filter stack to narrow the universe. '
             'Lasso-select points in the scatter plot, then Keep or Remove.',
             className='page-subtitle',
         ),
-
         # ── Universe controls ──────────────────────────────────────────
         html.Div(
             className='screener-universe-row control-row',
@@ -168,11 +119,15 @@ layout = html.Div(
                     className='filter-dropdown',
                     style={'minWidth': '160px'},
                 ),
-                html.Button('Run', id='screener-run-btn', className='run-btn', n_clicks=0),
-                html.Span(id='screener-universe-count', style={'color': MUTED, 'fontSize': '12px'}),
+                html.Button(
+                    'Run', id='screener-run-btn', className='run-btn', n_clicks=0
+                ),
+                html.Span(
+                    id='screener-universe-count',
+                    style={'color': MUTED, 'fontSize': '12px'},
+                ),
             ],
         ),
-
         # ── Filter stack ───────────────────────────────────────────────
         html.Div(
             className='screener-filter-panel',
@@ -221,30 +176,51 @@ layout = html.Div(
                 ),
             ],
         ),
-
         # ── Chart selection action bar (hidden until selection exists) ──
         html.Div(
             id='screener-selection-bar',
-            style={'display': 'none', 'gap': '12px', 'alignItems': 'center',
-                   'padding': '8px 12px', 'background': 'var(--surface-2)',
-                   'borderRadius': '4px', 'marginBottom': '12px'},
+            style={
+                'display': 'none',
+                'gap': '12px',
+                'alignItems': 'center',
+                'padding': '8px 12px',
+                'background': 'var(--surface-2)',
+                'borderRadius': '4px',
+                'marginBottom': '12px',
+            },
             children=[
-                html.Span(id='screener-selection-count',
-                          style={'color': MUTED, 'fontSize': '12px'}),
-                html.Button('Keep selection', id='screener-keep-btn',
-                            className='run-btn',
-                            style={'fontSize': '11px', 'padding': '4px 10px',
-                                   'background': '#2ea043'}),
-                html.Button('Remove selection', id='screener-remove-btn',
-                            className='run-btn',
-                            style={'fontSize': '11px', 'padding': '4px 10px',
-                                   'background': '#e05252'}),
-                html.Button('Clear', id='screener-clear-selection-btn',
-                            className='run-btn',
-                            style={'fontSize': '11px', 'padding': '4px 10px'}),
+                html.Span(
+                    id='screener-selection-count',
+                    style={'color': MUTED, 'fontSize': '12px'},
+                ),
+                html.Button(
+                    'Keep selection',
+                    id='screener-keep-btn',
+                    className='run-btn',
+                    style={
+                        'fontSize': '11px',
+                        'padding': '4px 10px',
+                        'background': '#2ea043',
+                    },
+                ),
+                html.Button(
+                    'Remove selection',
+                    id='screener-remove-btn',
+                    className='run-btn',
+                    style={
+                        'fontSize': '11px',
+                        'padding': '4px 10px',
+                        'background': '#e05252',
+                    },
+                ),
+                html.Button(
+                    'Clear',
+                    id='screener-clear-selection-btn',
+                    className='run-btn',
+                    style={'fontSize': '11px', 'padding': '4px 10px'},
+                ),
             ],
         ),
-
         # ── Charts ────────────────────────────────────────────────────
         dcc.Tabs(
             id='screener-chart-tabs',
@@ -356,8 +332,10 @@ layout = html.Div(
                             className='control-row',
                             style={'padding': '8px 0', 'gap': '12px'},
                             children=[
-                                html.Span(id='screener-prices-info',
-                                          style={'color': MUTED, 'fontSize': '12px'}),
+                                html.Span(
+                                    id='screener-prices-info',
+                                    style={'color': MUTED, 'fontSize': '12px'},
+                                ),
                                 html.Button(
                                     id='screener-load-prices-btn',
                                     children='Load Price History',
@@ -378,17 +356,20 @@ layout = html.Div(
                 ),
             ],
         ),
-
         # ── Results table ─────────────────────────────────────────────
         dcc.Loading(html.Div(id='screener-table-container')),
-
         # ── Save panel ────────────────────────────────────────────────
         html.Div(
-            style={'marginTop': '24px', 'borderTop': '1px solid var(--border)',
-                   'paddingTop': '16px'},
+            style={
+                'marginTop': '24px',
+                'borderTop': '1px solid var(--border)',
+                'paddingTop': '16px',
+            },
             children=[
-                html.H3('Save as Watchlist',
-                        style={'color': MUTED, 'fontSize': '13px', 'marginBottom': '8px'}),
+                html.H3(
+                    'Save as Watchlist',
+                    style={'color': MUTED, 'fontSize': '13px', 'marginBottom': '8px'},
+                ),
                 html.Div(
                     className='control-row',
                     style={'gap': '10px'},
@@ -406,11 +387,15 @@ layout = html.Div(
                             className='run-btn',
                             n_clicks=0,
                         ),
-                        html.Span(id='screener-save-status',
-                                  style={'color': MUTED, 'fontSize': '12px'}),
+                        html.Span(
+                            id='screener-save-status',
+                            style={'color': MUTED, 'fontSize': '12px'},
+                        ),
                     ],
                 ),
-                html.Div(id='screener-watchlists-container', style={'marginTop': '16px'}),
+                html.Div(
+                    id='screener-watchlists-container', style={'marginTop': '16px'}
+                ),
             ],
         ),
     ],
@@ -427,7 +412,7 @@ layout = html.Div(
 )
 def load_options(_: Any) -> tuple[list, list]:
     try:
-        df = _companies()
+        df = universe_service.get_companies()
     except Exception:
         return [], []
     if df.empty:
@@ -464,12 +449,16 @@ def run_screener(
     if not n_clicks or not date_str:
         raise PreventUpdate
     as_of = datetime.date.fromisoformat(date_str[:10])
-    df = cross_section(as_of, variant)
+    df = factors_service.load_cross_section(
+        as_of, variant, enrich_company_columns=False
+    )
     if df.empty:
         return {}, []
     df = df.reset_index()
     try:
-        comp = _companies()[['Ticker', 'Company Name', 'Sector', 'Market']].fillna('')
+        comp = universe_service.get_companies()[
+            ['Ticker', 'Company Name', 'Sector', 'Market']
+        ].fillna('')
         df = df.merge(comp, on='Ticker', how='left')
     except Exception:
         logger.warning('run_screener: could not merge company metadata')
@@ -521,7 +510,9 @@ def apply_steps_callback(
 )
 def render_step_stack(base: dict | None, steps: list | None) -> Any:
     if not steps:
-        return html.Span('No additional filters.', style={'color': MUTED, 'fontSize': '12px'})
+        return html.Span(
+            'No additional filters.', style={'color': MUTED, 'fontSize': '12px'}
+        )
     if not base or not base.get('records'):
         return []
 
@@ -536,24 +527,40 @@ def render_step_stack(base: dict | None, steps: list | None) -> Any:
         rows.append(
             html.Div(
                 style={
-                    'display': 'flex', 'alignItems': 'center', 'gap': '12px',
-                    'padding': '4px 8px', 'background': 'var(--surface-2)',
-                    'borderRadius': '4px', 'marginBottom': '4px', 'fontSize': '12px',
+                    'display': 'flex',
+                    'alignItems': 'center',
+                    'gap': '12px',
+                    'padding': '4px 8px',
+                    'background': 'var(--surface-2)',
+                    'borderRadius': '4px',
+                    'marginBottom': '4px',
+                    'fontSize': '12px',
                 },
                 children=[
                     html.Span(f'Step {i + 1}:', style={'color': MUTED}),
-                    html.Span(step.get('label', ''), style={'color': 'var(--text)', 'flex': '1'}),
+                    html.Span(
+                        step.get('label', ''),
+                        style={'color': 'var(--text)', 'flex': '1'},
+                    ),
                     html.Span(
                         f'{after_n:,} / {before_n:,}',
-                        style={'color': ACCENT, 'minWidth': '90px', 'textAlign': 'right'},
+                        style={
+                            'color': ACCENT,
+                            'minWidth': '90px',
+                            'textAlign': 'right',
+                        },
                     ),
                     html.Button(
                         '×',
                         id={'type': 'delete-step-btn', 'index': i},
                         n_clicks=0,
                         style={
-                            'background': 'none', 'border': 'none', 'color': MUTED,
-                            'cursor': 'pointer', 'fontSize': '14px', 'padding': '0 4px',
+                            'background': 'none',
+                            'border': 'none',
+                            'color': MUTED,
+                            'cursor': 'pointer',
+                            'fontSize': '14px',
+                            'padding': '0 4px',
                         },
                     ),
                 ],
@@ -603,8 +610,13 @@ def mutate_steps(
             label += f' ≥ {add_min}'
         else:
             label += f' ≤ {add_max}'
-        steps.append({'type': 'range', 'col': add_factor, 'min': add_min,
-                      'max': add_max, 'label': label})
+        steps.append({
+            'type': 'range',
+            'col': add_factor,
+            'min': add_min,
+            'max': add_max,
+            'label': label,
+        })
         return steps
 
     if triggered in ('screener-keep-btn', 'screener-remove-btn'):
@@ -613,8 +625,11 @@ def mutate_steps(
             raise PreventUpdate
         kind = 'keep' if triggered == 'screener-keep-btn' else 'remove'
         n = len(tickers)
-        steps.append({'type': kind, 'tickers': tickers,
-                      'label': f'chart-{kind} {n:,} stocks'})
+        steps.append({
+            'type': kind,
+            'tickers': tickers,
+            'label': f'chart-{kind} {n:,} stocks',
+        })
         return steps
 
     if isinstance(triggered, dict) and triggered.get('type') == 'delete-step-btn':
@@ -630,11 +645,16 @@ def mutate_steps(
             raise PreventUpdate
         name = triggered['index']
         try:
-            tickers = load_watchlist(name)
+            tickers = watchlist_service.load_watchlist(name)
         except KeyError:
             raise PreventUpdate
-        return [{'type': 'keep', 'tickers': tickers,
-                 'label': f'watchlist "{name}" ({len(tickers):,} stocks)'}]
+        return [
+            {
+                'type': 'keep',
+                'tickers': tickers,
+                'label': f'watchlist "{name}" ({len(tickers):,} stocks)',
+            }
+        ]
 
     raise PreventUpdate
 
@@ -679,9 +699,13 @@ def show_selection_bar(selection: list | None) -> tuple[dict, str]:
         return {'display': 'none'}, ''
     return (
         {
-            'display': 'flex', 'gap': '12px', 'alignItems': 'center',
-            'padding': '8px 12px', 'background': 'var(--surface-2)',
-            'borderRadius': '4px', 'marginBottom': '12px',
+            'display': 'flex',
+            'gap': '12px',
+            'alignItems': 'center',
+            'padding': '8px 12px',
+            'background': 'var(--surface-2)',
+            'borderRadius': '4px',
+            'marginBottom': '12px',
         },
         f'{n:,} stock{"s" if n != 1 else ""} selected in chart',
     )
@@ -738,45 +762,61 @@ def render_scatter(
                 f'{x_label}: %{{x:.3f}}<br>',
                 f'{y_label}: %{{y:.3f}}<extra></extra>',
             ]
-            traces.append(go.Scatter(
-                x=sub[x_factor].tolist(),
-                y=sub[y_factor].tolist(),
-                mode='markers',
-                name=grp,
-                customdata=sub[['Ticker', 'Company Name']].fillna('').values.tolist()
+            traces.append(
+                go.Scatter(
+                    x=sub[x_factor].tolist(),
+                    y=sub[y_factor].tolist(),
+                    mode='markers',
+                    name=grp,
+                    customdata=sub[['Ticker', 'Company Name']]
+                    .fillna('')
+                    .values.tolist()
                     if 'Company Name' in sub.columns
                     else sub[['Ticker']].values.tolist(),
-                hovertemplate=''.join(hover_parts),
-                hoverlabel=dict(**HOVER_LABEL),
-                marker=dict(
-                    size=6,
-                    color=_SECTOR_PALETTE[i % len(_SECTOR_PALETTE)],
-                    opacity=0.75,
-                ),
-            ))
+                    hovertemplate=''.join(hover_parts),
+                    hoverlabel=dict(**HOVER_LABEL),
+                    marker=dict(
+                        size=6,
+                        color=_SECTOR_PALETTE[i % len(_SECTOR_PALETTE)],
+                        opacity=0.75,
+                    ),
+                )
+            )
     else:
-        cd = (df[['Ticker', 'Company Name']].fillna('').values.tolist()
-              if 'Company Name' in df.columns else df[['Ticker']].values.tolist())
-        traces.append(go.Scatter(
-            x=df[x_factor].tolist(),
-            y=df[y_factor].tolist(),
-            mode='markers',
-            name='',
-            customdata=cd,
-            hovertemplate=f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
-                          f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}'
-                          '<extra></extra>',
-            hoverlabel=dict(**HOVER_LABEL),
-            marker=dict(size=6, color=ACCENT, opacity=0.7),
-        ))
+        cd = (
+            df[['Ticker', 'Company Name']].fillna('').values.tolist()
+            if 'Company Name' in df.columns
+            else df[['Ticker']].values.tolist()
+        )
+        traces.append(
+            go.Scatter(
+                x=df[x_factor].tolist(),
+                y=df[y_factor].tolist(),
+                mode='markers',
+                name='',
+                customdata=cd,
+                hovertemplate=f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
+                f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}'
+                '<extra></extra>',
+                hoverlabel=dict(**HOVER_LABEL),
+                marker=dict(size=6, color=ACCENT, opacity=0.7),
+            )
+        )
 
     n = len(df)
-    fig = go.Figure(data=traces, layout=_base_layout(
-        title=dict(text=f'{x_label} vs {y_label}  ({n:,} stocks)',
-                   font=dict(color=MUTED, size=12), x=0, xref='paper'),
-        xaxis_title=x_label,
-        yaxis_title=y_label,
-    ))
+    fig = go.Figure(
+        data=traces,
+        layout=_base_layout(
+            title=dict(
+                text=f'{x_label} vs {y_label}  ({n:,} stocks)',
+                font=dict(color=MUTED, size=12),
+                x=0,
+                xref='paper',
+            ),
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+        ),
+    )
     return fig
 
 
@@ -808,8 +848,12 @@ def render_histogram(result: dict | None, factor: str | None) -> go.Figure:
             hovertemplate=f'{label}: %{{x:.3f}}<br>Count: %{{y}}<extra></extra>',
         ),
         layout=_base_layout(
-            title=dict(text=f'{label} distribution  ({len(vals):,} stocks)',
-                       font=dict(color=MUTED, size=12), x=0, xref='paper'),
+            title=dict(
+                text=f'{label} distribution  ({len(vals):,} stocks)',
+                font=dict(color=MUTED, size=12),
+                x=0,
+                xref='paper',
+            ),
             xaxis_title=label,
             yaxis_title='Count',
             bargap=0.05,
@@ -839,7 +883,13 @@ def update_prices_controls(result: dict | None) -> tuple[str, bool]:
     Output('screener-prices-chart', 'figure'),
     Input('screener-load-prices-btn', 'n_clicks'),
     State('screener-result-store', 'data'),
-    running=[(Output('screener-load-prices-btn', 'children'), 'Loading…', 'Load Price History')],
+    running=[
+        (
+            Output('screener-load-prices-btn', 'children'),
+            'Loading…',
+            'Load Price History',
+        )
+    ],
     prevent_initial_call=True,
 )
 def load_prices(n_clicks: int, result: dict | None) -> go.Figure:
@@ -851,6 +901,7 @@ def load_prices(n_clicks: int, result: dict | None) -> go.Figure:
         return _empty_figure(f'Narrow to ≤ {_MAX_PRICE_TICKERS} stocks first.')
 
     from irp.query.yahoo import prices as yahoo_prices
+
     start = (datetime.date.today() - datetime.timedelta(days=365)).isoformat()
     px_df = yahoo_prices(tickers, start=start)
     if px_df.empty:
@@ -863,22 +914,31 @@ def load_prices(n_clicks: int, result: dict | None) -> go.Figure:
 
     traces = []
     for tk, grp in px_df.groupby(PRICE_TICKER):
-        traces.append(go.Scatter(
-            x=grp[PRICE_DATE].tolist(),
-            y=grp['norm'].tolist(),
-            mode='lines',
-            name=tk,
-            line=dict(width=1.2),
-            hovertemplate=f'<b>{tk}</b><br>%{{x}}<br>Index: %{{y:.1f}}<extra></extra>',
-        ))
+        traces.append(
+            go.Scatter(
+                x=grp[PRICE_DATE].tolist(),
+                y=grp['norm'].tolist(),
+                mode='lines',
+                name=tk,
+                line=dict(width=1.2),
+                hovertemplate=f'<b>{tk}</b><br>%{{x}}<br>Index: %{{y:.1f}}<extra></extra>',
+            )
+        )
 
-    fig = go.Figure(data=traces, layout=_base_layout(
-        title=dict(text='1-year price index (100 = start)',
-                   font=dict(color=MUTED, size=12), x=0, xref='paper'),
-        xaxis_title='Date',
-        yaxis_title='Price index',
-        hovermode='x unified',
-    ))
+    fig = go.Figure(
+        data=traces,
+        layout=_base_layout(
+            title=dict(
+                text='1-year price index (100 = start)',
+                font=dict(color=MUTED, size=12),
+                x=0,
+                xref='paper',
+            ),
+            xaxis_title='Date',
+            yaxis_title='Price index',
+            hovermode='x unified',
+        ),
+    )
     return fig
 
 
@@ -906,8 +966,10 @@ def render_results_table(result: dict | None) -> Any:
                 v = r.get(c)
                 try:
                     fv = float(v)  # type: ignore[arg-type]
-                    row[c] = round(fv / 1e9, 2) if c == 'mktcap' else (
-                        round(fv, 4) if isfinite(fv) else None
+                    row[c] = (
+                        round(fv / 1e9, 2)
+                        if c == 'mktcap'
+                        else (round(fv, 4) if isfinite(fv) else None)
                     )
                 except (TypeError, ValueError):
                     row[c] = None
@@ -936,7 +998,8 @@ def render_results_table(result: dict | None) -> Any:
         page_size=50,
         **{
             **TABLE_STYLE,
-            'style_cell_conditional': TABLE_STYLE.get('style_cell_conditional', []) + left_cols,
+            'style_cell_conditional': TABLE_STYLE.get('style_cell_conditional', [])
+            + left_cols,
         },
     )
 
@@ -977,7 +1040,7 @@ def save_watchlist_action(
         s.get('label', '') for s in (steps or []) if s.get('type') == 'range'
     )
     try:
-        save_watchlist(name, tickers, summary)
+        watchlist_service.save_watchlist(name, tickers, summary)
     except Exception as exc:
         return f'Error: {exc}', trigger or 0
     return f'Saved "{name}" ({len(tickers):,} stocks).', (trigger or 0) + 1
@@ -995,7 +1058,7 @@ def delete_watchlist_action(n_clicks: list, trigger: int) -> int:
         raise PreventUpdate
     name = triggered['index']
     try:
-        delete_watchlist(name)
+        watchlist_service.delete_watchlist(name)
     except Exception:
         raise PreventUpdate
     return (trigger or 0) + 1
@@ -1007,49 +1070,87 @@ def delete_watchlist_action(n_clicks: list, trigger: int) -> int:
     Input('screener-wl-trigger', 'data'),
 )
 def render_watchlists_table(_init: Any, _trigger: Any) -> Any:
-    wl = list_watchlists()
+    wl = watchlist_service.list_watchlists()
     if wl.empty:
-        return html.P('No saved watchlists.', style={'color': MUTED, 'fontSize': '12px'})
+        return html.P(
+            'No saved watchlists.', style={'color': MUTED, 'fontSize': '12px'}
+        )
 
     rows = []
     for _, r in wl.iterrows():
         rows.append(
             html.Tr([
-                html.Td(r['name'], style={'color': 'var(--text)', 'padding': '4px 10px'}),
-                html.Td(str(r['n']), style={'color': MUTED, 'padding': '4px 10px', 'textAlign': 'right'}),
-                html.Td(str(r['created']), style={'color': MUTED, 'padding': '4px 10px'}),
-                html.Td(str(r['summary'] or ''), style={'color': MUTED, 'padding': '4px 10px',
-                                                         'fontSize': '11px', 'maxWidth': '300px',
-                                                         'overflow': 'hidden', 'textOverflow': 'ellipsis'}),
-                html.Td([
-                    html.Button(
-                        'Load',
-                        id={'type': 'wl-load-btn', 'index': r['name']},
-                        n_clicks=0,
-                        style={'fontSize': '11px', 'padding': '2px 8px',
-                               'marginRight': '6px', 'cursor': 'pointer'},
-                    ),
-                    html.Button(
-                        'Delete',
-                        id={'type': 'wl-delete-btn', 'index': r['name']},
-                        n_clicks=0,
-                        style={'fontSize': '11px', 'padding': '2px 8px',
-                               'color': '#e05252', 'cursor': 'pointer'},
-                    ),
-                ], style={'padding': '4px 10px'}),
+                html.Td(
+                    r['name'], style={'color': 'var(--text)', 'padding': '4px 10px'}
+                ),
+                html.Td(
+                    str(r['n']),
+                    style={'color': MUTED, 'padding': '4px 10px', 'textAlign': 'right'},
+                ),
+                html.Td(
+                    str(r['created']), style={'color': MUTED, 'padding': '4px 10px'}
+                ),
+                html.Td(
+                    str(r['summary'] or ''),
+                    style={
+                        'color': MUTED,
+                        'padding': '4px 10px',
+                        'fontSize': '11px',
+                        'maxWidth': '300px',
+                        'overflow': 'hidden',
+                        'textOverflow': 'ellipsis',
+                    },
+                ),
+                html.Td(
+                    [
+                        html.Button(
+                            'Load',
+                            id={'type': 'wl-load-btn', 'index': r['name']},
+                            n_clicks=0,
+                            style={
+                                'fontSize': '11px',
+                                'padding': '2px 8px',
+                                'marginRight': '6px',
+                                'cursor': 'pointer',
+                            },
+                        ),
+                        html.Button(
+                            'Delete',
+                            id={'type': 'wl-delete-btn', 'index': r['name']},
+                            n_clicks=0,
+                            style={
+                                'fontSize': '11px',
+                                'padding': '2px 8px',
+                                'color': '#e05252',
+                                'cursor': 'pointer',
+                            },
+                        ),
+                    ],
+                    style={'padding': '4px 10px'},
+                ),
             ])
         )
 
     return html.Table(
         style={'width': '100%', 'fontSize': '12px', 'borderCollapse': 'collapse'},
         children=[
-            html.Thead(html.Tr([
-                html.Th(h, style={'color': MUTED, 'textAlign': 'left', 'padding': '4px 10px',
-                                  'fontWeight': '600', 'fontSize': '11px',
-                                  'textTransform': 'uppercase',
-                                  'borderBottom': '1px solid var(--border)'})
-                for h in ['Name', 'Tickers', 'Created', 'Summary', 'Actions']
-            ])),
+            html.Thead(
+                html.Tr([
+                    html.Th(
+                        h,
+                        style={
+                            'color': MUTED,
+                            'textAlign': 'left',
+                            'padding': '4px 10px',
+                            'fontWeight': '600',
+                            'fontSize': '11px',
+                            'textTransform': 'uppercase',
+                            'borderBottom': '1px solid var(--border)',
+                        },
+                    )
+                    for h in ['Name', 'Tickers', 'Created', 'Summary', 'Actions']
+                ])
+            ),
             html.Tbody(rows),
         ],
     )

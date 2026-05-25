@@ -15,6 +15,7 @@ from scipy import stats
 
 from irp.core.config import config
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
+from irp.factors.models import BacktestResult
 
 
 def compute_forward_returns(
@@ -86,7 +87,7 @@ def compute_backtest(
     n_quantiles: int = 5,
     horizon_days: int = 252,
     cost_bps: float = 0,
-) -> dict:
+) -> BacktestResult:
     """Compute IC series, quintile cumulative returns, and risk metrics.
 
     Parameters
@@ -126,27 +127,10 @@ def compute_backtest(
     quantile_labels = [f'Q{i + 1}' for i in range(n_quantiles)]
     q_last = quantile_labels[-1]
     _nan = float('nan')
-    empty: dict = {
-        'ic_series': pd.Series(dtype=float),
-        'quintile_cumret': pd.DataFrame(columns=quantile_labels),
-        'quintile_cumret_net': None,
-        'ew_cumret': pd.Series(dtype=float),
-        'ls_cumret': pd.Series(dtype=float),
-        'mean_ic': _nan,
-        'ic_tstat': _nan,
-        'icir': _nan,
-        'n_dates': 0,
-        'quintile_ann_ret': {},
-        'quintile_ann_vol': {},
-        'quintile_sharpe': {},
-        'quintile_max_dd': {},
-        'turnover_q1': pd.Series(dtype=float),
-        'turnover_q5': pd.Series(dtype=float),
-        'mean_turnover_q1': _nan,
-        'mean_turnover_q5': _nan,
-    }
     if not cross_sections or fwd_returns.empty:
-        return empty
+        return BacktestResult(
+            quintile_cumret=pd.DataFrame(columns=quantile_labels),
+        )
 
     ic_records: list[tuple[datetime.date, float]] = []
     qret_rows: list[pd.Series] = []
@@ -194,7 +178,9 @@ def compute_backtest(
         qret_dates.append(d)
 
     if not ic_records:
-        return empty
+        return BacktestResult(
+            quintile_cumret=pd.DataFrame(columns=quantile_labels),
+        )
 
     ic_series = pd.Series(
         [v for _, v in ic_records],
@@ -212,8 +198,12 @@ def compute_backtest(
             ic_tstat = mean_ic / std_ic * math.sqrt(len(valid_ic))
 
     if not qret_rows:
-        return {**empty, 'ic_series': ic_series, 'mean_ic': mean_ic,
-                'ic_tstat': ic_tstat, 'icir': icir, 'n_dates': int(len(valid_ic))}
+        return BacktestResult(
+            ic_series=ic_series,
+            quintile_cumret=pd.DataFrame(columns=quantile_labels),
+            mean_ic=mean_ic, ic_tstat=ic_tstat, icir=icir,
+            n_dates=int(len(valid_ic)),
+        )
 
     qdf = pd.DataFrame(qret_rows)
     qdf.index = pd.DatetimeIndex(qret_dates)
@@ -266,22 +256,22 @@ def compute_backtest(
             qdf_net[q] = qdf[q] - to_s * cost_bps / 10_000
         quintile_cumret_net = qdf_net.fillna(0).cumsum()
 
-    return {
-        'ic_series': ic_series,
-        'quintile_cumret': quintile_cumret,
-        'quintile_cumret_net': quintile_cumret_net,
-        'ew_cumret': ew_cumret,
-        'ls_cumret': ls_cumret,
-        'mean_ic': mean_ic,
-        'ic_tstat': ic_tstat,
-        'icir': icir,
-        'n_dates': int(len(valid_ic)),
-        'quintile_ann_ret': quintile_ann_ret,
-        'quintile_ann_vol': quintile_ann_vol,
-        'quintile_sharpe': quintile_sharpe,
-        'quintile_max_dd': quintile_max_dd,
-        'turnover_q1': turnover_q1,
-        'turnover_q5': turnover_q5,
-        'mean_turnover_q1': mean_turnover_q1,
-        'mean_turnover_q5': mean_turnover_q5,
-    }
+    return BacktestResult(
+        ic_series=ic_series,
+        quintile_cumret=quintile_cumret,
+        quintile_cumret_net=quintile_cumret_net,
+        ew_cumret=ew_cumret,
+        ls_cumret=ls_cumret,
+        mean_ic=mean_ic,
+        ic_tstat=ic_tstat,
+        icir=icir,
+        n_dates=int(len(valid_ic)),
+        quintile_ann_ret=quintile_ann_ret,
+        quintile_ann_vol=quintile_ann_vol,
+        quintile_sharpe=quintile_sharpe,
+        quintile_max_dd=quintile_max_dd,
+        turnover_q1=turnover_q1,
+        turnover_q5=turnover_q5,
+        mean_turnover_q1=mean_turnover_q1,
+        mean_turnover_q5=mean_turnover_q5,
+    )
