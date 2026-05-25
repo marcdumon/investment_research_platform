@@ -250,7 +250,7 @@ layout = html.Div(
                                         {'label': 'Stocks only', 'value': 'stocks'},
                                         {'label': 'ETFs only', 'value': 'etfs'},
                                     ],
-                                    value='stocks',
+                                    value='',
                                     clearable=False,
                                     className='control-dropdown',
                                 ),
