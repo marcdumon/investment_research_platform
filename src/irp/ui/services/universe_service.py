@@ -34,12 +34,13 @@ def get_sectors() -> list[str]:
     return sorted(_sector_map().dropna().unique().tolist())
 
 
-def get_statement(ticker: str, kind: str, variant: str = 'A') -> pd.DataFrame:
-    """Fundamental statement for one ticker.
+def get_statement(ticker: str, kind: str) -> pd.DataFrame:
+    """Fundamental statement for one ticker (all available periods).
 
-    `kind` ∈ {'income', 'balance', 'cashflow'}, `variant` ∈ {'A', 'Q'}.
+    `kind` ∈ {'income', 'balance', 'cashflow'}. Variant filtering happens
+    at the caller via column-name suffix ('FY' = annual, else quarterly).
     """
-    return _statement([ticker], kind, variant)
+    return _statement(ticker, kind)
 
 
 def filter_tickers(

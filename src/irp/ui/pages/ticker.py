@@ -434,6 +434,20 @@ def render_prices(
         divs = price_service.get_dividends(ticker)
         spls = price_service.get_splits(ticker)
 
+        # Restrict actions to chart date range so x-axis doesn't span full history.
+        df_min = df['_date_str'].min()
+        df_max = df['_date_str'].max()
+        if not divs.empty:
+            div_dates_all = pd.to_datetime(divs['Date'])
+            divs = divs.loc[
+                (div_dates_all >= df_min) & (div_dates_all <= df_max)
+            ]
+        if not spls.empty:
+            spl_dates_all = pd.to_datetime(spls['Date'])
+            spls = spls.loc[
+                (spl_dates_all >= df_min) & (spl_dates_all <= df_max)
+            ]
+
         if not divs.empty:
             div_dates = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
             price_at_div = (
