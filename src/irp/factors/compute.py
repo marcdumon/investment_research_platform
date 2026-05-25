@@ -1,7 +1,8 @@
 """Cross-section factor computation orchestrator.
 
-This is the only module in irp.factors that accesses the database.
-Pure computation is delegated to valuation.py and profitability.py.
+Hot-path factor work runs on `irp.panel` (wide-format parquet panels +
+polars/numpy). The single-ticker `ticker_factor_history` path still uses
+`irp.factors._pit` and `compute_valuation` etc. for pandas history.
 """
 import datetime
 import logging
@@ -13,76 +14,32 @@ from irp.core.config import config
 from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE, TICKER
 from irp.factors._pit import pit_latest, pit_prepare, pit_price, pit_ttm
-from irp.factors.backtest import compute_backtest, compute_forward_returns
+from irp.factors.backtest import compute_backtest
+from irp.panel import cross_section_panel, forward_returns_panel
 from irp.factors.valuation import compute_valuation
 from irp.factors.profitability import compute_profitability
 from irp.factors.momentum import compute_momentum
-from irp.factors.leverage import compute_leverage
-from irp.factors.growth import compute_growth
-from irp.factors.piotroski import compute_piotroski
-from irp.factors.registry import all_factors
 from irp.query.simfin import fundamentals
 from irp.query.yahoo import prices as yahoo_prices
 
 logger = logging.getLogger(__name__)
 
 
-def _cross_section_from_raw(
-    raw_income: pd.DataFrame,
-    raw_balance: pd.DataFrame,
-    raw_cashflow: pd.DataFrame,
-    raw_prices: pd.DataFrame,
-    as_of_date: datetime.date,
-    variant: Literal['A', 'Q'],
-) -> pd.DataFrame:
-    """PIT cross-section from pre-fetched raw DataFrames (no DB access)."""
-    if variant == 'Q':
-        income   = pit_ttm(raw_income,   as_of_date)
-        cashflow = pit_ttm(raw_cashflow, as_of_date)
-    else:
-        income   = pit_latest(raw_income,   as_of_date)
-        cashflow = pit_latest(raw_cashflow, as_of_date)
-    balance = pit_latest(raw_balance,  as_of_date)
-    prices  = pit_price(raw_prices,    as_of_date)
-
-    if income.empty or balance.empty or cashflow.empty or prices.empty:
-        return pd.DataFrame()
-
-    val  = compute_valuation(income, balance, cashflow, prices)
-    prof = compute_profitability(income, balance, cashflow)
-    mom  = compute_momentum(raw_prices, as_of_date)
-    lev  = compute_leverage(income, balance, cashflow)
-    grow = compute_growth(raw_income, raw_cashflow, as_of_date, variant)
-    piot = compute_piotroski(raw_income, raw_balance, raw_cashflow, as_of_date, variant)
-
-    result = val.join(prof, how='outer').join(mom, how='outer').join(lev, how='outer').join(grow, how='outer').join(piot, how='outer')
-    for f in all_factors():
-        if f.positive_only and f.name in result.columns:
-            result[f.name] = result[f.name].where(result[f.name] > 0)
-    result.index.name = TICKER
-    return result
-
-
 def _compute_and_cache(
     dates: list[datetime.date],
     variant: str,
-    raw_income: pd.DataFrame,
-    raw_balance: pd.DataFrame,
-    raw_cashflow: pd.DataFrame,
-    raw_prices: pd.DataFrame,
+    tickers: list[str] | None,
     write_cache: bool = True,
 ) -> dict[datetime.date, pd.DataFrame]:
-    """Compute cross-sections for `dates` in parallel; optionally write to cache.
+    """Compute cross-sections for `dates` via SQL; optionally write to cache.
 
     Returns dict of date → DataFrame (non-empty results only).
-    Cache writes are serialised through the calling thread so no lock is needed.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    def _one(d):
-        return d, _cross_section_from_raw(
-            raw_income, raw_balance, raw_cashflow, raw_prices, d, variant
-        )
+    def _one(d: datetime.date):
+        xs = cross_section_panel(d, variant, tickers)
+        return d, xs
 
     result: dict[datetime.date, pd.DataFrame] = {}
     with ThreadPoolExecutor(max_workers=config.factors.cache_workers) as ex:
@@ -114,7 +71,7 @@ def cross_section(
 
     Returns
     -------
-    DataFrame indexed by Ticker with valuation, profitability, and momentum columns.
+    DataFrame indexed by Ticker with all factor columns.
     Tickers without sufficient data are silently absent.
     """
     if tickers is None:
@@ -122,13 +79,7 @@ def cross_section(
         if cached is not None:
             return cached
 
-    raw_income   = fundamentals(tickers, 'income',   variant)
-    raw_balance  = fundamentals(tickers, 'balance',  variant)
-    raw_cashflow = fundamentals(tickers, 'cashflow', variant)
-    raw_prices   = yahoo_prices(tickers, end=as_of_date.isoformat())
-    result = _cross_section_from_raw(
-        raw_income, raw_balance, raw_cashflow, raw_prices, as_of_date, variant
-    )
+    result = cross_section_panel(as_of_date, variant, tickers)
     if tickers is None and not result.empty:
         _cache.store(as_of_date, variant, result)
     return result
@@ -223,18 +174,10 @@ def run_composite_backtest(
         else:
             dates_to_compute.append(d)
 
-    raw_prices = pit_prepare(yahoo_prices(tickers), 'price')
-
     if dates_to_compute:
         logger.info(f'composite backtest: computing {len(dates_to_compute)} uncached cross-sections')
-        raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
-        raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
-        raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
         cross_sections_raw.update(
-            _compute_and_cache(
-                dates_to_compute, variant,
-                raw_income, raw_balance, raw_cashflow, raw_prices,
-            )
+            _compute_and_cache(dates_to_compute, variant, tickers)
         )
 
     sector = None
@@ -260,7 +203,7 @@ def run_composite_backtest(
             'n_dates': 0,
         }
 
-    fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
+    fwd_returns = forward_returns_panel(rebalance_dates, horizon_days, tickers)
     logger.info('composite backtest: computing IC series and quintile returns...')
     result = compute_backtest(
         '__composite__', cross_sections_enriched, fwd_returns,
@@ -314,11 +257,6 @@ def run_backtest(
         for ts in pd.date_range(start_date, end_date, freq=pd_freq)
     ]
 
-    # Date-filtered price fetch: momentum lookback (400d) + forward-return horizon
-    price_start = (start_date - datetime.timedelta(days=400)).isoformat()
-    price_end = (end_date + datetime.timedelta(days=horizon_days + 5)).isoformat()
-    raw_prices = pit_prepare(yahoo_prices(tickers, start=price_start, end=price_end), 'price')
-
     cross_sections: dict[datetime.date, pd.DataFrame] = {}
     dates_to_compute = []
 
@@ -340,19 +278,16 @@ def run_backtest(
     )
 
     if dates_to_compute:
-        raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
-        raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
-        raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
         cross_sections.update(
             _compute_and_cache(
-                dates_to_compute, variant,
-                raw_income, raw_balance, raw_cashflow, raw_prices,
+                dates_to_compute, variant, tickers,
                 write_cache=(tickers is None),
             )
         )
 
+    logger.info(f'backtest {factor}: computing forward returns via SQL...')
+    fwd_returns = forward_returns_panel(rebalance_dates, horizon_days, tickers)
     logger.info(f'backtest {factor}: computing IC series and quintile returns...')
-    fwd_returns = compute_forward_returns(raw_prices, rebalance_dates, horizon_days)
     result = compute_backtest(
         factor, cross_sections, fwd_returns,
         horizon_days=horizon_days, cost_bps=cost_bps,
@@ -401,20 +336,11 @@ def run_factor_decay(
     else:
         dates_to_compute = list(rebalance_dates)
 
-    max_horizon = max(horizons)
-    price_start = (start_date - datetime.timedelta(days=400)).isoformat()
-    price_end = (end_date + datetime.timedelta(days=max_horizon + 5)).isoformat()
-    raw_prices = pit_prepare(yahoo_prices(tickers, start=price_start, end=price_end), 'price')
-
     if dates_to_compute:
         logger.info(f'factor decay {factor}: computing {len(dates_to_compute)} uncached cross-sections')
-        raw_income   = pit_prepare(fundamentals(tickers, 'income',   variant), 'fundamental')
-        raw_balance  = pit_prepare(fundamentals(tickers, 'balance',  variant), 'fundamental')
-        raw_cashflow = pit_prepare(fundamentals(tickers, 'cashflow', variant), 'fundamental')
         cross_sections.update(
             _compute_and_cache(
-                dates_to_compute, variant,
-                raw_income, raw_balance, raw_cashflow, raw_prices,
+                dates_to_compute, variant, tickers,
                 write_cache=(tickers is None),
             )
         )
@@ -424,7 +350,7 @@ def run_factor_decay(
 
     rows = []
     for h in sorted(horizons):
-        fwd = compute_forward_returns(raw_prices, rebalance_dates, h)
+        fwd = forward_returns_panel(rebalance_dates, h, tickers)
         res = compute_backtest(factor, cross_sections, fwd, horizon_days=h)
         rows.append({
             'horizon': h,

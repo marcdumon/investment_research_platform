@@ -77,9 +77,7 @@ def test_cross_section_writes_to_cache(tmp_path, monkeypatch):
 
     dummy = _DF.copy()
     with (
-        patch.object(compute_mod, 'fundamentals', return_value=pd.DataFrame()),
-        patch.object(compute_mod, 'yahoo_prices', return_value=pd.DataFrame()),
-        patch.object(compute_mod, '_cross_section_from_raw', return_value=dummy),
+        patch.object(compute_mod, 'cross_section_panel', return_value=dummy),
         patch.object(compute_mod, '_cache', cache_mod),
     ):
         result = compute_mod.cross_section(_DATE, 'A', tickers=None)
@@ -89,20 +87,20 @@ def test_cross_section_writes_to_cache(tmp_path, monkeypatch):
 
 
 def test_cross_section_uses_cache_without_db(tmp_path, monkeypatch):
-    """cross_section() returns cached value and skips DB calls on second call."""
+    """cross_section() returns cached value and skips SQL on second call."""
     import irp.factors.compute as compute_mod
 
     monkeypatch.setattr(cache_mod, '_CACHE_ROOT', tmp_path / 'fc')
     cache_mod.store(_DATE, 'A', _DF)
 
-    mock_fundamentals = MagicMock()
+    mock_sql = MagicMock()
     with (
-        patch.object(compute_mod, 'fundamentals', mock_fundamentals),
+        patch.object(compute_mod, 'cross_section_panel', mock_sql),
         patch.object(compute_mod, '_cache', cache_mod),
     ):
         result = compute_mod.cross_section(_DATE, 'A', tickers=None)
 
-    mock_fundamentals.assert_not_called()
+    mock_sql.assert_not_called()
     pd.testing.assert_frame_equal(result, _DF)
 
 

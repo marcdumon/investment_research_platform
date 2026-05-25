@@ -188,9 +188,6 @@ def precompute_all(
     """
     import pandas as pd
     from irp.factors.compute import _compute_and_cache
-    from irp.factors._pit import pit_prepare
-    from irp.query.simfin import fundamentals
-    from irp.query.yahoo import prices as yahoo_prices
 
     if variants is None:
         variants = ['A', 'Q']
@@ -207,13 +204,8 @@ def precompute_all(
         )
         if not todo:
             continue
-        logger.info(f'variant {variant}: fetching raw data...')
-        raw_income   = pit_prepare(fundamentals(None, 'income',   variant), 'fundamental')
-        raw_balance  = pit_prepare(fundamentals(None, 'balance',  variant), 'fundamental')
-        raw_cashflow = pit_prepare(fundamentals(None, 'cashflow', variant), 'fundamental')
-        raw_prices   = pit_prepare(yahoo_prices(None),                      'price')
-        logger.info(f'variant {variant}: raw data ready, computing {len(todo)} snapshots...')
-        computed = _compute_and_cache(todo, variant, raw_income, raw_balance, raw_cashflow, raw_prices)
+        logger.info(f'variant {variant}: computing {len(todo)} snapshots via SQL...')
+        computed = _compute_and_cache(todo, variant, tickers=None)
         written += len(computed)
         logger.info(f'variant {variant}: done — {written} new snapshots written')
     return written

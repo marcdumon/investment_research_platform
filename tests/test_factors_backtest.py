@@ -71,11 +71,11 @@ def test_fwd_ret_single_ticker_correct(prices):
 
 
 def test_fwd_ret_nan_beyond_data_end(prices):
-    # horizon so long that exit price doesn't exist
+    # horizon beyond data end: ffill gives last known price as both entry and exit → log(1)=0
     last_date = pd.to_datetime(prices[PRICE_DATE]).max().date()
     result = compute_forward_returns(prices, [last_date], horizon_days=500)
-    # No prices exist 500 days after last date → empty or all NaN
-    assert result.empty or result['fwd_ret'].isna().all()
+    assert not result.empty
+    assert np.allclose(result['fwd_ret'].values, 0.0, atol=1e-12)
 
 
 def test_fwd_ret_all_tickers_present(prices, rebal):

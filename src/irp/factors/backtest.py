@@ -1,10 +1,13 @@
 """Factor backtest: IC series and quintile return analysis.
 
 Pure computation — no DB access. Called by compute.run_backtest().
+Production forward returns use `irp.panel.forward_returns_panel`;
+compute_forward_returns() remains here for unit tests with synthetic data.
 """
 
 import datetime
 import math
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -29,8 +32,7 @@ def compute_forward_returns(
 
     Returns
     -------
-    DataFrame with columns [Ticker, Date, fwd_ret].
-    fwd_ret = log(P_{T+horizon} / P_T). NaN dropped.
+    DataFrame with columns [Ticker, Date, fwd_ret]. fwd_ret = log(P_exit / P_entry).
     """
     if prices.empty or not rebalance_dates:
         return pd.DataFrame(columns=[PRICE_TICKER, 'Date', 'fwd_ret'])
@@ -38,20 +40,17 @@ def compute_forward_returns(
     prices = prices.copy()
     prices[PRICE_DATE] = pd.to_datetime(prices[PRICE_DATE])
 
-    # Pivot to (date × ticker) matrix; forward-fill trading gaps
     pivot = (
         prices.pivot_table(index=PRICE_DATE, columns=PRICE_TICKER, values=PRICE_CLOSE)
         .sort_index()
     )
-
     entry_ts = pd.DatetimeIndex([pd.Timestamp(d) for d in rebalance_dates])
     exit_ts = entry_ts + pd.Timedelta(days=horizon_days)
 
-    # Extend index to include target dates, then ffill to nearest prior price
     all_targets = pivot.index.union(entry_ts).union(exit_ts)
     extended = pivot.reindex(all_targets).ffill()
 
-    p0 = extended.reindex(entry_ts).values  # (n_dates, n_tickers)
+    p0 = extended.reindex(entry_ts).values
     p1 = extended.reindex(exit_ts).values
 
     log_ret = np.log(p1 / p0)
@@ -170,7 +169,9 @@ def compute_backtest(
         if len(merged) < config.factors.min_ic_obs:
             ic_records.append((d, _nan))
             continue
-        ic_val, _ = stats.spearmanr(merged['factor'], merged['fwd_ret'])
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            ic_val, _ = stats.spearmanr(merged['factor'], merged['fwd_ret'])
         ic_records.append((d, float(ic_val)))  # type: ignore[arg-type]
         try:
             merged['q'] = pd.qcut(
@@ -245,7 +246,7 @@ def compute_backtest(
         col = qdf[q].fillna(0)
         cumret_q = col.cumsum()
         per_mean = float(col.mean())
-        per_std = float(col.std())
+        per_std = float(col.std()) if len(col) > 1 else float('nan')
         ann_ret = per_mean * ann_factor
         ann_vol = per_std * math.sqrt(ann_factor)
         quintile_ann_ret[q] = ann_ret
