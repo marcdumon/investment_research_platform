@@ -55,7 +55,7 @@ _BALANCE_COLS = [
 ]
 
 _FACTOR_COLS_ORDER = [
-    'mktcap',
+    'mktcap', 'revenue', 'net_income', 'total_assets', 'total_equity', 'op_cashflow',
     'pe', 'pb', 'ps', 'ev_ebitda', 'ev_ebit', 'ev_sales', 'fcf_yield', 'rand',
     'gross_margin', 'op_margin', 'net_margin', 'roe', 'roa', 'roic', 'fcf_margin',
     'asset_turnover', 'cfo_ni_ratio', 'accruals',
@@ -288,7 +288,12 @@ def _apply_formulas(df: pd.DataFrame) -> pd.DataFrame:
     """All factor formulas on the assembled frame; returns the final cross-section."""
     out = pd.DataFrame(index=df.index)
     mktcap = df['p0'] * df['shares']
-    out['mktcap'] = mktcap
+    out['mktcap']       = mktcap / 1e9
+    out['revenue']      = df['rev']    / 1e9
+    out['net_income']   = df['ni']     / 1e9
+    out['total_assets'] = df['ta']     / 1e9
+    out['total_equity'] = df['equity'] / 1e9
+    out['op_cashflow']  = df['cfo']    / 1e9
 
     # Valuation
     out['pe']        = mktcap / _positive_only(df['ni'])

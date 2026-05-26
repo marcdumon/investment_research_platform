@@ -23,6 +23,12 @@ from irp.factors._cols import (
 from irp.factors._utils import _safe_div
 from irp.factors.registry import register
 
+register('mktcap',       'Mkt Cap ($B)',        group='size')
+register('revenue',      'Revenue ($B)',        group='fundamentals')
+register('net_income',   'Net Income ($B)',     group='fundamentals')
+register('total_assets', 'Total Assets ($B)',   group='fundamentals')
+register('total_equity', 'Total Equity ($B)',   group='fundamentals')
+register('op_cashflow',  'Op. Cash Flow ($B)',  group='fundamentals')
 register('pe',        'P/E',       group='valuation', positive_only=True)
 register('pb',        'P/B',       group='valuation', positive_only=True)
 register('ps',        'P/S',       group='valuation')

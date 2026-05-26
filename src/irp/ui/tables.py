@@ -13,15 +13,19 @@ from dash.dash_table.Format import Format, Scheme, Symbol
 
 from irp.ui.factor_meta import FACTOR_LABELS, PCT_FACTORS
 
+_DOLLAR_B_COLS = frozenset({
+    'mktcap', 'revenue', 'net_income', 'total_assets', 'total_equity', 'op_cashflow',
+})
+
 
 def column_format(col: str) -> dict:
     """Dash DataTable column-format dict for a known factor column.
 
-    `mktcap` is dollar-prefixed; percentage factors use the `percentage`
+    Dollar-B columns get `$` prefix; percentage factors use the `percentage`
     scheme; remaining registered factors use 2-decimal fixed. Unknown
     columns return an empty dict (no special formatting).
     """
-    if col == 'mktcap':
+    if col in _DOLLAR_B_COLS:
         return {
             'type': 'numeric',
             'format': Format(precision=1, scheme=Scheme.fixed, symbol=Symbol.yes, symbol_prefix='$'),
