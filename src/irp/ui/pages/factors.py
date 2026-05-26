@@ -3,7 +3,7 @@
 import datetime
 import logging
 from math import isfinite
-from typing import Any
+from typing import Any, Literal
 
 import dash
 import pandas as pd
@@ -18,7 +18,7 @@ from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import factors_service, universe_service, watchlist_service
 from irp.ui.tables import column_format as _col_fmt
 from irp.ui.tables import format_factor_value as _fmt
-from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
+from irp.ui.theme import ACCENT, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')
 
@@ -37,8 +37,6 @@ _TOP_OPTIONS = [
 ]
 
 _DEFAULT_DATE = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
-
-
 
 
 # ── Layout ────────────────────────────────────────────────────────────
@@ -230,7 +228,7 @@ def load_options(_: Any, _wl: Any) -> tuple[Any, list, list, list, list]:
         df = universe_service.get_companies()
     except Exception:
         logger.exception('load_options: get_companies() failed')
-        return None, [], [], []
+        return None, [], [], [], []
     if df.empty:
         logger.warning('load_options: companies() returned empty DataFrame')
         return None, [], [], [], []
@@ -246,9 +244,12 @@ def load_options(_: Any, _wl: Any) -> tuple[Any, list, list, list, list]:
     ]
     wl_df = watchlist_service.list_watchlists()
     wl_opts = (
-        [{'label': f'{r["name"]} ({r["n"]})', 'value': r['name']}
-         for _, r in wl_df.iterrows()]
-        if not wl_df.empty else []
+        [
+            {'label': f'{r["name"]} ({r["n"]})', 'value': r['name']}
+            for _, r in wl_df.iterrows()
+        ]
+        if not wl_df.empty
+        else []
     )
     slim = df[['Ticker', 'Company Name', 'Sector', 'Market']].fillna('')
     logger.info(
@@ -289,7 +290,7 @@ def compute_xsection(
     n_clicks: int,
     companies_data: list | None,
     as_of_str: str | None,
-    variant: str,
+    variant: Literal['A', 'Q'],
     sector: str | None,
     market: str | None,
     watchlist: str | None,
@@ -308,8 +309,9 @@ def compute_xsection(
         except KeyError:
             logger.warning(f'compute_xsection: watchlist "{watchlist}" not found')
 
-    df = factors_service.load_cross_section(as_of, variant, watchlist=None,
-                                            enrich_company_columns=False)
+    df = factors_service.load_cross_section(
+        as_of, variant, watchlist=None, enrich_company_columns=False
+    )
     if tickers is not None:
         df = df[df.index.isin(tickers)]
     if df.empty:
@@ -322,7 +324,11 @@ def compute_xsection(
             df = df[df['Sector'] == sector]
         if market:
             df = df[df['Market'] == market]
-    return {'records': df.to_dict('records'), 'factor': factor or 'pe', 'top_n': top_n or 50}
+    return {
+        'records': df.to_dict('records'),
+        'factor': factor or 'pe',
+        'top_n': top_n or 50,
+    }
 
 
 @callback(
@@ -345,7 +351,9 @@ def render_ranking_chart(store: dict | None) -> go.Figure:
     df = df.dropna(subset=[factor])
     df = df[df[factor].apply(lambda v: isfinite(float(v)) if v is not None else False)]
     if df.empty:
-        return _empty_figure('No tickers with valid data — try a different date or filter')
+        return _empty_figure(
+            'No tickers with valid data — try a different date or filter'
+        )
 
     df = df.sort_values(factor, ascending=False)
     if top_n:
@@ -390,9 +398,7 @@ def render_ranking_chart(store: dict | None) -> go.Figure:
 def render_xsection_table(store: dict | None) -> Any:
     """DataTable of all tickers with all factors, formatted."""
     if not store or not store.get('records'):
-        return html.P(
-            'No data — select a date and click Run.', className='no-data'
-        )
+        return html.P('No data — select a date and click Run.', className='no-data')
 
     df = pd.DataFrame(store['records'])
     if df.empty:
@@ -411,7 +417,11 @@ def render_xsection_table(store: dict | None) -> Any:
                 v = r.get(c)
                 try:
                     fv = float(v)  # type: ignore[arg-type]
-                    row[c] = round(fv / 1e9, 2) if c == 'mktcap' else (round(fv, 4) if isfinite(fv) else None)
+                    row[c] = (
+                        round(fv / 1e9, 2)
+                        if c == 'mktcap'
+                        else (round(fv, 4) if isfinite(fv) else None)
+                    )
                 except (TypeError, ValueError):
                     row[c] = None
             else:
@@ -420,7 +430,11 @@ def render_xsection_table(store: dict | None) -> Any:
 
     mktcap_label = 'Mkt Cap ($B)'
     columns: list[Any] = [
-        {'name': mktcap_label if c == 'mktcap' else FACTOR_LABELS.get(c, c), 'id': c, **_col_fmt(c)}
+        {
+            'name': mktcap_label if c == 'mktcap' else FACTOR_LABELS.get(c, c),
+            'id': c,
+            **_col_fmt(c),
+        }
         for c in display_cols
     ]
 
@@ -455,7 +469,9 @@ def render_xsection_table(store: dict | None) -> Any:
     ],
     prevent_initial_call=True,
 )
-def compute_history(n_clicks: int, ticker: str | None, variant: str, factor: str | None) -> Any:
+def compute_history(
+    n_clicks: int, ticker: str | None, variant: str, factor: str | None
+) -> Any:
     """Compute per-ticker factor history on Run click."""
     if not ticker:
         raise PreventUpdate
@@ -543,7 +559,11 @@ def render_history_table(store: dict | None) -> Any:
                 v = r.get(c)
                 try:
                     fv = float(v)  # type: ignore[arg-type]
-                    row[c] = round(fv / 1e9, 2) if c == 'mktcap' else (round(fv, 4) if isfinite(fv) else None)
+                    row[c] = (
+                        round(fv / 1e9, 2)
+                        if c == 'mktcap'
+                        else (round(fv, 4) if isfinite(fv) else None)
+                    )
                 except (TypeError, ValueError):
                     row[c] = None
             else:
@@ -553,7 +573,9 @@ def render_history_table(store: dict | None) -> Any:
     mktcap_label = 'Mkt Cap ($B)'
     columns: list[Any] = [
         {
-            'name': mktcap_label if c == 'mktcap' else FACTOR_LABELS.get(c, 'Filing Date' if c == REPORT_DATE else c),
+            'name': mktcap_label
+            if c == 'mktcap'
+            else FACTOR_LABELS.get(c, 'Filing Date' if c == REPORT_DATE else c),
             'id': c,
             **_col_fmt(c),
         }

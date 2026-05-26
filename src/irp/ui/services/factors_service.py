@@ -83,7 +83,7 @@ def compute_return_corr(
     if prices_df.shape[1] < 2:
         return pd.DataFrame(), [], 'Too few tickers with sufficient price history'
 
-    log_ret = np.log(prices_df / prices_df.shift(1)).dropna(how='all')
+    log_ret: pd.DataFrame = np.log(prices_df / prices_df.shift(1)).dropna(how='all')  # type: ignore[assignment]
     corr = log_ret.corr(method='pearson')
 
     warning = f'{len(prices_df.columns)} tickers — heatmap may be dense' if len(prices_df.columns) > 80 else None

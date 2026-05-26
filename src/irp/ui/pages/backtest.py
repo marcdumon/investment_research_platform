@@ -16,13 +16,8 @@ from irp.features.composite import PRESETS
 from irp.ui.charts import base_chart_layout as _chart_layout
 from irp.ui.charts import empty_figure as _empty_figure
 from irp.ui.factor_meta import FACTOR_OPTIONS
-from irp.ui.services import (
-    backtest_service,
-    factors_service,
-    universe_service,
-    watchlist_service,
-)
-from irp.ui.theme import ACCENT, GRID, MUTED
+from irp.ui.services import backtest_service, universe_service, watchlist_service
+from irp.ui.theme import ACCENT, MUTED
 
 dash.register_page(__name__, path='/backtest', name='Backtest')
 
@@ -603,7 +598,9 @@ def run_bt(
 
         ic = result['ic_series']
         filtered = universe_service.filter_tickers(
-            market=market or None, sector=sector, watchlist=watchlist,
+            market=market or None,
+            sector=sector,
+            watchlist=watchlist,
         )
         n_tickers = len(filtered) if filtered is not None else None
         mean_ic = result['mean_ic']
@@ -1064,7 +1061,6 @@ def render_decay(data):
     if df.empty:
         return _empty_figure('No data')
 
-    valid_ic = df['mean_ic'].dropna()
     valid_icir = df['icir'].dropna()
 
     fig = go.Figure(layout=_chart_layout())

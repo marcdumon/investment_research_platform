@@ -11,8 +11,15 @@ from dash.exceptions import PreventUpdate
 from plotly.basedatatypes import BaseTraceType
 
 from irp.ui.services import price_service, universe_service
-from irp.ui.theme import ACCENT, DIV_COLOR, GRID, HOVER_LABEL, MUTED, SPLIT_COLOR, TABLE_STYLE
-from irp.ui import tables as _tables
+from irp.ui.theme import (
+    ACCENT,
+    DIV_COLOR,
+    GRID,
+    HOVER_LABEL,
+    MUTED,
+    SPLIT_COLOR,
+    TABLE_STYLE,
+)
 from irp.ui.ticker_fmt import date_range_for_preset, fmt_price_table, fmt_statement
 
 logger = logging.getLogger(__name__)
@@ -149,7 +156,11 @@ layout = html.Div(
                             selected_className='ticker-tab--active',
                             children=[
                                 _period_radio('income'),
-                                dcc.Loading(html.Div(id='income-table', style={'overflowX': 'auto'})),
+                                dcc.Loading(
+                                    html.Div(
+                                        id='income-table', style={'overflowX': 'auto'}
+                                    )
+                                ),
                                 html.P(id='income-note', className='stmt-note'),
                             ],
                         ),
@@ -160,7 +171,11 @@ layout = html.Div(
                             selected_className='ticker-tab--active',
                             children=[
                                 _period_radio('balance'),
-                                dcc.Loading(html.Div(id='balance-table', style={'overflowX': 'auto'})),
+                                dcc.Loading(
+                                    html.Div(
+                                        id='balance-table', style={'overflowX': 'auto'}
+                                    )
+                                ),
                                 html.P(id='balance-note', className='stmt-note'),
                             ],
                         ),
@@ -171,7 +186,11 @@ layout = html.Div(
                             selected_className='ticker-tab--active',
                             children=[
                                 _period_radio('cashflow'),
-                                dcc.Loading(html.Div(id='cashflow-table', style={'overflowX': 'auto'})),
+                                dcc.Loading(
+                                    html.Div(
+                                        id='cashflow-table', style={'overflowX': 'auto'}
+                                    )
+                                ),
                                 html.P(id='cashflow-note', className='stmt-note'),
                             ],
                         ),
@@ -196,6 +215,7 @@ layout = html.Div(
 # Callbacks
 # ---------------------------------------------------------------------------
 
+
 @callback(
     Output('all-tickers-store', 'data'),
     Output('filter-market', 'options'),
@@ -211,7 +231,9 @@ def load_ticker_data(_: Any) -> tuple[Any, ...]:
         return [], [], [], []
 
     try:
-        comp = universe_service.get_companies()[['Ticker', 'Company Name', 'Sector', 'Industry']]
+        comp = universe_service.get_companies()[
+            ['Ticker', 'Company Name', 'Sector', 'Industry']
+        ]
     except Exception:
         comp = pd.DataFrame(columns=['Ticker', 'Company Name', 'Sector', 'Industry'])
 
@@ -280,7 +302,9 @@ def filter_tickers(
 
     if search:
         q = search.upper()
-        options = [o for o in options if q in o['value'].upper() or q in o['label'].upper()]
+        options = [
+            o for o in options if q in o['value'].upper() or q in o['label'].upper()
+        ]
         options.sort(key=lambda o: _ticker_sort_key(o, q))
 
     return options
@@ -440,14 +464,10 @@ def render_prices(
         df_max = df['_date_str'].max()
         if not divs.empty:
             div_dates_all = pd.to_datetime(divs['Date'])
-            divs = divs.loc[
-                (div_dates_all >= df_min) & (div_dates_all <= df_max)
-            ]
+            divs = divs.loc[(div_dates_all >= df_min) & (div_dates_all <= df_max)]
         if not spls.empty:
             spl_dates_all = pd.to_datetime(spls['Date'])
-            spls = spls.loc[
-                (spl_dates_all >= df_min) & (spl_dates_all <= df_max)
-            ]
+            spls = spls.loc[(spl_dates_all >= df_min) & (spl_dates_all <= df_max)]
 
         if not divs.empty:
             div_dates = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
@@ -644,11 +664,17 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
         return (year, q)
 
     if period == 'A':
-        cols = sorted([c for c in df.columns if str(c).endswith('FY')],
-                      key=_period_key, reverse=True)
+        cols = sorted(
+            [c for c in df.columns if str(c).endswith('FY')],
+            key=_period_key,
+            reverse=True,
+        )
     else:
-        cols = sorted([c for c in df.columns if not str(c).endswith('FY')],
-                      key=_period_key, reverse=True)
+        cols = sorted(
+            [c for c in df.columns if not str(c).endswith('FY')],
+            key=_period_key,
+            reverse=True,
+        )
 
     df = df[cols] if cols else df
     if df.empty or df.columns.empty:
@@ -658,7 +684,7 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
 
     table_df = fmt_df.reset_index(names='Metric')
     period_cols = [c for c in fmt_df.columns]
-    columns = [{'name': 'Metric', 'id': 'Metric'}] + [
+    columns: list = [{'name': 'Metric', 'id': 'Metric'}] + [
         {'name': str(c), 'id': str(c)} for c in period_cols
     ]
     # Rename any columns that duplicate to avoid DataTable id collisions
@@ -670,9 +696,9 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
     style['style_cell_conditional'] = [
         {'if': {'column_id': 'Metric'}, 'textAlign': 'left', 'fontWeight': '500'},
     ]
-
+    data: list = table_df.to_dict('records')
     table = _dt.DataTable(
-        data=table_df.to_dict('records'),
+        data=data,
         columns=columns,
         sort_action='native',
         page_size=40,
@@ -703,12 +729,16 @@ def render_actions(ticker: str | None) -> Any:
     else:
         divs = divs.sort_values('Date', ascending=False).reset_index(drop=True)
         rows = [
-            html.Tr(
-                [
-                    html.Td(str(row['Date'])[:10], className='stmt-td stmt-td--item'),
-                    html.Td(f'{float(row["Amount"]):,.4f}' if row['Amount'] is not None and str(row['Amount']) not in ('', 'nan') else '—', className='stmt-td'),
-                ]
-            )
+            html.Tr([
+                html.Td(str(row['Date'])[:10], className='stmt-td stmt-td--item'),
+                html.Td(
+                    f'{float(row["Amount"]):,.4f}'
+                    if row['Amount'] is not None
+                    and str(row['Amount']) not in ('', 'nan')
+                    else '—',
+                    className='stmt-td',
+                ),
+            ])
             for _, row in divs.iterrows()
         ]
         div_block = html.Div(
@@ -718,12 +748,10 @@ def render_actions(ticker: str | None) -> Any:
                     className='stmt-table',
                     children=[
                         html.Thead(
-                            html.Tr(
-                                [
-                                    html.Th('Date', className='stmt-th stmt-th--item'),
-                                    html.Th('Amount', className='stmt-th'),
-                                ]
-                            )
+                            html.Tr([
+                                html.Th('Date', className='stmt-th stmt-th--item'),
+                                html.Th('Amount', className='stmt-th'),
+                            ])
                         ),
                         html.Tbody(rows),
                     ],
@@ -738,12 +766,10 @@ def render_actions(ticker: str | None) -> Any:
             'Stock Splits' if 'Stock Splits' in spls.columns else spls.columns[-1]
         )
         spl_rows = [
-            html.Tr(
-                [
-                    html.Td(str(row['Date'])[:10], className='stmt-td stmt-td--item'),
-                    html.Td(str(row[ratio_col]), className='stmt-td'),
-                ]
-            )
+            html.Tr([
+                html.Td(str(row['Date'])[:10], className='stmt-td stmt-td--item'),
+                html.Td(str(row[ratio_col]), className='stmt-td'),
+            ])
             for _, row in spls.iterrows()
         ]
         split_block = html.Div(
@@ -753,12 +779,10 @@ def render_actions(ticker: str | None) -> Any:
                     className='stmt-table',
                     children=[
                         html.Thead(
-                            html.Tr(
-                                [
-                                    html.Th('Date', className='stmt-th stmt-th--item'),
-                                    html.Th('Ratio', className='stmt-th'),
-                                ]
-                            )
+                            html.Tr([
+                                html.Th('Date', className='stmt-th stmt-th--item'),
+                                html.Th('Ratio', className='stmt-th'),
+                            ])
                         ),
                         html.Tbody(spl_rows),
                     ],

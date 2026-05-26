@@ -9,6 +9,7 @@ Pure data movement — no IC math, no rebalance-date generation.
 import datetime
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Literal
 
 import pandas as pd
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def compute_and_cache(
     dates: list[datetime.date],
-    variant: str,
+    variant: Literal['A','Q'],
     tickers: list[str] | None,
     write_cache: bool = True,
 ) -> dict[datetime.date, pd.DataFrame]:
@@ -58,7 +59,7 @@ def compute_and_cache(
 
 def load_cross_sections(
     dates: list[datetime.date],
-    variant: str,
+    variant: Literal['A','Q'],
     tickers: list[str] | None,
 ) -> dict[datetime.date, pd.DataFrame]:
     """Cache-first cross-section retrieval for a list of rebalance dates.

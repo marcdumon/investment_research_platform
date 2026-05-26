@@ -5,7 +5,7 @@ and inline per-ticker detail panel (prices, fundamentals, factor history).
 import datetime
 import logging
 from math import isfinite
-from typing import Any
+from typing import Any, Literal
 
 import dash
 import numpy as np
@@ -24,10 +24,23 @@ from irp.ui.charts import corr_heatmap_figure as _corr_heatmap
 from irp.ui.charts import empty_figure as _empty_figure
 from irp.ui.charts import scatter_chart_layout as _base_layout
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
-from irp.ui.services import factors_service, price_service, universe_service, watchlist_service
+from irp.ui.services import (
+    factors_service,
+    price_service,
+    universe_service,
+    watchlist_service,
+)
 from irp.ui.tables import column_format as _col_fmt
 from irp.ui.ticker_fmt import date_range_for_preset, fmt_statement
-from irp.ui.theme import ACCENT, DIV_COLOR, GRID, HOVER_LABEL, MUTED, SPLIT_COLOR, TABLE_STYLE
+from irp.ui.theme import (
+    ACCENT,
+    DIV_COLOR,
+    GRID,
+    HOVER_LABEL,
+    MUTED,
+    SPLIT_COLOR,
+    TABLE_STYLE,
+)
 
 dash.register_page(__name__, path='/screener', name='Screener')
 
@@ -287,7 +300,10 @@ layout = html.Div(
                                                 {'label': 'Market', 'value': 'market'},
                                                 {'label': 'None', 'value': 'none'},
                                             ]
-                                            + [{'label': f.label, 'value': f.name} for f in all_factors()]
+                                            + [
+                                                {'label': f.label, 'value': f.name}
+                                                for f in all_factors()
+                                            ]
                                         ),
                                         value='sector',
                                         clearable=False,
@@ -299,7 +315,10 @@ layout = html.Div(
                                     html.Label('X scale', className='control-label'),
                                     dcc.RadioItems(
                                         id='screener-x-scale',
-                                        options=[{'label': ' Lin', 'value': 'linear'}, {'label': ' Log', 'value': 'log'}],
+                                        options=[
+                                            {'label': ' Lin', 'value': 'linear'},
+                                            {'label': ' Log', 'value': 'log'},
+                                        ],
                                         value='linear',
                                         inline=True,
                                         labelClassName='check-item',
@@ -309,17 +328,25 @@ layout = html.Div(
                                     html.Label('Y scale', className='control-label'),
                                     dcc.RadioItems(
                                         id='screener-y-scale',
-                                        options=[{'label': ' Lin', 'value': 'linear'}, {'label': ' Log', 'value': 'log'}],
+                                        options=[
+                                            {'label': ' Lin', 'value': 'linear'},
+                                            {'label': ' Log', 'value': 'log'},
+                                        ],
                                         value='linear',
                                         inline=True,
                                         labelClassName='check-item',
                                     ),
                                 ]),
                                 html.Div([
-                                    html.Label('Color scale', className='control-label'),
+                                    html.Label(
+                                        'Color scale', className='control-label'
+                                    ),
                                     dcc.RadioItems(
                                         id='screener-color-scale',
-                                        options=[{'label': ' Lin', 'value': 'linear'}, {'label': ' Log', 'value': 'log'}],
+                                        options=[
+                                            {'label': ' Lin', 'value': 'linear'},
+                                            {'label': ' Log', 'value': 'log'},
+                                        ],
                                         value='log',
                                         inline=True,
                                         labelClassName='check-item',
@@ -440,7 +467,9 @@ layout = html.Div(
                         dcc.Loading(
                             dcc.Graph(
                                 id='screener-corr-chart',
-                                figure=_empty_figure('Select filters and click Run Correlation'),
+                                figure=_empty_figure(
+                                    'Select filters and click Run Correlation'
+                                ),
                                 config={'displayModeBar': False},
                                 style={'minHeight': '400px'},
                             )
@@ -468,10 +497,18 @@ layout = html.Div(
                     children=[
                         html.H3(
                             id='screener-detail-title',
-                            style={'color': 'var(--text)', 'fontSize': '14px', 'margin': '0'},
+                            style={
+                                'color': 'var(--text)',
+                                'fontSize': '14px',
+                                'margin': '0',
+                            },
                         ),
                         html.Div(
-                            style={'display': 'flex', 'gap': '8px', 'alignItems': 'center'},
+                            style={
+                                'display': 'flex',
+                                'gap': '8px',
+                                'alignItems': 'center',
+                            },
                             children=[
                                 html.Button(
                                     '− Remove from list',
@@ -517,12 +554,19 @@ layout = html.Div(
                             children=[
                                 html.Div(
                                     className='control-row',
-                                    style={'padding': '8px 0', 'gap': '8px', 'flexWrap': 'wrap'},
+                                    style={
+                                        'padding': '8px 0',
+                                        'gap': '8px',
+                                        'flexWrap': 'wrap',
+                                    },
                                     children=[
                                         *[
                                             html.Button(
                                                 p,
-                                                id={'type': 'detail-preset-btn', 'index': p},
+                                                id={
+                                                    'type': 'detail-preset-btn',
+                                                    'index': p,
+                                                },
                                                 n_clicks=0,
                                                 style={
                                                     'fontSize': '11px',
@@ -538,7 +582,11 @@ layout = html.Div(
                                         ],
                                         html.Span(
                                             'MA:',
-                                            style={'color': MUTED, 'fontSize': '11px', 'marginLeft': '8px'},
+                                            style={
+                                                'color': MUTED,
+                                                'fontSize': '11px',
+                                                'marginLeft': '8px',
+                                            },
                                         ),
                                         dcc.Checklist(
                                             id='screener-detail-ma',
@@ -596,8 +644,15 @@ layout = html.Div(
                                             className='ticker-tab',
                                             selected_className='ticker-tab--active',
                                             children=[
-                                                dcc.Loading(html.Div(id='screener-detail-income')),
-                                                html.Small(id='screener-detail-income-note', style={'color': MUTED}),
+                                                dcc.Loading(
+                                                    html.Div(
+                                                        id='screener-detail-income'
+                                                    )
+                                                ),
+                                                html.Small(
+                                                    id='screener-detail-income-note',
+                                                    style={'color': MUTED},
+                                                ),
                                             ],
                                         ),
                                         dcc.Tab(
@@ -606,8 +661,15 @@ layout = html.Div(
                                             className='ticker-tab',
                                             selected_className='ticker-tab--active',
                                             children=[
-                                                dcc.Loading(html.Div(id='screener-detail-balance')),
-                                                html.Small(id='screener-detail-balance-note', style={'color': MUTED}),
+                                                dcc.Loading(
+                                                    html.Div(
+                                                        id='screener-detail-balance'
+                                                    )
+                                                ),
+                                                html.Small(
+                                                    id='screener-detail-balance-note',
+                                                    style={'color': MUTED},
+                                                ),
                                             ],
                                         ),
                                         dcc.Tab(
@@ -616,8 +678,15 @@ layout = html.Div(
                                             className='ticker-tab',
                                             selected_className='ticker-tab--active',
                                             children=[
-                                                dcc.Loading(html.Div(id='screener-detail-cashflow')),
-                                                html.Small(id='screener-detail-cashflow-note', style={'color': MUTED}),
+                                                dcc.Loading(
+                                                    html.Div(
+                                                        id='screener-detail-cashflow'
+                                                    )
+                                                ),
+                                                html.Small(
+                                                    id='screener-detail-cashflow-note',
+                                                    style={'color': MUTED},
+                                                ),
                                             ],
                                         ),
                                     ],
@@ -691,7 +760,12 @@ layout = html.Div(
                 ),
                 html.Div(
                     id='screener-wl-description',
-                    style={'color': MUTED, 'fontSize': '11px', 'marginTop': '4px', 'fontStyle': 'italic'},
+                    style={
+                        'color': MUTED,
+                        'fontSize': '11px',
+                        'marginTop': '4px',
+                        'fontStyle': 'italic',
+                    },
                 ),
                 html.Div(
                     id='screener-watchlists-container', style={'marginTop': '16px'}
@@ -742,7 +816,7 @@ def load_options(_: Any) -> tuple[list, list]:
 def run_screener(
     n_clicks: int,
     date_str: str | None,
-    variant: str,
+    variant: Literal['A', 'Q'],
     market: str | None,
     sector: str | None,
 ) -> tuple[Any, list]:
@@ -1079,7 +1153,11 @@ def render_scatter(
         cat_col = 'Market'
 
     # Continuous color (any registered factor)
-    factor_color = color_by if (color_by and color_by in FACTOR_LABELS and color_by in df.columns) else None
+    factor_color = (
+        color_by
+        if (color_by and color_by in FACTOR_LABELS and color_by in df.columns)
+        else None
+    )
 
     traces = []
     if cat_col:
@@ -1094,19 +1172,25 @@ def render_scatter(
                 if 'Company Name' in sub.columns
                 else sub[['Ticker']].values.tolist()
             )
-            traces.append(go.Scatter(
-                x=sub[x_factor].tolist(),
-                y=sub[y_factor].tolist(),
-                mode='markers',
-                name=grp,
-                customdata=sub_cd,
-                hovertemplate=(
-                    f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
-                    f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<extra></extra>'
-                ),
-                hoverlabel=dict(**HOVER_LABEL),
-                marker=dict(size=6, color=_SECTOR_PALETTE[i % len(_SECTOR_PALETTE)], opacity=0.75),
-            ))
+            traces.append(
+                go.Scatter(
+                    x=sub[x_factor].tolist(),
+                    y=sub[y_factor].tolist(),
+                    mode='markers',
+                    name=grp,
+                    customdata=sub_cd,
+                    hovertemplate=(
+                        f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
+                        f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<extra></extra>'
+                    ),
+                    hoverlabel=dict(**HOVER_LABEL),
+                    marker=dict(
+                        size=6,
+                        color=_SECTOR_PALETTE[i % len(_SECTOR_PALETTE)],
+                        opacity=0.75,
+                    ),
+                )
+            )
     elif factor_color:
         color_label = FACTOR_LABELS.get(factor_color, factor_color)
         color_vals = pd.to_numeric(df[factor_color], errors='coerce')
@@ -1114,62 +1198,80 @@ def render_scatter(
         fmt = '.1%' if is_pct else '.2f'
         if color_scale == 'log':
             plot_color = color_vals.apply(
-                lambda v: np.sign(v) * np.log10(abs(v)) if pd.notna(v) and v != 0 else (0.0 if pd.notna(v) else np.nan)
+                lambda v: (
+                    np.sign(v) * np.log10(abs(v))
+                    if pd.notna(v) and v != 0
+                    else (0.0 if pd.notna(v) else np.nan)
+                )
             )
             color_label_full = f'{color_label} (log)'
         else:
             plot_color = color_vals
             color_label_full = color_label
         valid_plot = plot_color.dropna()
-        cmin = float(valid_plot.quantile(0.02)) if len(valid_plot) >= 10 else float(valid_plot.min())
-        cmax = float(valid_plot.quantile(0.98)) if len(valid_plot) >= 10 else float(valid_plot.max())
+        cmin = (
+            float(valid_plot.quantile(0.02))
+            if len(valid_plot) >= 10
+            else float(valid_plot.min())
+        )
+        cmax = (
+            float(valid_plot.quantile(0.98))
+            if len(valid_plot) >= 10
+            else float(valid_plot.max())
+        )
         if cmin == cmax:
             cmin -= 0.5
             cmax += 0.5
-        traces.append(go.Scatter(
-            x=df[x_factor].tolist(),
-            y=df[y_factor].tolist(),
-            mode='markers',
-            name='',
-            showlegend=False,
-            customdata=list(zip(cd, color_vals.tolist())),
-            hovertemplate=(
-                f'<b>%{{customdata[0][0]}}</b> %{{customdata[0][1]}}<br>'
-                f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<br>'
-                f'{color_label}: %{{customdata[1]:{fmt}}}<extra></extra>'
-            ),
-            hoverlabel=dict(**HOVER_LABEL),
-            marker=dict(
-                size=6,
-                color=plot_color.tolist(),
-                colorscale='RdYlGn',
-                cmin=cmin,
-                cmax=cmax,
-                showscale=True,
-                colorbar=dict(
-                    title=dict(text=color_label_full, font=dict(color=MUTED, size=11)),
-                    thickness=12,
-                    len=0.8,
-                    tickfont=dict(color=MUTED, size=10),
-                    outlinewidth=0,
+        traces.append(
+            go.Scatter(
+                x=df[x_factor].tolist(),
+                y=df[y_factor].tolist(),
+                mode='markers',
+                name='',
+                showlegend=False,
+                customdata=list(zip(cd, color_vals.tolist())),
+                hovertemplate=(
+                    f'<b>%{{customdata[0][0]}}</b> %{{customdata[0][1]}}<br>'
+                    f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<br>'
+                    f'{color_label}: %{{customdata[1]:{fmt}}}<extra></extra>'
                 ),
-                opacity=0.8,
-            ),
-        ))
+                hoverlabel=dict(**HOVER_LABEL),
+                marker=dict(
+                    size=6,
+                    color=plot_color.tolist(),
+                    colorscale='RdYlGn',
+                    cmin=cmin,
+                    cmax=cmax,
+                    showscale=True,
+                    colorbar=dict(
+                        title=dict(
+                            text=color_label_full, font=dict(color=MUTED, size=11)
+                        ),
+                        thickness=12,
+                        len=0.8,
+                        tickfont=dict(color=MUTED, size=10),
+                        outlinewidth=0,
+                    ),
+                    opacity=0.8,
+                ),
+            )
+        )
     else:
-        traces.append(go.Scatter(
-            x=df[x_factor].tolist(),
-            y=df[y_factor].tolist(),
-            mode='markers',
-            name='',
-            customdata=cd,
-            hovertemplate=(
-                f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
-                f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<extra></extra>'
-            ),
-            hoverlabel=dict(**HOVER_LABEL),
-            marker=dict(size=6, color=ACCENT, opacity=0.7),
-        ))
+        traces.append(
+            go.Scatter(
+                x=df[x_factor].tolist(),
+                y=df[y_factor].tolist(),
+                mode='markers',
+                name='',
+                customdata=cd,
+                hovertemplate=(
+                    f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
+                    f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<extra></extra>'
+                ),
+                hoverlabel=dict(**HOVER_LABEL),
+                marker=dict(size=6, color=ACCENT, opacity=0.7),
+            )
+        )
 
     n = len(df)
     fig = go.Figure(
@@ -1383,7 +1485,9 @@ def render_results_table(result: dict | None) -> Any:
     running=[(Output('screener-corr-run-btn', 'disabled'), True, False)],
     prevent_initial_call=True,
 )
-def run_correlation(n_clicks: int, result: dict | None, window: int) -> tuple[go.Figure, str]:
+def run_correlation(
+    n_clicks: int, result: dict | None, window: int
+) -> tuple[go.Figure, str]:
     if not n_clicks or not result or not result.get('records'):
         raise PreventUpdate
 
@@ -1392,7 +1496,9 @@ def run_correlation(n_clicks: int, result: dict | None, window: int) -> tuple[go
 
     if n > _MAX_CORR_TICKERS:
         return (
-            _empty_figure(f'{n:,} tickers — narrow to ≤{_MAX_CORR_TICKERS} before running correlation'),
+            _empty_figure(
+                f'{n:,} tickers — narrow to ≤{_MAX_CORR_TICKERS} before running correlation'
+            ),
             f'{n:,} tickers (too many)',
         )
 
@@ -1408,7 +1514,9 @@ def run_correlation(n_clicks: int, result: dict | None, window: int) -> tuple[go
     if corr.empty:
         return _empty_figure(warning or 'No data'), warning or ''
 
-    w_label = next((o['label'] for o in _CORR_WINDOW_OPTIONS if o['value'] == window), str(window))
+    w_label = next(
+        (o['label'] for o in _CORR_WINDOW_OPTIONS if o['value'] == window), str(window)
+    )
     title = f'Return correlation — {w_label}  ({len(labels)} tickers)'
     info = warning or f'{len(labels)} tickers'
     return _corr_heatmap(corr, labels, title, warning=warning), info
@@ -1534,11 +1642,12 @@ def render_detail_prices(
             hovertemplate='<b>%{x}</b><br>Close: %{y:,.2f}<extra></extra>',
             hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
         ),
-        row=1, col=1,
+        row=1,
+        col=1,
     )
 
     # MA overlays
-    for ma_label in (ma_overlays or []):
+    for ma_label in ma_overlays or []:
         n = 50 if ma_label == 'MA50' else 200
         ma = df[close_col].rolling(n).mean()
         fig.add_trace(
@@ -1549,7 +1658,8 @@ def render_detail_prices(
                 line=dict(width=1, dash='dash'),
                 hovertemplate=f'{ma_label}: %{{y:,.2f}}<extra></extra>',
             ),
-            row=1, col=1,
+            row=1,
+            col=1,
         )
 
     # Dividend markers
@@ -1557,11 +1667,18 @@ def render_detail_prices(
         divs = price_service.get_dividends(ticker)
         if not divs.empty:
             div_dates = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
-            mask = (div_dates >= df['_date_str'].min()) & (div_dates <= df['_date_str'].max())
+            mask = (div_dates >= df['_date_str'].min()) & (
+                div_dates <= df['_date_str'].max()
+            )
             divs_in_range = divs[mask.values]
             div_dates_in_range = div_dates[mask.values]
             if not divs_in_range.empty:
-                price_at_div = df.set_index('_date_str')[close_col].reindex(div_dates_in_range).values
+                price_at_div = (
+                    df
+                    .set_index('_date_str')[close_col]
+                    .reindex(div_dates_in_range)
+                    .values
+                )
                 fig.add_trace(
                     go.Scatter(
                         x=div_dates_in_range.values,
@@ -1573,7 +1690,8 @@ def render_detail_prices(
                         customdata=divs_in_range['Amount'].values,
                         hoverlabel=dict(**HOVER_LABEL, bordercolor=DIV_COLOR),
                     ),
-                    row=1, col=1,
+                    row=1,
+                    col=1,
                 )
     except Exception:
         pass
@@ -1586,11 +1704,18 @@ def render_detail_prices(
             for _, row in spls.iterrows():
                 d = pd.to_datetime(row['Date']).strftime('%Y-%m-%d')
                 if df['_date_str'].min() <= d <= df['_date_str'].max():
-                    shapes.append(dict(
-                        type='line', x0=d, x1=d, y0=0, y1=1,
-                        yref='paper', xref='x',
-                        line=dict(color=SPLIT_COLOR, width=1, dash='dash'),
-                    ))
+                    shapes.append(
+                        dict(
+                            type='line',
+                            x0=d,
+                            x1=d,
+                            y0=0,
+                            y1=1,
+                            yref='paper',
+                            xref='x',
+                            line=dict(color=SPLIT_COLOR, width=1, dash='dash'),
+                        )
+                    )
     except Exception:
         pass
 
@@ -1606,17 +1731,30 @@ def render_detail_prices(
                 hovertemplate='Vol: %{y:,}<extra></extra>',
                 showlegend=False,
             ),
-            row=2, col=1,
+            row=2,
+            col=1,
         )
 
-    common_axis = dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=10), zeroline=False)
+    common_axis = dict(
+        gridcolor=GRID,
+        linecolor=GRID,
+        tickfont=dict(color=MUTED, size=10),
+        zeroline=False,
+    )
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(128,128,128,0.05)',
         font=dict(color=MUTED, size=11),
         hovermode='x unified',
         margin=dict(l=0, r=0, t=8, b=0),
-        legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=11), orientation='h', y=1.02, x=1, xanchor='right'),
+        legend=dict(
+            bgcolor='rgba(0,0,0,0)',
+            font=dict(color=MUTED, size=11),
+            orientation='h',
+            y=1.02,
+            x=1,
+            xanchor='right',
+        ),
         shapes=shapes,
         xaxis=dict(**common_axis, showticklabels=False if vol_col else True),
         yaxis=dict(**common_axis, title='Price'),
@@ -1654,9 +1792,17 @@ def _render_detail_statement(
         return (year, q)
 
     if variant == 'A':
-        cols = sorted([c for c in df.columns if str(c).endswith('FY')], key=_period_key, reverse=True)
+        cols = sorted(
+            [c for c in df.columns if str(c).endswith('FY')],
+            key=_period_key,
+            reverse=True,
+        )
     else:
-        cols = sorted([c for c in df.columns if not str(c).endswith('FY')], key=_period_key, reverse=True)
+        cols = sorted(
+            [c for c in df.columns if not str(c).endswith('FY')],
+            key=_period_key,
+            reverse=True,
+        )
 
     df = df[cols] if cols else df
     if df.empty or df.columns.empty:
@@ -1665,7 +1811,9 @@ def _render_detail_statement(
     fmt_df, note = fmt_statement(df)
     table_df = fmt_df.reset_index(names='Metric')
     period_cols = list(fmt_df.columns)
-    columns = [{'name': 'Metric', 'id': 'Metric'}] + [{'name': str(c), 'id': str(c)} for c in period_cols]
+    columns: list = [{'name': 'Metric', 'id': 'Metric'}] + [
+        {'name': str(c), 'id': str(c)} for c in period_cols
+    ]
     table_df.columns = [c['id'] for c in columns]
 
     style = dict(TABLE_STYLE)
@@ -1674,7 +1822,8 @@ def _render_detail_statement(
         'fontSize': '11px',
         'padding': '4px 8px',
     }
-    return _dt.DataTable(data=table_df.to_dict('records'), columns=columns, **style), note
+    data: list = table_df.to_dict('records')
+    return _dt.DataTable(data=data, columns=columns, **style), note
 
 
 @callback(
@@ -1715,7 +1864,7 @@ def render_detail_cashflow(ticker: str | None, variant: str) -> tuple[Any, str]:
     Input('screener-detail-ticker', 'data'),
     Input('screener-detail-factor-variant', 'value'),
 )
-def render_detail_factors(ticker: str | None, variant: str) -> Any:
+def render_detail_factors(ticker: str | None, variant: Literal['A', 'Q']) -> Any:
     if not ticker:
         return html.P('Click a row to load factor history', className='no-data')
 
@@ -1745,34 +1894,43 @@ def render_detail_factors(ticker: str | None, variant: str) -> Any:
 
         fig = go.Figure()
         for f in ratio_factors:
-            fig.add_trace(go.Scatter(
-                x=hist[date_col],
-                y=hist[f.name],
-                mode='lines+markers',
-                name=f.label,
-                marker=dict(size=5),
-                hovertemplate=f'{f.label}: %{{y:.2f}}<br>%{{x}}<extra></extra>',
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=hist[date_col],
+                    y=hist[f.name],
+                    mode='lines+markers',
+                    name=f.label,
+                    marker=dict(size=5),
+                    hovertemplate=f'{f.label}: %{{y:.2f}}<br>%{{x}}<extra></extra>',
+                )
+            )
         for f in pct_factors:
-            fig.add_trace(go.Scatter(
-                x=hist[date_col],
-                y=hist[f.name] * 100,
-                mode='lines+markers',
-                name=f'{f.label} (%)',
-                marker=dict(size=5),
-                yaxis='y2',
-                hovertemplate=f'{f.label}: %{{y:.1f}}%<br>%{{x}}<extra></extra>',
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=hist[date_col],
+                    y=hist[f.name] * 100,
+                    mode='lines+markers',
+                    name=f'{f.label} (%)',
+                    marker=dict(size=5),
+                    yaxis='y2',
+                    hovertemplate=f'{f.label}: %{{y:.1f}}%<br>%{{x}}<extra></extra>',
+                )
+            )
 
         layout_kwargs: dict[str, Any] = dict(
             title=dict(text=group_name.title(), font=dict(size=12, color=MUTED), x=0),
             height=220,
             margin=dict(l=0, r=0, t=28, b=0),
-            legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=10), orientation='h'),
+            legend=dict(
+                bgcolor='rgba(0,0,0,0)',
+                font=dict(color=MUTED, size=10),
+                orientation='h',
+            ),
         )
         if pct_factors and ratio_factors:
             layout_kwargs['yaxis2'] = dict(
-                overlaying='y', side='right',
+                overlaying='y',
+                side='right',
                 gridcolor='rgba(0,0,0,0)',
                 tickfont=dict(color=MUTED, size=10),
                 ticksuffix='%',
@@ -1958,7 +2116,10 @@ def render_watchlists_table(_init: Any, _trigger: Any, pending: str | None) -> A
                                 ),
                                 html.Button(
                                     'Cancel',
-                                    id={'type': 'wl-delete-btn', 'index': f'__cancel__{r["name"]}'},
+                                    id={
+                                        'type': 'wl-delete-btn',
+                                        'index': f'__cancel__{r["name"]}',
+                                    },
                                     n_clicks=0,
                                     style={
                                         'fontSize': '11px',

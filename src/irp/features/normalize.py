@@ -4,10 +4,6 @@ Pure functions; no DB access. All operate per-snapshot (one date at a time).
 """
 import pandas as pd
 
-import irp.factors.valuation      # noqa: F401 — populate registry
-import irp.factors.profitability  # noqa: F401
-import irp.factors.momentum       # noqa: F401
-import irp.factors.leverage       # noqa: F401
 from irp.factors.registry import all_factors
 
 FACTOR_COLS: list[str] = [f.name for f in all_factors()]

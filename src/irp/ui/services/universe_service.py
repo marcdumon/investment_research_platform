@@ -4,6 +4,9 @@ Wraps `irp.query.universe` and `irp.query.simfin.companies`. Owns the
 market/sector/watchlist ticker-filter logic that was previously
 duplicated in `backtest.py` and `screener.py`.
 """
+
+from typing import Literal
+
 import pandas as pd
 
 from irp.query.simfin import companies as _companies
@@ -34,7 +37,9 @@ def get_sectors() -> list[str]:
     return sorted(_sector_map().dropna().unique().tolist())
 
 
-def get_statement(ticker: str, kind: str) -> pd.DataFrame:
+def get_statement(
+    ticker: str, kind: Literal['income', 'balance', 'cashflow']
+) -> pd.DataFrame:
     """Fundamental statement for one ticker (all available periods).
 
     `kind` ∈ {'income', 'balance', 'cashflow'}. Variant filtering happens

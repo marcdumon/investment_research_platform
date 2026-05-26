@@ -3,12 +3,6 @@
 Derived from the central factor registry. Import this module anywhere that
 needs factor labels or dropdown options; do NOT hardcode factor lists elsewhere.
 """
-import irp.factors.valuation      # noqa: F401 — populate registry
-import irp.factors.profitability  # noqa: F401
-import irp.factors.momentum       # noqa: F401
-import irp.factors.leverage       # noqa: F401
-import irp.factors.growth         # noqa: F401
-import irp.factors.piotroski      # noqa: F401
 from irp.factors.registry import FactorDef, all_factors
 
 

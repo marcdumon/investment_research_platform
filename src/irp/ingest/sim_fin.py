@@ -9,7 +9,6 @@ import requests
 import simfin as sf
 
 from irp.core.config import config
-from irp.core.freshness import is_fresh
 from irp.runner import Feed
 
 logger = logging.getLogger(__name__)

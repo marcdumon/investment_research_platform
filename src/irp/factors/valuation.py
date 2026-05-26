@@ -2,6 +2,7 @@
 
 All inputs must already be PIT-aligned (one row per ticker). No DB access.
 """
+
 import numpy as np
 import pandas as pd
 
@@ -23,20 +24,21 @@ from irp.factors._cols import (
 from irp.factors._utils import _safe_div
 from irp.factors.registry import register
 
-register('mktcap',       'Mkt Cap ($B)',        group='size')
-register('revenue',      'Revenue ($B)',        group='fundamentals')
-register('net_income',   'Net Income ($B)',     group='fundamentals')
-register('total_assets', 'Total Assets ($B)',   group='fundamentals')
-register('total_equity', 'Total Equity ($B)',   group='fundamentals')
-register('op_cashflow',  'Op. Cash Flow ($B)',  group='fundamentals')
-register('pe',        'P/E',       group='valuation', positive_only=True)
-register('pb',        'P/B',       group='valuation', positive_only=True)
-register('ps',        'P/S',       group='valuation')
-register('ev_ebitda', 'EV/EBITDA', group='valuation', positive_only=True)
-register('ev_ebit',   'EV/EBIT',   group='valuation', positive_only=True)
-register('ev_sales',  'EV/Sales',  group='valuation')
-register('fcf_yield', 'FCF Yield', pct=True, group='valuation')
-register('rand',      'Random',    group='valuation')
+register('mktcap',          'Mkt Cap ($B)',         group='size')
+register('revenue',         'Revenue ($B)',         group='fundamentals')
+register('net_income',      'Net Income ($B)',      group='fundamentals')
+register('total_assets',    'Total Assets ($B)',    group='fundamentals')
+register('total_equity',    'Total Equity ($B)',    group='fundamentals')
+register('op_cashflow',     'Op. Cash Flow ($B)',   group='fundamentals')
+register('pe',              'P/E',                  group='valuation', positive_only=True)
+register('pb',              'P/B',                  group='valuation', positive_only=True)
+register('ps',              'P/S',                  group='valuation')
+register('ev_ebitda',       'EV/EBITDA',            group='valuation', positive_only=True)
+register('ev_ebit',         'EV/EBIT',              group='valuation', positive_only=True)
+register('ev_sales',        'EV/Sales',             group='valuation')
+register('fcf_yield',       'FCF Yield',  pct=True, group='valuation')
+register('rand',            'Random',               group='valuation')
+
 
 def compute_valuation(
     income: pd.DataFrame,
@@ -70,16 +72,27 @@ def compute_valuation(
         prices[[TICKER, PRICE_CLOSE]]
         .merge(
             income[[TICKER, NET_INCOME, REVENUE, OPERATING_INCOME]],
-            on=TICKER, how='inner',
+            on=TICKER,
+            how='inner',
         )
         .merge(
-            balance[[TICKER, TOTAL_EQUITY, CASH_AND_ST_INVESTMENTS,
-                     SHORT_TERM_DEBT, LONG_TERM_DEBT, SHARES_DILUTED_BAL]],
-            on=TICKER, how='inner',
+            balance[
+                [
+                    TICKER,
+                    TOTAL_EQUITY,
+                    CASH_AND_ST_INVESTMENTS,
+                    SHORT_TERM_DEBT,
+                    LONG_TERM_DEBT,
+                    SHARES_DILUTED_BAL,
+                ]
+            ],
+            on=TICKER,
+            how='inner',
         )
         .merge(
             cashflow[[TICKER, CFO, CFI, DA]],
-            on=TICKER, how='inner',
+            on=TICKER,
+            how='inner',
         )
         .set_index(TICKER)
     )
@@ -88,24 +101,24 @@ def compute_valuation(
 
     st_debt = w[SHORT_TERM_DEBT].fillna(0)
     lt_debt = w[LONG_TERM_DEBT].fillna(0)
-    cash    = w[CASH_AND_ST_INVESTMENTS].fillna(0)
+    cash = w[CASH_AND_ST_INVESTMENTS].fillna(0)
     w['net_debt'] = st_debt + lt_debt - cash
-    w['ev']       = w['mktcap'] + w['net_debt']
+    w['ev'] = w['mktcap'] + w['net_debt']
 
     # DA from cashflow is positive; no abs() needed.
     w['ebitda'] = w[OPERATING_INCOME] + w[DA].fillna(0)
-    w['fcf']    = w[CFO] + w[CFI]
+    w['fcf'] = w[CFO] + w[CFI]
 
     out = pd.DataFrame(index=w.index)
-    out['mktcap']    = w['mktcap']
-    out['pe']        = _safe_div(w['mktcap'], w[NET_INCOME])
-    out['pb']        = _safe_div(w['mktcap'], w[TOTAL_EQUITY])
-    out['ps']        = _safe_div(w['mktcap'], w[REVENUE])
+    out['mktcap'] = w['mktcap']
+    out['pe'] = _safe_div(w['mktcap'], w[NET_INCOME])
+    out['pb'] = _safe_div(w['mktcap'], w[TOTAL_EQUITY])
+    out['ps'] = _safe_div(w['mktcap'], w[REVENUE])
     out['ev_ebitda'] = _safe_div(w['ev'], w['ebitda'])
-    out['ev_ebit']   = _safe_div(w['ev'], w[OPERATING_INCOME])
-    out['ev_sales']  = _safe_div(w['ev'], w[REVENUE])
+    out['ev_ebit'] = _safe_div(w['ev'], w[OPERATING_INCOME])
+    out['ev_sales'] = _safe_div(w['ev'], w[REVENUE])
     out['fcf_yield'] = _safe_div(w['fcf'], w['mktcap'])
-    out['rand']      = np.random.rand(out.shape[0])
+    out['rand'] = np.random.rand(out.shape[0])
 
     out.index.name = TICKER
     return out
