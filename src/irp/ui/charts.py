@@ -62,4 +62,5 @@ def base_chart_layout(**extra: Any) -> go.Layout:
 
 def scatter_chart_layout(**extra: Any) -> go.Layout:
     """Like `base_chart_layout` but with `hovermode='closest'` for scatter-style plots."""
-    return base_chart_layout(hovermode='closest', **extra)
+    extra.setdefault('hovermode', 'closest')
+    return base_chart_layout(**extra)
