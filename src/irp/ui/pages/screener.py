@@ -281,15 +281,48 @@ layout = html.Div(
                                     html.Label('Color', className='control-label'),
                                     dcc.Dropdown(
                                         id='screener-color-by',
-                                        options=[
-                                            {'label': 'Sector', 'value': 'sector'},
-                                            {'label': 'Market', 'value': 'market'},
-                                            {'label': 'None', 'value': 'none'},
-                                        ],
+                                        options=(
+                                            [
+                                                {'label': 'Sector', 'value': 'sector'},
+                                                {'label': 'Market', 'value': 'market'},
+                                                {'label': 'None', 'value': 'none'},
+                                            ]
+                                            + [{'label': f.label, 'value': f.name} for f in all_factors()]
+                                        ),
                                         value='sector',
                                         clearable=False,
                                         className='filter-dropdown',
-                                        style={'minWidth': '110px'},
+                                        style={'minWidth': '140px'},
+                                    ),
+                                ]),
+                                html.Div([
+                                    html.Label('X scale', className='control-label'),
+                                    dcc.RadioItems(
+                                        id='screener-x-scale',
+                                        options=[{'label': ' Lin', 'value': 'linear'}, {'label': ' Log', 'value': 'log'}],
+                                        value='linear',
+                                        inline=True,
+                                        labelClassName='check-item',
+                                    ),
+                                ]),
+                                html.Div([
+                                    html.Label('Y scale', className='control-label'),
+                                    dcc.RadioItems(
+                                        id='screener-y-scale',
+                                        options=[{'label': ' Lin', 'value': 'linear'}, {'label': ' Log', 'value': 'log'}],
+                                        value='linear',
+                                        inline=True,
+                                        labelClassName='check-item',
+                                    ),
+                                ]),
+                                html.Div([
+                                    html.Label('Color scale', className='control-label'),
+                                    dcc.RadioItems(
+                                        id='screener-color-scale',
+                                        options=[{'label': ' Lin', 'value': 'linear'}, {'label': ' Log', 'value': 'log'}],
+                                        value='log',
+                                        inline=True,
+                                        labelClassName='check-item',
                                     ),
                                 ]),
                             ],
@@ -965,8 +998,10 @@ def capture_selection(selected: dict | None, clear_n: int) -> list:
     for pt in selected['points']:
         cd = pt.get('customdata')
         if cd and len(cd) >= 1:
-            tickers.append(cd[0])
-    return list(dict.fromkeys(tickers))  # deduplicate, preserve order
+            first = cd[0]
+            ticker = first[0] if isinstance(first, (list, tuple)) else first
+            tickers.append(ticker)
+    return list(dict.fromkeys(tickers))
 
 
 @callback(
@@ -998,12 +1033,18 @@ def show_selection_bar(selection: list | None) -> tuple[dict, str]:
     Input('screener-x-factor', 'value'),
     Input('screener-y-factor', 'value'),
     Input('screener-color-by', 'value'),
+    Input('screener-x-scale', 'value'),
+    Input('screener-y-scale', 'value'),
+    Input('screener-color-scale', 'value'),
 )
 def render_scatter(
     result: dict | None,
     x_factor: str | None,
     y_factor: str | None,
     color_by: str | None,
+    x_scale: str,
+    y_scale: str,
+    color_scale: str,
 ) -> go.Figure:
     if not result or not result.get('records'):
         return _empty_figure('Run screener to see data.')
@@ -1024,65 +1065,111 @@ def render_scatter(
     x_label = FACTOR_LABELS.get(x_factor, x_factor)
     y_label = FACTOR_LABELS.get(y_factor, y_factor)
 
-    color_col = None
+    cd = (
+        df[['Ticker', 'Company Name']].fillna('').values.tolist()
+        if 'Company Name' in df.columns
+        else df[['Ticker']].values.tolist()
+    )
+
+    # Categorical color (sector / market) → one trace per group
+    cat_col = None
     if color_by == 'sector' and 'Sector' in df.columns:
-        color_col = 'Sector'
+        cat_col = 'Sector'
     elif color_by == 'market' and 'Market' in df.columns:
-        color_col = 'Market'
+        cat_col = 'Market'
+
+    # Continuous color (any registered factor)
+    factor_color = color_by if (color_by and color_by in FACTOR_LABELS and color_by in df.columns) else None
 
     traces = []
-    if color_col:
-        groups = sorted(df[color_col].fillna('Unknown').unique())
+    if cat_col:
+        groups = sorted(df[cat_col].fillna('Unknown').unique())
         for i, grp in enumerate(groups):
-            mask = df[color_col].fillna('Unknown') == grp
+            mask = df[cat_col].fillna('Unknown') == grp
             sub = df[mask]
             if sub.empty:
                 continue
-            hover_parts = [
-                f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>',
-                f'{x_label}: %{{x:.3f}}<br>',
-                f'{y_label}: %{{y:.3f}}<extra></extra>',
-            ]
-            traces.append(
-                go.Scatter(
-                    x=sub[x_factor].tolist(),
-                    y=sub[y_factor].tolist(),
-                    mode='markers',
-                    name=grp,
-                    customdata=sub[['Ticker', 'Company Name']]
-                    .fillna('')
-                    .values.tolist()
-                    if 'Company Name' in sub.columns
-                    else sub[['Ticker']].values.tolist(),
-                    hovertemplate=''.join(hover_parts),
-                    hoverlabel=dict(**HOVER_LABEL),
-                    marker=dict(
-                        size=6,
-                        color=_SECTOR_PALETTE[i % len(_SECTOR_PALETTE)],
-                        opacity=0.75,
-                    ),
-                )
+            sub_cd = (
+                sub[['Ticker', 'Company Name']].fillna('').values.tolist()
+                if 'Company Name' in sub.columns
+                else sub[['Ticker']].values.tolist()
             )
-    else:
-        cd = (
-            df[['Ticker', 'Company Name']].fillna('').values.tolist()
-            if 'Company Name' in df.columns
-            else df[['Ticker']].values.tolist()
-        )
-        traces.append(
-            go.Scatter(
-                x=df[x_factor].tolist(),
-                y=df[y_factor].tolist(),
+            traces.append(go.Scatter(
+                x=sub[x_factor].tolist(),
+                y=sub[y_factor].tolist(),
                 mode='markers',
-                name='',
-                customdata=cd,
-                hovertemplate=f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
-                f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}'
-                '<extra></extra>',
+                name=grp,
+                customdata=sub_cd,
+                hovertemplate=(
+                    f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
+                    f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<extra></extra>'
+                ),
                 hoverlabel=dict(**HOVER_LABEL),
-                marker=dict(size=6, color=ACCENT, opacity=0.7),
+                marker=dict(size=6, color=_SECTOR_PALETTE[i % len(_SECTOR_PALETTE)], opacity=0.75),
+            ))
+    elif factor_color:
+        color_label = FACTOR_LABELS.get(factor_color, factor_color)
+        color_vals = pd.to_numeric(df[factor_color], errors='coerce')
+        is_pct = factor_color in _PCT_FACTORS
+        fmt = '.1%' if is_pct else '.2f'
+        if color_scale == 'log':
+            plot_color = color_vals.apply(
+                lambda v: np.sign(v) * np.log10(abs(v)) if pd.notna(v) and v != 0 else (0.0 if pd.notna(v) else np.nan)
             )
-        )
+            color_label_full = f'{color_label} (log)'
+        else:
+            plot_color = color_vals
+            color_label_full = color_label
+        valid_plot = plot_color.dropna()
+        cmin = float(valid_plot.quantile(0.02)) if len(valid_plot) >= 10 else float(valid_plot.min())
+        cmax = float(valid_plot.quantile(0.98)) if len(valid_plot) >= 10 else float(valid_plot.max())
+        if cmin == cmax:
+            cmin -= 0.5
+            cmax += 0.5
+        traces.append(go.Scatter(
+            x=df[x_factor].tolist(),
+            y=df[y_factor].tolist(),
+            mode='markers',
+            name='',
+            showlegend=False,
+            customdata=list(zip(cd, color_vals.tolist())),
+            hovertemplate=(
+                f'<b>%{{customdata[0][0]}}</b> %{{customdata[0][1]}}<br>'
+                f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<br>'
+                f'{color_label}: %{{customdata[1]:{fmt}}}<extra></extra>'
+            ),
+            hoverlabel=dict(**HOVER_LABEL),
+            marker=dict(
+                size=6,
+                color=plot_color.tolist(),
+                colorscale='RdYlGn',
+                cmin=cmin,
+                cmax=cmax,
+                showscale=True,
+                colorbar=dict(
+                    title=dict(text=color_label_full, font=dict(color=MUTED, size=11)),
+                    thickness=12,
+                    len=0.8,
+                    tickfont=dict(color=MUTED, size=10),
+                    outlinewidth=0,
+                ),
+                opacity=0.8,
+            ),
+        ))
+    else:
+        traces.append(go.Scatter(
+            x=df[x_factor].tolist(),
+            y=df[y_factor].tolist(),
+            mode='markers',
+            name='',
+            customdata=cd,
+            hovertemplate=(
+                f'<b>%{{customdata[0]}}</b> %{{customdata[1]}}<br>'
+                f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<extra></extra>'
+            ),
+            hoverlabel=dict(**HOVER_LABEL),
+            marker=dict(size=6, color=ACCENT, opacity=0.7),
+        ))
 
     n = len(df)
     fig = go.Figure(
@@ -1096,6 +1183,8 @@ def render_scatter(
             ),
             xaxis_title=x_label,
             yaxis_title=y_label,
+            xaxis_type=x_scale,
+            yaxis_type=y_scale,
         ),
     )
     return fig

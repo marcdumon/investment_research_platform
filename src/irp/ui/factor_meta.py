@@ -7,10 +7,25 @@ import irp.factors.valuation      # noqa: F401 — populate registry
 import irp.factors.profitability  # noqa: F401
 import irp.factors.momentum       # noqa: F401
 import irp.factors.leverage       # noqa: F401
-from irp.factors.registry import all_factors
+import irp.factors.growth         # noqa: F401
+import irp.factors.piotroski      # noqa: F401
+from irp.factors.registry import FactorDef, all_factors
+
+
+def _label_with_unit(f: FactorDef) -> str:
+    if f.pct:
+        return f'{f.label} (%)'
+    if f.name == 'piotroski_fscore':
+        return f'{f.label} (0–9)'
+    if f.name == 'rand':
+        return f.label
+    if f.group in ('size', 'fundamentals'):
+        return f.label  # already contains ($B)
+    return f'{f.label} (x)'
+
 
 _all = all_factors()
 
-FACTOR_LABELS: dict[str, str]  = {f.name: f.label for f in _all}
+FACTOR_LABELS: dict[str, str]  = {f.name: _label_with_unit(f) for f in _all}
 PCT_FACTORS: frozenset[str]    = frozenset(f.name for f in _all if f.pct)
-FACTOR_OPTIONS: list[dict]     = [{'label': f.label, 'value': f.name} for f in _all]
+FACTOR_OPTIONS: list[dict]     = [{'label': _label_with_unit(f), 'value': f.name} for f in _all]
