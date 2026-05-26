@@ -437,17 +437,36 @@ layout = html.Div(
                             id='screener-detail-title',
                             style={'color': 'var(--text)', 'fontSize': '14px', 'margin': '0'},
                         ),
-                        html.Button(
-                            '✕ Close',
-                            id='screener-detail-close-btn',
-                            n_clicks=0,
-                            style={
-                                'background': 'none',
-                                'border': 'none',
-                                'color': MUTED,
-                                'cursor': 'pointer',
-                                'fontSize': '12px',
-                            },
+                        html.Div(
+                            style={'display': 'flex', 'gap': '8px', 'alignItems': 'center'},
+                            children=[
+                                html.Button(
+                                    '− Remove from list',
+                                    id='screener-detail-remove-btn',
+                                    n_clicks=0,
+                                    style={
+                                        'fontSize': '11px',
+                                        'padding': '3px 10px',
+                                        'background': '#e05252',
+                                        'border': '1px solid #e05252',
+                                        'color': '#fff',
+                                        'cursor': 'pointer',
+                                        'borderRadius': '4px',
+                                    },
+                                ),
+                                html.Button(
+                                    '✕ Close',
+                                    id='screener-detail-close-btn',
+                                    n_clicks=0,
+                                    style={
+                                        'background': 'none',
+                                        'border': 'none',
+                                        'color': MUTED,
+                                        'cursor': 'pointer',
+                                        'fontSize': '12px',
+                                    },
+                                ),
+                            ],
                         ),
                     ],
                 ),
@@ -822,12 +841,14 @@ def render_step_stack(base: dict | None, steps: list | None) -> Any:
     Input('screener-add-filter-btn', 'n_clicks'),
     Input('screener-keep-btn', 'n_clicks'),
     Input('screener-remove-btn', 'n_clicks'),
+    Input('screener-detail-remove-btn', 'n_clicks'),
     Input({'type': 'delete-step-btn', 'index': ALL}, 'n_clicks'),
     Input({'type': 'wl-load-btn', 'index': ALL}, 'n_clicks'),
     State('screener-add-factor', 'value'),
     State('screener-add-min', 'value'),
     State('screener-add-max', 'value'),
     State('screener-selection-store', 'data'),
+    State('screener-detail-ticker', 'data'),
     State('screener-steps-store', 'data'),
     prevent_initial_call=True,
 )
@@ -835,12 +856,14 @@ def mutate_steps(
     add_n: int,
     keep_n: int,
     remove_n: int,
+    detail_remove_n: int,
     delete_clicks: list,
     load_clicks: list,
     add_factor: str | None,
     add_min: float | None,
     add_max: float | None,
     selection: list | None,
+    detail_ticker: str | None,
     steps: list | None,
 ) -> list:
     steps = list(steps or [])
@@ -877,6 +900,16 @@ def mutate_steps(
             'type': kind,
             'tickers': tickers,
             'label': f'chart-{kind} {n:,} stocks',
+        })
+        return steps
+
+    if triggered == 'screener-detail-remove-btn':
+        if not detail_ticker:
+            raise PreventUpdate
+        steps.append({
+            'type': 'remove',
+            'tickers': [detail_ticker],
+            'label': detail_ticker,
         })
         return steps
 
@@ -1299,6 +1332,7 @@ def run_correlation(n_clicks: int, result: dict | None, window: int) -> tuple[go
     Output('screener-detail-ticker', 'data'),
     Input('screener-results-table', 'active_cell'),
     Input('screener-detail-close-btn', 'n_clicks'),
+    Input('screener-detail-remove-btn', 'n_clicks'),
     State('screener-results-table', 'data'),
     State('screener-detail-ticker', 'data'),
     prevent_initial_call=True,
@@ -1306,10 +1340,12 @@ def run_correlation(n_clicks: int, result: dict | None, window: int) -> tuple[go
 def set_detail_ticker(
     active_cell: dict | None,
     close_n: int,
+    remove_n: int,
     table_data: list | None,
     current_ticker: str | None,
 ) -> str | None:
-    if ctx.triggered_id == 'screener-detail-close-btn':
+    tid = ctx.triggered_id
+    if tid in ('screener-detail-close-btn', 'screener-detail-remove-btn'):
         return None
     if not active_cell or not table_data:
         raise PreventUpdate
@@ -1652,7 +1688,7 @@ def render_detail_factors(ticker: str | None, variant: str) -> Any:
                 tickfont=dict(color=MUTED, size=10),
                 ticksuffix='%',
             )
-        fig.update_layout(**_chart_layout(**layout_kwargs))
+        fig.update_layout(_chart_layout(**layout_kwargs))
         charts_out.append(dcc.Graph(figure=fig, config={'displayModeBar': False}))
 
     if not charts_out:
