@@ -1,22 +1,20 @@
-"""Central factor registry: single source of truth for factor metadata.
+"""Central factor registry: single source of truth for factor metadata."""
 
-Each compute module calls register() at import time. Consumers (factor_meta,
-normalize) import compute modules to trigger registration, then call all_factors()
-to derive their own derived data structures.
-"""
 from dataclasses import dataclass
+
+_REGISTRY: dict[str, 'FactorDef'] = {}
+_populated = False
 
 
 @dataclass(frozen=True)
 class FactorDef:
-    name: str    # DataFrame column key, e.g. 'pe'
-    label: str   # UI display label, e.g. 'P/E'
-    pct: bool = False           # format as percentage in UI
-    group: str = ''             # 'valuation' | 'profitability' | 'momentum' | 'leverage'
-    positive_only: bool = False # hint: ratio is economically meaningful only when positive (stored as-is; callers may filter)
-
-
-_REGISTRY: dict[str, FactorDef] = {}
+    name: str
+    label: str
+    pct: bool = False
+    group: str = ''
+    positive_only: bool = (
+        False  # hint: meaningful only when positive; callers may filter
+    )
 
 
 def register(
@@ -27,12 +25,31 @@ def register(
     group: str = '',
     positive_only: bool = False,
 ) -> None:
-    """Register a factor definition. Called at module level in each compute file."""
     _REGISTRY[name] = FactorDef(
-        name=name, label=label, pct=pct, group=group, positive_only=positive_only,
+        name=name,
+        label=label,
+        pct=pct,
+        group=group,
+        positive_only=positive_only,
     )
+
+
+def _populate() -> None:
+    """Import all factor modules to trigger their register() calls."""
+    global _populated
+    if _populated:
+        return
+    import irp.factors.growth  # noqa: F401
+    import irp.factors.leverage  # noqa: F401
+    import irp.factors.momentum  # noqa: F401
+    import irp.factors.piotroski  # noqa: F401
+    import irp.factors.profitability  # noqa: F401
+    import irp.factors.valuation  # noqa: F401
+
+    _populated = True
 
 
 def all_factors() -> list[FactorDef]:
     """All registered factors in registration order."""
+    _populate()
     return list(_REGISTRY.values())

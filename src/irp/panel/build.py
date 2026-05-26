@@ -14,6 +14,7 @@ Run once after each ETL update. Output:
 eff_date = COALESCE(Publish Date, Report Date + 60 days) — the PIT cutoff.
 Fundamentals tables keep only the columns the factor engine uses (skinnier than raw).
 """
+
 import logging
 from pathlib import Path
 from typing import Literal
@@ -28,28 +29,46 @@ logger = logging.getLogger(__name__)
 
 # Columns kept in fundamentals panels (skinnier than raw — only what factors need)
 _INCOME_COLS = [
-    'Ticker', 'Report Date', 'Publish Date', 'Period',
-    'Revenue', 'Gross Profit', 'Operating Income (Loss)', 'Net Income',
-    'Interest Expense, Net', 'Depreciation & Amortization',
+    'Ticker',
+    'Report Date',
+    'Publish Date',
+    'Period',
+    'Revenue',
+    'Gross Profit',
+    'Operating Income (Loss)',
+    'Net Income',
+    'Interest Expense, Net',
+    'Depreciation & Amortization',
     'Shares (Diluted)',
 ]
 _BALANCE_COLS = [
-    'Ticker', 'Report Date', 'Publish Date', 'Period',
-    'Total Assets', 'Total Equity', 'Total Liabilities',
-    'Total Current Assets', 'Total Current Liabilities',
+    'Ticker',
+    'Report Date',
+    'Publish Date',
+    'Period',
+    'Total Assets',
+    'Total Equity',
+    'Total Liabilities',
+    'Total Current Assets',
+    'Total Current Liabilities',
     'Cash, Cash Equivalents & Short Term Investments',
-    'Short Term Debt', 'Long Term Debt',
+    'Short Term Debt',
+    'Long Term Debt',
     'Shares (Diluted)',
 ]
 _CASHFLOW_COLS = [
-    'Ticker', 'Report Date', 'Publish Date', 'Period',
-    'Net Cash from Operating Activities', 'Net Cash from Investing Activities',
+    'Ticker',
+    'Report Date',
+    'Publish Date',
+    'Period',
+    'Net Cash from Operating Activities',
+    'Net Cash from Investing Activities',
     'Depreciation & Amortization',
 ]
 
 _FUND_COLS = {
-    'income':   _INCOME_COLS,
-    'balance':  _BALANCE_COLS,
+    'income': _INCOME_COLS,
+    'balance': _BALANCE_COLS,
     'cashflow': _CASHFLOW_COLS,
 }
 
@@ -78,7 +97,7 @@ def build_prices_panel() -> Path:
         FROM yahoo_prices
         ORDER BY Ticker, Date
     """).arrow()
-    df = pl.from_arrow(arrow)
+    df: pl.DataFrame = pl.from_arrow(arrow)  # type: ignore[assignment]
     df.write_parquet(out, compression='zstd', statistics=True)
     logger.info(f'prices panel: {len(df):,} rows, {df["Ticker"].n_unique():,} tickers')
     return out
@@ -103,10 +122,12 @@ def build_fundamentals_panel(
         WHERE Period = '{variant}'
         ORDER BY Ticker, eff_date
     """).arrow()
-    df = pl.from_arrow(arrow)
+    df: pl.DataFrame = pl.from_arrow(arrow)  # type: ignore[assignment]
     out = _panel_dir() / f'{stmt}_{variant}.parquet'
     df.write_parquet(out, compression='zstd', statistics=True)
-    logger.info(f'{stmt}_{variant} panel: {len(df):,} rows, {df["Ticker"].n_unique():,} tickers → {out}')
+    logger.info(
+        f'{stmt}_{variant} panel: {len(df):,} rows, {df["Ticker"].n_unique():,} tickers → {out}'
+    )
     return out
 
 
@@ -121,5 +142,7 @@ def build_panels() -> list[Path]:
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s'
+    )
     build_panels()

@@ -4,9 +4,9 @@ Every page used to define its own `_empty_figure` and `_chart_layout`;
 this module consolidates the layout dicts + a couple of high-level
 chart factories so behaviour stays consistent across pages.
 """
+
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -22,7 +22,10 @@ def empty_figure(message: str = 'No data') -> go.Figure:
         annotations=[
             dict(
                 text=message,
-                x=0.5, y=0.5, xref='paper', yref='paper',
+                x=0.5,
+                y=0.5,
+                xref='paper',
+                yref='paper',
                 showarrow=False,
                 font=dict(color=MUTED, size=13),
             )
@@ -83,13 +86,19 @@ def corr_heatmap_figure(
         for i in range(n):
             for j in range(n):
                 if i != j and abs(z[i, j]) >= 0.7:
-                    annotations.append(dict(
-                        x=j, y=i,
-                        text=f'{z[i, j]:.2f}',
-                        showarrow=False,
-                        font=dict(size=9, color='white' if abs(z[i, j]) > 0.85 else MUTED),
-                        xref='x', yref='y',
-                    ))
+                    annotations.append(
+                        dict(
+                            x=j,
+                            y=i,
+                            text=f'{z[i, j]:.2f}',
+                            showarrow=False,
+                            font=dict(
+                                size=9, color='white' if abs(z[i, j]) > 0.85 else MUTED
+                            ),
+                            xref='x',
+                            yref='y',
+                        )
+                    )
 
     heatmap = go.Heatmap(
         z=z,
@@ -99,7 +108,9 @@ def corr_heatmap_figure(
         zmin=-1,
         zmax=1,
         zmid=0,
-        colorbar=dict(thickness=14, len=0.9, tickfont=dict(color=MUTED, size=10), outlinewidth=0),
+        colorbar=dict(
+            thickness=14, len=0.9, tickfont=dict(color=MUTED, size=10), outlinewidth=0
+        ),
         hovertemplate='%{y} / %{x}: %{z:.3f}<extra></extra>',
         xgap=1,
         ygap=1,

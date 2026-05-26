@@ -76,7 +76,9 @@ def _load_last_prices_dates() -> dict[str, date]:
         # yahoo_prices table absent on first-time load
         return {}
     except duckdb.IOException as exc:
-        logger.warning(f'_load_last_prices_dates: DB unreachable, treating as empty: {exc}')
+        logger.warning(
+            f'_load_last_prices_dates: DB unreachable, treating as empty: {exc}'
+        )
         return {}
 
 
@@ -134,6 +136,7 @@ def _fetch_actions_per_ticker(
     has_header: bool,
 ) -> bool:
     from irp.core.cancel import is_cancelled
+
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo actions: {len(todo)} tickers')
     for ticker in todo:
@@ -169,6 +172,7 @@ def _fetch_prices_per_ticker(
     last_dates: dict[str, date] | None = None,
 ) -> bool:
     from irp.core.cancel import is_cancelled
+
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
     for ticker in todo:
@@ -221,23 +225,32 @@ def _fetch_prices_batched(
     the group as the shared start date (incremental update). Batches containing
     any ticker absent from `last_dates` fall back to `period='max'`."""
     from irp.core.cancel import is_cancelled
+
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     bsize = yahoo_cfg.prices_batch_size
     n_batches = (len(todo) + bsize - 1) // bsize
-    logger.info(f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers, {n_batches} batches')
+    logger.info(
+        f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers, {n_batches} batches'
+    )
     for i in range(0, len(todo), bsize):
         if is_cancelled():
             break
         batch = todo[i : i + bsize]
         batch_yahoo = [ticker_map[t] for t in batch]
-        batch_starts = [last_dates.get(t) for t in batch] if last_dates is not None else []
+        batch_starts = (
+            [last_dates.get(t) for t in batch] if last_dates is not None else []
+        )
         non_null_starts: list[date] = [s for s in batch_starts if s is not None]
         if non_null_starts and len(non_null_starts) == len(batch_starts):
-            dl_kwargs: dict = {'start': (min(non_null_starts) + timedelta(days=1)).isoformat()}
+            dl_kwargs: dict = {
+                'start': (min(non_null_starts) + timedelta(days=1)).isoformat()
+            }
         else:
             dl_kwargs = {'period': 'max'}
         batch_num = i // bsize + 1
-        logger.info(f'Batch {batch_num}/{n_batches}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}')
+        logger.info(
+            f'Batch {batch_num}/{n_batches}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}'
+        )
         try:
             raw = yf.download(
                 batch_yahoo,
@@ -284,7 +297,7 @@ def _extract_batch_slice(
         return None
     if df.empty or 'Close' not in df.columns:
         return None
-    df = df.dropna(subset=['Close']) # type: ignore (pandas typing issue)
+    df = df.dropna(subset=['Close'])  # type: ignore (pandas typing issue)
     return df if not df.empty else None
 
 
@@ -467,6 +480,7 @@ class YahooSource:
         prices_mode: Literal['batch', 'ticker'] = 'batch',
     ) -> None:
         from irp.core.markers import MarkerSet
+
         self._fetch_actions = fetch_actions
         self._fetch_prices = fetch_prices
         self._prices_mode = prices_mode
@@ -497,7 +511,7 @@ class YahooSource:
         _fetch_ticker_data(
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
-            prices_mode=self._prices_mode, # type: ignore (pylance widens instance attribute type)
+            prices_mode=self._prices_mode,  # type: ignore (pylance widens instance attribute type)
         )
         self.markers.touch('fetched')
         logger.debug('Yahoo ticker data fetched.')
@@ -513,13 +527,14 @@ class YahooSource:
         last_dates_raw = _load_last_prices_dates() if self._fetch_prices else None
         last_dates = (
             {t: d - timedelta(days=_LOOKBACK_DAYS) for t, d in last_dates_raw.items()}
-            if last_dates_raw is not None else None
+            if last_dates_raw is not None
+            else None
         )
         _fetch_ticker_data(
             skip_queried=False,
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
-            prices_mode=self._prices_mode, # type: ignore (pylance widens instance attribute type)
+            prices_mode=self._prices_mode,  # type: ignore (pylance widens instance attribute type)
             last_dates=last_dates,
         )
         self.markers.touch('fetched')

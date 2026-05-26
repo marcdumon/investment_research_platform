@@ -15,7 +15,6 @@ import pyarrow.parquet as pq
 from irp.core.config import config
 from irp.core.duckdb_merge import merge_csv
 from irp.runner import Feed
-from irp.core.freshness import is_fresh
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +135,11 @@ FEED_SPECS: dict[str, FeedSpec] = {
 
 
 def _transform_prices(conn: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
-    source = f"read_parquet('{spec.input_path}')" if spec.input_format == 'parquet' else f"read_csv_auto('{spec.input_path}')"
+    source = (
+        f"read_parquet('{spec.input_path}')"
+        if spec.input_format == 'parquet'
+        else f"read_csv_auto('{spec.input_path}')"
+    )
     fmt = 'FORMAT PARQUET' if spec.output_format == 'parquet' else 'FORMAT CSV, HEADER'
     conn.sql(f"""
         COPY (
@@ -157,15 +160,15 @@ def _transform_prices(conn: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
     logger.debug(f'Wrote {spec.output_path}')
 
 
-
 def _store_prices(con: duckdb.DuckDBPyConnection, spec: FeedSpec) -> None:
     merge_csv(
-        con, 'prices', spec.output_path,
+        con,
+        'prices',
+        spec.output_path,
         key_cols=['Ticker', 'SrcId', 'Date', 'Src'],
         value_cols=['O', 'H', 'L', 'C', 'V'],
     )
     logger.debug(f'Stored prices from {spec.output_path}')
-
 
 
 class StooqSource:
@@ -173,6 +176,7 @@ class StooqSource:
 
     def __init__(self) -> None:
         from irp.core.markers import MarkerSet
+
         self.markers = MarkerSet(raw_dir)
 
     def fetch_bulk(self) -> None:
@@ -236,4 +240,3 @@ class StooqSource:
         if data_dir.exists():
             shutil.rmtree(data_dir)
             logger.debug(f'Deleted {data_dir}')
-

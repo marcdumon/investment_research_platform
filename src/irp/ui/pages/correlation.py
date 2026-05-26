@@ -2,6 +2,7 @@
 
 import datetime
 import logging
+from typing import Literal
 
 import dash
 import pandas as pd
@@ -44,18 +45,23 @@ def _factor_label_map() -> dict[str, str]:
 
 def _factor_corr(
     date: datetime.date,
-    variant: str,
+    variant: Literal['A', 'Q'],
     market: str | None,
     sector: str | None,
     watchlist: str | None,
 ) -> tuple[pd.DataFrame, list[str], str | None]:
-    """Compute factor × factor Pearson correlation from a cross-section snapshot.
+    """Compute factor x factor Pearson correlation from a cross-section snapshot.
 
     Returns (corr_df, labels, error_msg). corr_df has raw factor names as index/cols;
     labels has the display labels in matching order.
     """
     xs = factors_service.load_cross_section(
-        date, variant, market, sector, watchlist, enrich_company_columns=False,
+        date,
+        variant,
+        market,
+        sector,
+        watchlist,
+        enrich_company_columns=False,
     )
     if xs.empty:
         return pd.DataFrame(), [], 'No data for selected filters'
@@ -68,7 +74,11 @@ def _factor_corr(
     corr = xs[factor_cols].corr(method='pearson')
     labels = [label_map[c] for c in factor_cols]
     n = len(xs)
-    return corr, labels, None if n >= 10 else f'Only {n} tickers — correlation may be unreliable'
+    return (
+        corr,
+        labels,
+        None if n >= 10 else f'Only {n} tickers — correlation may be unreliable',
+    )
 
 
 def _return_corr(
@@ -79,18 +89,29 @@ def _return_corr(
     watchlist: str | None,
 ) -> tuple[pd.DataFrame, list[str], str | None]:
     """Compute ticker × ticker return correlation from the price panel."""
-    tickers = universe_service.filter_tickers(market=market, sector=sector, watchlist=watchlist)
+    tickers = universe_service.filter_tickers(
+        market=market, sector=sector, watchlist=watchlist
+    )
     if tickers is None:
         from irp.panel.load import load_prices_wide
+
         n_all = len(load_prices_wide('Close').tickers)
-        return pd.DataFrame(), [], (
-            f'Returns correlation requires a market/sector/watchlist filter '
-            f'(full universe has {n_all:,} tickers)'
+        return (
+            pd.DataFrame(),
+            [],
+            (
+                f'Returns correlation requires a market/sector/watchlist filter '
+                f'(full universe has {n_all:,} tickers)'
+            ),
         )
     if len(tickers) > _MAX_RETURN_TICKERS:
-        return pd.DataFrame(), [], (
-            f'Too many tickers ({len(tickers)}) — add market/sector/watchlist filter '
-            f'to narrow to ≤{_MAX_RETURN_TICKERS}'
+        return (
+            pd.DataFrame(),
+            [],
+            (
+                f'Too many tickers ({len(tickers)}) — add market/sector/watchlist filter '
+                f'to narrow to ≤{_MAX_RETURN_TICKERS}'
+            ),
         )
     return factors_service.compute_return_corr(tickers, window_days, as_of_date)
 
@@ -250,7 +271,7 @@ def _run(
     n_clicks: int,
     mode: str,
     date_str: str | None,
-    variant: str,
+    variant: Literal['A', 'Q'],
     market: str,
     sector: str | None,
     watchlist: str | None,
@@ -264,11 +285,18 @@ def _run(
 
     try:
         if mode == 'factor':
-            corr, labels, err = _factor_corr(date, variant, market_filter, sector, watchlist)
+            corr, labels, err = _factor_corr(
+                date, variant, market_filter, sector, watchlist
+            )
             title = f'Factor correlation — {date_str[:10]} ({variant})'
         else:
-            corr, labels, err = _return_corr(date, window or 252, market_filter, sector, watchlist)
-            w_label = next((o['label'] for o in _WINDOW_OPTIONS if o['value'] == window), str(window))
+            corr, labels, err = _return_corr(
+                date, window or 252, market_filter, sector, watchlist
+            )
+            w_label = next(
+                (o['label'] for o in _WINDOW_OPTIONS if o['value'] == window),
+                str(window),
+            )
             title = f'Return correlation — {w_label} ending {date_str[:10]}'
 
         if corr.empty:
