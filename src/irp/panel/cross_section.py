@@ -273,12 +273,6 @@ def _safe_log_ratio(num: pd.Series, denom: pd.Series) -> pd.Series:
     return result
 
 
-def _positive_only(series: pd.Series) -> pd.Series:
-    out = series.astype('float64').copy()
-    out[~(out > 0)] = np.nan
-    return out
-
-
 def _div(num, denom):
     out = num / denom.replace(0, np.nan)
     return out.where(np.isfinite(out), np.nan)
@@ -296,12 +290,12 @@ def _apply_formulas(df: pd.DataFrame) -> pd.DataFrame:
     out['op_cashflow']  = df['cfo']    / 1e9
 
     # Valuation
-    out['pe']        = mktcap / _positive_only(df['ni'])
-    out['pb']        = mktcap / _positive_only(df['equity'])
+    out['pe']        = _div(mktcap, df['ni'])
+    out['pb']        = _div(mktcap, df['equity'])
     out['ps']        = _div(mktcap, df['rev'])
     ev = mktcap + df['st_debt'] + df['lt_debt'] - df['cash']
-    out['ev_ebitda'] = ev / _positive_only(df['ebit'] + df['da'])
-    out['ev_ebit']   = ev / _positive_only(df['ebit'])
+    out['ev_ebitda'] = _div(ev, df['ebit'] + df['da'])
+    out['ev_ebit']   = _div(ev, df['ebit'])
     out['ev_sales']  = _div(ev, df['rev'])
     out['fcf_yield'] = _div(df['cfo'] + df['cfi'], mktcap)
     out['rand']      = np.random.default_rng().random(len(df))
