@@ -4,7 +4,6 @@ import datetime
 import logging
 
 import dash
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
@@ -12,11 +11,10 @@ from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
 from irp.factors.registry import all_factors
-from irp.panel.load import load_prices_wide
-from irp.ui.charts import base_chart_layout as _chart_layout
+from irp.ui.charts import corr_heatmap_figure as _heatmap_figure
 from irp.ui.charts import empty_figure as _empty_figure
 from irp.ui.services import factors_service, universe_service, watchlist_service
-from irp.ui.theme import ACCENT, MUTED
+from irp.ui.theme import ACCENT
 
 dash.register_page(__name__, path='/correlation', name='Correlation')
 
@@ -80,130 +78,21 @@ def _return_corr(
     sector: str | None,
     watchlist: str | None,
 ) -> tuple[pd.DataFrame, list[str], str | None]:
-    """Compute ticker × ticker return correlation from the price panel.
-
-    Returns (corr_df, ticker_labels, error_msg).
-    """
+    """Compute ticker × ticker return correlation from the price panel."""
     tickers = universe_service.filter_tickers(market=market, sector=sector, watchlist=watchlist)
-    if tickers is not None and len(tickers) > _MAX_RETURN_TICKERS:
+    if tickers is None:
+        from irp.panel.load import load_prices_wide
+        n_all = len(load_prices_wide('Close').tickers)
+        return pd.DataFrame(), [], (
+            f'Returns correlation requires a market/sector/watchlist filter '
+            f'(full universe has {n_all:,} tickers)'
+        )
+    if len(tickers) > _MAX_RETURN_TICKERS:
         return pd.DataFrame(), [], (
             f'Too many tickers ({len(tickers)}) — add market/sector/watchlist filter '
             f'to narrow to ≤{_MAX_RETURN_TICKERS}'
         )
-
-    panel = load_prices_wide('Close')
-    dates_np = panel.dates
-    # Convert as_of_date to numpy datetime64 for comparison
-    as_of_np = np.datetime64(as_of_date, 'D')
-    end_idx = int(np.searchsorted(dates_np, as_of_np, side='right'))
-    start_idx = max(0, end_idx - window_days)
-    if end_idx - start_idx < 20:
-        return pd.DataFrame(), [], 'Not enough price history in selected window'
-
-    # Build price matrix slice
-    all_tickers = list(panel.tickers)
-    if tickers is not None:
-        use_tickers = [t for t in tickers if t in panel.ticker_to_idx]
-    else:
-        return pd.DataFrame(), [], (
-            f'Returns correlation requires a market/sector/watchlist filter '
-            f'(full universe has {len(all_tickers):,} tickers)'
-        )
-
-    if not use_tickers:
-        return pd.DataFrame(), [], 'No tickers found in price panel for selected filters'
-
-    idxs = [panel.ticker_to_idx[t] for t in use_tickers]
-    price_slice = panel.values[start_idx:end_idx, :][:, idxs]  # (days, n_tickers)
-
-    prices_df = pd.DataFrame(price_slice, columns=use_tickers)
-    # Drop tickers with >20% missing values
-    min_obs = int(price_slice.shape[0] * 0.8)
-    prices_df = prices_df.dropna(axis=1, thresh=min_obs)
-    if prices_df.shape[1] < 2:
-        return pd.DataFrame(), [], 'Too few tickers with sufficient price history'
-
-    log_ret = np.log(prices_df / prices_df.shift(1)).dropna(how='all')
-    corr = log_ret.corr(method='pearson')
-
-    n_days = end_idx - start_idx
-    warning = None
-    if len(prices_df.columns) > 80:
-        warning = f'{len(prices_df.columns)} tickers — heatmap may be dense'
-    return corr, list(corr.columns), warning
-
-
-def _heatmap_figure(
-    corr: pd.DataFrame,
-    labels: list[str],
-    title: str,
-    warning: str | None = None,
-) -> go.Figure:
-    z = corr.values
-    n = len(labels)
-
-    # Annotations for high |corr| cells (off-diagonal only)
-    annotations = []
-    if n <= 40:  # only annotate when matrix is small enough to read
-        for i in range(n):
-            for j in range(n):
-                if i != j and abs(z[i, j]) >= 0.7:
-                    annotations.append(dict(
-                        x=j, y=i,
-                        text=f'{z[i, j]:.2f}',
-                        showarrow=False,
-                        font=dict(size=9, color='white' if abs(z[i, j]) > 0.85 else MUTED),
-                        xref='x', yref='y',
-                    ))
-
-    heatmap = go.Heatmap(
-        z=z,
-        x=labels,
-        y=labels,
-        colorscale='RdBu_r',
-        zmin=-1,
-        zmax=1,
-        zmid=0,
-        colorbar=dict(
-            thickness=14,
-            len=0.9,
-            tickfont=dict(color=MUTED, size=10),
-            outlinewidth=0,
-        ),
-        hovertemplate='%{y} / %{x}: %{z:.3f}<extra></extra>',
-        xgap=1,
-        ygap=1,
-    )
-
-    subtitle = f' — {warning}' if warning else ''
-    layout = _chart_layout(
-        title=dict(
-            text=f'{title}{subtitle}',
-            font=dict(size=13, color=MUTED),
-            x=0,
-            pad=dict(l=0),
-        ),
-        hovermode='closest',
-        xaxis=dict(
-            tickfont=dict(size=10, color=MUTED),
-            side='bottom',
-            tickangle=-40,
-            showgrid=False,
-            zeroline=False,
-        ),
-        yaxis=dict(
-            tickfont=dict(size=10, color=MUTED),
-            autorange='reversed',
-            showgrid=False,
-            zeroline=False,
-            scaleanchor='x',
-        ),
-        margin=dict(l=0, r=0, t=40, b=0),
-        annotations=annotations,
-        height=max(400, n * 26 + 80),
-    )
-
-    return go.Figure(data=[heatmap], layout=layout)
+    return factors_service.compute_return_corr(tickers, window_days, as_of_date)
 
 
 # ── Layout ────────────────────────────────────────────────────────────

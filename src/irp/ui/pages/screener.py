@@ -1,4 +1,6 @@
-"""Stock screener page: progressive filter stack + scatter/histogram/price charts."""
+"""Stock screener page: progressive filter stack + scatter/histogram/price/correlation charts
+and inline per-ticker detail panel (prices, fundamentals, factor history).
+"""
 
 import datetime
 import logging
@@ -6,20 +8,26 @@ from math import isfinite
 from typing import Any
 
 import dash
+import numpy as np
 import pandas as pd
 import plotly.colors as pc
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
+from plotly.subplots import make_subplots
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
+from irp.factors.registry import all_factors
+from irp.ui.charts import base_chart_layout as _chart_layout
+from irp.ui.charts import corr_heatmap_figure as _corr_heatmap
 from irp.ui.charts import empty_figure as _empty_figure
 from irp.ui.charts import scatter_chart_layout as _base_layout
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
-from irp.ui.services import factors_service, universe_service, watchlist_service
+from irp.ui.services import factors_service, price_service, universe_service, watchlist_service
 from irp.ui.tables import column_format as _col_fmt
-from irp.ui.theme import ACCENT, GRID, HOVER_LABEL, MUTED, TABLE_STYLE
+from irp.ui.ticker_fmt import date_range_for_preset, fmt_statement
+from irp.ui.theme import ACCENT, DIV_COLOR, GRID, HOVER_LABEL, MUTED, SPLIT_COLOR, TABLE_STYLE
 
 dash.register_page(__name__, path='/screener', name='Screener')
 
@@ -33,7 +41,14 @@ _VARIANT_OPTIONS = [
     {'label': ' Quarterly', 'value': 'Q'},
 ]
 _MAX_PRICE_TICKERS = 50
+_MAX_CORR_TICKERS = 150
 _SECTOR_PALETTE = pc.qualitative.Set3
+_RANGE_PRESETS = ['1M', '6M', '1Y', '3Y', '5Y', 'Max']
+_CORR_WINDOW_OPTIONS = [
+    {'label': '1 year', 'value': 252},
+    {'label': '2 years', 'value': 504},
+    {'label': '5 years', 'value': 1260},
+]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -83,6 +98,7 @@ layout = html.Div(
         dcc.Store(id='screener-selection-store', data=[]),
         dcc.Store(id='screener-wl-trigger', data=0),
         dcc.Store(id='screener-wl-pending-delete', data=None),
+        dcc.Store(id='screener-detail-ticker', data=None),
         html.H2('Stock Screener', className='page-title'),
         html.P(
             'Build a filter stack to narrow the universe. '
@@ -355,10 +371,237 @@ layout = html.Div(
                         ),
                     ],
                 ),
+                # Correlation tab
+                dcc.Tab(
+                    label='Correlation',
+                    value='correlation',
+                    className='ticker-tab',
+                    selected_className='ticker-tab--active',
+                    children=[
+                        html.Div(
+                            className='control-row',
+                            style={'padding': '8px 0', 'gap': '12px'},
+                            children=[
+                                html.Label('Return window', className='control-label'),
+                                dcc.Dropdown(
+                                    id='screener-corr-window',
+                                    options=_CORR_WINDOW_OPTIONS,
+                                    value=252,
+                                    clearable=False,
+                                    className='filter-dropdown',
+                                    style={'minWidth': '110px'},
+                                ),
+                                html.Button(
+                                    'Run Correlation',
+                                    id='screener-corr-run-btn',
+                                    className='run-btn',
+                                    n_clicks=0,
+                                    style={'fontSize': '11px', 'padding': '4px 10px'},
+                                ),
+                                html.Span(
+                                    id='screener-corr-info',
+                                    style={'color': MUTED, 'fontSize': '12px'},
+                                ),
+                            ],
+                        ),
+                        dcc.Loading(
+                            dcc.Graph(
+                                id='screener-corr-chart',
+                                figure=_empty_figure('Select filters and click Run Correlation'),
+                                config={'displayModeBar': False},
+                                style={'minHeight': '400px'},
+                            )
+                        ),
+                    ],
+                ),
             ],
         ),
         # ── Results table ─────────────────────────────────────────────
         dcc.Loading(html.Div(id='screener-table-container')),
+        # ── Ticker detail panel ───────────────────────────────────────
+        html.Div(
+            id='screener-detail-panel',
+            style={'display': 'none'},
+            children=[
+                html.Div(
+                    style={
+                        'display': 'flex',
+                        'justifyContent': 'space-between',
+                        'alignItems': 'center',
+                        'padding': '12px 0 8px 0',
+                        'borderTop': '1px solid var(--border)',
+                        'marginTop': '16px',
+                    },
+                    children=[
+                        html.H3(
+                            id='screener-detail-title',
+                            style={'color': 'var(--text)', 'fontSize': '14px', 'margin': '0'},
+                        ),
+                        html.Button(
+                            '✕ Close',
+                            id='screener-detail-close-btn',
+                            n_clicks=0,
+                            style={
+                                'background': 'none',
+                                'border': 'none',
+                                'color': MUTED,
+                                'cursor': 'pointer',
+                                'fontSize': '12px',
+                            },
+                        ),
+                    ],
+                ),
+                dcc.Tabs(
+                    id='screener-detail-tabs',
+                    value='detail-prices',
+                    className='ticker-tabs',
+                    children=[
+                        # ── Prices + Volume tab ────────────────────────
+                        dcc.Tab(
+                            label='Prices',
+                            value='detail-prices',
+                            className='ticker-tab',
+                            selected_className='ticker-tab--active',
+                            children=[
+                                html.Div(
+                                    className='control-row',
+                                    style={'padding': '8px 0', 'gap': '8px', 'flexWrap': 'wrap'},
+                                    children=[
+                                        *[
+                                            html.Button(
+                                                p,
+                                                id={'type': 'detail-preset-btn', 'index': p},
+                                                n_clicks=0,
+                                                style={
+                                                    'fontSize': '11px',
+                                                    'padding': '2px 8px',
+                                                    'background': 'var(--surface-2)',
+                                                    'border': '1px solid var(--border)',
+                                                    'color': MUTED,
+                                                    'cursor': 'pointer',
+                                                    'borderRadius': '3px',
+                                                },
+                                            )
+                                            for p in _RANGE_PRESETS
+                                        ],
+                                        html.Span(
+                                            'MA:',
+                                            style={'color': MUTED, 'fontSize': '11px', 'marginLeft': '8px'},
+                                        ),
+                                        dcc.Checklist(
+                                            id='screener-detail-ma',
+                                            options=[
+                                                {'label': ' MA50', 'value': 'MA50'},
+                                                {'label': ' MA200', 'value': 'MA200'},
+                                            ],
+                                            value=[],
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
+                                    ],
+                                ),
+                                dcc.Store(id='screener-detail-preset', data='1Y'),
+                                dcc.Loading(
+                                    dcc.Graph(
+                                        id='screener-detail-price-chart',
+                                        config={'displayModeBar': False},
+                                        style={'height': '420px'},
+                                    )
+                                ),
+                            ],
+                        ),
+                        # ── Fundamentals tab ──────────────────────────
+                        dcc.Tab(
+                            label='Fundamentals',
+                            value='detail-fundamentals',
+                            className='ticker-tab',
+                            selected_className='ticker-tab--active',
+                            children=[
+                                html.Div(
+                                    className='control-row',
+                                    style={'padding': '8px 0', 'gap': '12px'},
+                                    children=[
+                                        dcc.RadioItems(
+                                            id='screener-detail-stmt-variant',
+                                            options=[
+                                                {'label': ' Annual', 'value': 'A'},
+                                                {'label': ' Quarterly', 'value': 'Q'},
+                                            ],
+                                            value='A',
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
+                                    ],
+                                ),
+                                dcc.Tabs(
+                                    id='screener-detail-stmt-tabs',
+                                    value='detail-income',
+                                    className='ticker-tabs',
+                                    children=[
+                                        dcc.Tab(
+                                            label='Income',
+                                            value='detail-income',
+                                            className='ticker-tab',
+                                            selected_className='ticker-tab--active',
+                                            children=[
+                                                dcc.Loading(html.Div(id='screener-detail-income')),
+                                                html.Small(id='screener-detail-income-note', style={'color': MUTED}),
+                                            ],
+                                        ),
+                                        dcc.Tab(
+                                            label='Balance Sheet',
+                                            value='detail-balance',
+                                            className='ticker-tab',
+                                            selected_className='ticker-tab--active',
+                                            children=[
+                                                dcc.Loading(html.Div(id='screener-detail-balance')),
+                                                html.Small(id='screener-detail-balance-note', style={'color': MUTED}),
+                                            ],
+                                        ),
+                                        dcc.Tab(
+                                            label='Cash Flow',
+                                            value='detail-cashflow',
+                                            className='ticker-tab',
+                                            selected_className='ticker-tab--active',
+                                            children=[
+                                                dcc.Loading(html.Div(id='screener-detail-cashflow')),
+                                                html.Small(id='screener-detail-cashflow-note', style={'color': MUTED}),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        # ── Factor History tab ────────────────────────
+                        dcc.Tab(
+                            label='Factor History',
+                            value='detail-factors',
+                            className='ticker-tab',
+                            selected_className='ticker-tab--active',
+                            children=[
+                                html.Div(
+                                    className='control-row',
+                                    style={'padding': '8px 0', 'gap': '12px'},
+                                    children=[
+                                        dcc.RadioItems(
+                                            id='screener-detail-factor-variant',
+                                            options=[
+                                                {'label': ' Annual', 'value': 'A'},
+                                                {'label': ' Quarterly', 'value': 'Q'},
+                                            ],
+                                            value='A',
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
+                                    ],
+                                ),
+                                dcc.Loading(html.Div(id='screener-detail-factors')),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        ),
         # ── Save panel ────────────────────────────────────────────────
         html.Div(
             style={
@@ -993,6 +1236,7 @@ def render_results_table(result: dict | None) -> Any:
     ]
 
     return _dt.DataTable(
+        id='screener-results-table',
         data=rows,
         columns=columns,
         sort_action='native',
@@ -1003,6 +1247,417 @@ def render_results_table(result: dict | None) -> Any:
             + left_cols,
         },
     )
+
+
+# ── Correlation tab callback ──────────────────────────────────────────
+
+
+@callback(
+    Output('screener-corr-chart', 'figure'),
+    Output('screener-corr-info', 'children'),
+    Input('screener-corr-run-btn', 'n_clicks'),
+    State('screener-result-store', 'data'),
+    State('screener-corr-window', 'value'),
+    running=[(Output('screener-corr-run-btn', 'disabled'), True, False)],
+    prevent_initial_call=True,
+)
+def run_correlation(n_clicks: int, result: dict | None, window: int) -> tuple[go.Figure, str]:
+    if not n_clicks or not result or not result.get('records'):
+        raise PreventUpdate
+
+    tickers = [r['Ticker'] for r in result['records'] if r.get('Ticker')]
+    n = len(tickers)
+
+    if n > _MAX_CORR_TICKERS:
+        return (
+            _empty_figure(f'{n:,} tickers — narrow to ≤{_MAX_CORR_TICKERS} before running correlation'),
+            f'{n:,} tickers (too many)',
+        )
+
+    window = window or 252
+    try:
+        corr, labels, warning = factors_service.compute_return_corr(
+            tickers, window, datetime.date.today()
+        )
+    except Exception as exc:
+        logger.exception('screener correlation error')
+        return _empty_figure(f'Error: {exc}'), ''
+
+    if corr.empty:
+        return _empty_figure(warning or 'No data'), warning or ''
+
+    w_label = next((o['label'] for o in _CORR_WINDOW_OPTIONS if o['value'] == window), str(window))
+    title = f'Return correlation — {w_label}  ({len(labels)} tickers)'
+    info = warning or f'{len(labels)} tickers'
+    return _corr_heatmap(corr, labels, title, warning=warning), info
+
+
+# ── Detail panel — open/close ─────────────────────────────────────────
+
+
+@callback(
+    Output('screener-detail-ticker', 'data'),
+    Input('screener-results-table', 'active_cell'),
+    Input('screener-detail-close-btn', 'n_clicks'),
+    State('screener-results-table', 'data'),
+    State('screener-detail-ticker', 'data'),
+    prevent_initial_call=True,
+)
+def set_detail_ticker(
+    active_cell: dict | None,
+    close_n: int,
+    table_data: list | None,
+    current_ticker: str | None,
+) -> str | None:
+    if ctx.triggered_id == 'screener-detail-close-btn':
+        return None
+    if not active_cell or not table_data:
+        raise PreventUpdate
+    row = active_cell.get('row', 0)
+    if row >= len(table_data):
+        raise PreventUpdate
+    ticker = table_data[row].get('Ticker')
+    if ticker == current_ticker:
+        return None  # toggle off
+    return ticker
+
+
+@callback(
+    Output('screener-detail-panel', 'style'),
+    Output('screener-detail-title', 'children'),
+    Input('screener-detail-ticker', 'data'),
+)
+def show_detail_panel(ticker: str | None) -> tuple[dict, str]:
+    if not ticker:
+        return {'display': 'none'}, ''
+    return {'display': 'block'}, f'Detail: {ticker}'
+
+
+# ── Detail panel — preset store ───────────────────────────────────────
+
+
+@callback(
+    Output('screener-detail-preset', 'data'),
+    Input({'type': 'detail-preset-btn', 'index': ALL}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def update_preset(clicks: list) -> str:
+    if not any(clicks):
+        raise PreventUpdate
+    triggered = ctx.triggered_id
+    if isinstance(triggered, dict):
+        return triggered['index']
+    return '1Y'
+
+
+# ── Detail panel — price + volume chart ───────────────────────────────
+
+
+@callback(
+    Output('screener-detail-price-chart', 'figure'),
+    Input('screener-detail-ticker', 'data'),
+    Input('screener-detail-preset', 'data'),
+    Input('screener-detail-ma', 'value'),
+)
+def render_detail_prices(
+    ticker: str | None,
+    preset: str | None,
+    ma_overlays: list | None,
+) -> go.Figure:
+    if not ticker:
+        return _empty_figure('Click a row to load price chart')
+
+    preset = preset or '1Y'
+    start, end = date_range_for_preset(preset)
+
+    try:
+        df = price_service.get_prices(ticker, source='yahoo', start=start, end=end)
+    except Exception:
+        df = pd.DataFrame()
+
+    if df.empty or 'Close' not in df.columns:
+        try:
+            df = price_service.get_prices(ticker, source='stooq', start=start, end=end)
+            close_col = 'C' if 'C' in df.columns else 'Close'
+        except Exception:
+            return _empty_figure(f'No price data for {ticker}')
+    else:
+        close_col = 'Close'
+
+    if df.empty or close_col not in df.columns:
+        return _empty_figure(f'No price data for {ticker}')
+
+    df = df.sort_values('Date').copy()
+    df['_date_str'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+    vol_col = 'Volume' if 'Volume' in df.columns else None
+
+    fig = make_subplots(
+        rows=2 if vol_col else 1,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.75, 0.25] if vol_col else [1.0],
+        vertical_spacing=0.03,
+    )
+
+    # Price line
+    fig.add_trace(
+        go.Scatter(
+            x=df['_date_str'],
+            y=df[close_col],
+            name='Close',
+            line=dict(color=ACCENT, width=1.5),
+            hovertemplate='<b>%{x}</b><br>Close: %{y:,.2f}<extra></extra>',
+            hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
+        ),
+        row=1, col=1,
+    )
+
+    # MA overlays
+    for ma_label in (ma_overlays or []):
+        n = 50 if ma_label == 'MA50' else 200
+        ma = df[close_col].rolling(n).mean()
+        fig.add_trace(
+            go.Scatter(
+                x=df['_date_str'],
+                y=ma,
+                name=ma_label,
+                line=dict(width=1, dash='dash'),
+                hovertemplate=f'{ma_label}: %{{y:,.2f}}<extra></extra>',
+            ),
+            row=1, col=1,
+        )
+
+    # Dividend markers
+    try:
+        divs = price_service.get_dividends(ticker)
+        if not divs.empty:
+            div_dates = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
+            mask = (div_dates >= df['_date_str'].min()) & (div_dates <= df['_date_str'].max())
+            divs_in_range = divs[mask.values]
+            div_dates_in_range = div_dates[mask.values]
+            if not divs_in_range.empty:
+                price_at_div = df.set_index('_date_str')[close_col].reindex(div_dates_in_range).values
+                fig.add_trace(
+                    go.Scatter(
+                        x=div_dates_in_range.values,
+                        y=price_at_div,
+                        mode='markers',
+                        marker=dict(symbol='triangle-up', size=9, color=DIV_COLOR),
+                        name='Dividend',
+                        hovertemplate='<b>%{x}</b><br>Div: $%{customdata:.4f}<extra></extra>',
+                        customdata=divs_in_range['Amount'].values,
+                        hoverlabel=dict(**HOVER_LABEL, bordercolor=DIV_COLOR),
+                    ),
+                    row=1, col=1,
+                )
+    except Exception:
+        pass
+
+    # Split lines
+    shapes = []
+    try:
+        spls = price_service.get_splits(ticker)
+        if not spls.empty:
+            for _, row in spls.iterrows():
+                d = pd.to_datetime(row['Date']).strftime('%Y-%m-%d')
+                if df['_date_str'].min() <= d <= df['_date_str'].max():
+                    shapes.append(dict(
+                        type='line', x0=d, x1=d, y0=0, y1=1,
+                        yref='paper', xref='x',
+                        line=dict(color=SPLIT_COLOR, width=1, dash='dash'),
+                    ))
+    except Exception:
+        pass
+
+    # Volume bars
+    if vol_col:
+        fig.add_trace(
+            go.Bar(
+                x=df['_date_str'],
+                y=df[vol_col],
+                name='Volume',
+                marker_color=MUTED,
+                opacity=0.5,
+                hovertemplate='Vol: %{y:,}<extra></extra>',
+                showlegend=False,
+            ),
+            row=2, col=1,
+        )
+
+    common_axis = dict(gridcolor=GRID, linecolor=GRID, tickfont=dict(color=MUTED, size=10), zeroline=False)
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(128,128,128,0.05)',
+        font=dict(color=MUTED, size=11),
+        hovermode='x unified',
+        margin=dict(l=0, r=0, t=8, b=0),
+        legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=11), orientation='h', y=1.02, x=1, xanchor='right'),
+        shapes=shapes,
+        xaxis=dict(**common_axis, showticklabels=False if vol_col else True),
+        yaxis=dict(**common_axis, title='Price'),
+    )
+    if vol_col:
+        fig.update_layout(
+            xaxis2=dict(**common_axis),
+            yaxis2=dict(**common_axis, title='Volume', tickformat='.2s'),
+        )
+    return fig
+
+
+# ── Detail panel — statements ─────────────────────────────────────────
+
+
+def _render_detail_statement(
+    ticker: str | None, kind: str, variant: str
+) -> tuple[Any, str]:
+    if not ticker:
+        return html.P('Click a row to load', className='no-data'), ''
+    try:
+        df = universe_service.get_statement(ticker, kind)  # type: ignore[arg-type]
+    except Exception as exc:
+        return html.P(f'Failed: {exc}', className='no-data'), ''
+    if df.empty:
+        return html.P('No data available.', className='no-data'), ''
+
+    def _period_key(p: str) -> tuple:
+        p = str(p)
+        try:
+            year = int(p[:4])
+            q = int(p[5]) if len(p) > 5 and p[4] == 'Q' else 0
+        except (ValueError, IndexError):
+            return (0, 0)
+        return (year, q)
+
+    if variant == 'A':
+        cols = sorted([c for c in df.columns if str(c).endswith('FY')], key=_period_key, reverse=True)
+    else:
+        cols = sorted([c for c in df.columns if not str(c).endswith('FY')], key=_period_key, reverse=True)
+
+    df = df[cols] if cols else df
+    if df.empty or df.columns.empty:
+        return html.P('No data available.', className='no-data'), ''
+
+    fmt_df, note = fmt_statement(df)
+    table_df = fmt_df.reset_index(names='Metric')
+    period_cols = list(fmt_df.columns)
+    columns = [{'name': 'Metric', 'id': 'Metric'}] + [{'name': str(c), 'id': str(c)} for c in period_cols]
+    table_df.columns = [c['id'] for c in columns]
+
+    style = dict(TABLE_STYLE)
+    style['style_cell'] = {
+        **TABLE_STYLE.get('style_cell', {}),
+        'fontSize': '11px',
+        'padding': '4px 8px',
+    }
+    return _dt.DataTable(data=table_df.to_dict('records'), columns=columns, **style), note
+
+
+@callback(
+    Output('screener-detail-income', 'children'),
+    Output('screener-detail-income-note', 'children'),
+    Input('screener-detail-ticker', 'data'),
+    Input('screener-detail-stmt-variant', 'value'),
+)
+def render_detail_income(ticker: str | None, variant: str) -> tuple[Any, str]:
+    return _render_detail_statement(ticker, 'income', variant)
+
+
+@callback(
+    Output('screener-detail-balance', 'children'),
+    Output('screener-detail-balance-note', 'children'),
+    Input('screener-detail-ticker', 'data'),
+    Input('screener-detail-stmt-variant', 'value'),
+)
+def render_detail_balance(ticker: str | None, variant: str) -> tuple[Any, str]:
+    return _render_detail_statement(ticker, 'balance', variant)
+
+
+@callback(
+    Output('screener-detail-cashflow', 'children'),
+    Output('screener-detail-cashflow-note', 'children'),
+    Input('screener-detail-ticker', 'data'),
+    Input('screener-detail-stmt-variant', 'value'),
+)
+def render_detail_cashflow(ticker: str | None, variant: str) -> tuple[Any, str]:
+    return _render_detail_statement(ticker, 'cashflow', variant)
+
+
+# ── Detail panel — factor history ────────────────────────────────────
+
+
+@callback(
+    Output('screener-detail-factors', 'children'),
+    Input('screener-detail-ticker', 'data'),
+    Input('screener-detail-factor-variant', 'value'),
+)
+def render_detail_factors(ticker: str | None, variant: str) -> Any:
+    if not ticker:
+        return html.P('Click a row to load factor history', className='no-data')
+
+    try:
+        hist = factors_service.load_ticker_history(ticker, variant)
+    except Exception as exc:
+        return html.P(f'Failed: {exc}', className='no-data')
+
+    if hist.empty:
+        return html.P('No factor history available.', className='no-data')
+
+    factor_defs = all_factors()
+    groups: dict[str, list] = {}
+    for f in factor_defs:
+        if f.name in hist.columns and f.group:
+            groups.setdefault(f.group, []).append(f)
+
+    date_col = 'Report Date' if 'Report Date' in hist.columns else hist.columns[0]
+    charts_out = []
+    for group_name, group_factors in groups.items():
+        valid = [f for f in group_factors if hist[f.name].notna().any()]
+        if not valid:
+            continue
+
+        pct_factors = [f for f in valid if f.pct]
+        ratio_factors = [f for f in valid if not f.pct]
+
+        fig = go.Figure()
+        for f in ratio_factors:
+            fig.add_trace(go.Scatter(
+                x=hist[date_col],
+                y=hist[f.name],
+                mode='lines+markers',
+                name=f.label,
+                marker=dict(size=5),
+                hovertemplate=f'{f.label}: %{{y:.2f}}<br>%{{x}}<extra></extra>',
+            ))
+        for f in pct_factors:
+            fig.add_trace(go.Scatter(
+                x=hist[date_col],
+                y=hist[f.name] * 100,
+                mode='lines+markers',
+                name=f'{f.label} (%)',
+                marker=dict(size=5),
+                yaxis='y2',
+                hovertemplate=f'{f.label}: %{{y:.1f}}%<br>%{{x}}<extra></extra>',
+            ))
+
+        layout_kwargs: dict[str, Any] = dict(
+            title=dict(text=group_name.title(), font=dict(size=12, color=MUTED), x=0),
+            height=220,
+            margin=dict(l=0, r=0, t=28, b=0),
+            legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color=MUTED, size=10), orientation='h'),
+        )
+        if pct_factors and ratio_factors:
+            layout_kwargs['yaxis2'] = dict(
+                overlaying='y', side='right',
+                gridcolor='rgba(0,0,0,0)',
+                tickfont=dict(color=MUTED, size=10),
+                ticksuffix='%',
+            )
+        fig.update_layout(**_chart_layout(**layout_kwargs))
+        charts_out.append(dcc.Graph(figure=fig, config={'displayModeBar': False}))
+
+    if not charts_out:
+        return html.P('No factor data available.', className='no-data')
+    return html.Div(charts_out)
 
 
 def _build_summary(steps: list) -> str:

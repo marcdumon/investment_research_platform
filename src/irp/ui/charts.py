@@ -6,6 +6,8 @@ chart factories so behaviour stays consistent across pages.
 """
 from typing import Any
 
+import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 
 from irp.ui.theme import GRID, MUTED
@@ -64,3 +66,70 @@ def scatter_chart_layout(**extra: Any) -> go.Layout:
     """Like `base_chart_layout` but with `hovermode='closest'` for scatter-style plots."""
     extra.setdefault('hovermode', 'closest')
     return base_chart_layout(**extra)
+
+
+def corr_heatmap_figure(
+    corr: pd.DataFrame,
+    labels: list[str],
+    title: str,
+    warning: str | None = None,
+) -> go.Figure:
+    """Correlation heatmap used by /correlation page and screener correlation tab."""
+    z = corr.values
+    n = len(labels)
+
+    annotations = []
+    if n <= 40:
+        for i in range(n):
+            for j in range(n):
+                if i != j and abs(z[i, j]) >= 0.7:
+                    annotations.append(dict(
+                        x=j, y=i,
+                        text=f'{z[i, j]:.2f}',
+                        showarrow=False,
+                        font=dict(size=9, color='white' if abs(z[i, j]) > 0.85 else MUTED),
+                        xref='x', yref='y',
+                    ))
+
+    heatmap = go.Heatmap(
+        z=z,
+        x=labels,
+        y=labels,
+        colorscale='RdBu_r',
+        zmin=-1,
+        zmax=1,
+        zmid=0,
+        colorbar=dict(thickness=14, len=0.9, tickfont=dict(color=MUTED, size=10), outlinewidth=0),
+        hovertemplate='%{y} / %{x}: %{z:.3f}<extra></extra>',
+        xgap=1,
+        ygap=1,
+    )
+
+    subtitle = f' — {warning}' if warning else ''
+    layout = base_chart_layout(
+        title=dict(
+            text=f'{title}{subtitle}',
+            font=dict(size=13, color=MUTED),
+            x=0,
+            pad=dict(l=0),
+        ),
+        hovermode='closest',
+        xaxis=dict(
+            tickfont=dict(size=10, color=MUTED),
+            side='bottom',
+            tickangle=-40,
+            showgrid=False,
+            zeroline=False,
+        ),
+        yaxis=dict(
+            tickfont=dict(size=10, color=MUTED),
+            autorange='reversed',
+            showgrid=False,
+            zeroline=False,
+            scaleanchor='x',
+        ),
+        margin=dict(l=0, r=0, t=40, b=0),
+        annotations=annotations,
+        height=max(400, n * 26 + 80),
+    )
+    return go.Figure(data=[heatmap], layout=layout)
