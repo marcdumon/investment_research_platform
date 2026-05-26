@@ -395,6 +395,10 @@ layout = html.Div(
                     ],
                 ),
                 html.Div(
+                    id='screener-wl-description',
+                    style={'color': MUTED, 'fontSize': '11px', 'marginTop': '4px', 'fontStyle': 'italic'},
+                ),
+                html.Div(
                     id='screener-watchlists-container', style={'marginTop': '16px'}
                 ),
             ],
@@ -955,9 +959,9 @@ def render_results_table(result: dict | None) -> Any:
     if df.empty:
         return html.P('No stocks match current filters.', className='no-data')
 
-    display_cols = ['Ticker', 'Company Name', 'Sector', 'mktcap'] + _ALL_FACTOR_COLS
+    display_cols = ['Ticker', 'Company Name', 'Sector'] + _ALL_FACTOR_COLS
     display_cols = [c for c in display_cols if c in df.columns]
-    numeric_cols = {c for c in display_cols if c in FACTOR_LABELS or c == 'mktcap'}
+    numeric_cols = {c for c in display_cols if c in FACTOR_LABELS}
 
     rows = []
     for r in df[display_cols].to_dict('records'):
@@ -967,11 +971,7 @@ def render_results_table(result: dict | None) -> Any:
                 v = r.get(c)
                 try:
                     fv = float(v)  # type: ignore[arg-type]
-                    row[c] = (
-                        round(fv / 1e9, 2)
-                        if c == 'mktcap'
-                        else (round(fv, 4) if isfinite(fv) else None)
-                    )
+                    row[c] = round(fv, 4) if isfinite(fv) else None
                 except (TypeError, ValueError):
                     row[c] = None
             else:
@@ -980,7 +980,7 @@ def render_results_table(result: dict | None) -> Any:
 
     columns: list[Any] = [
         {
-            'name': 'Mkt Cap ($B)' if c == 'mktcap' else FACTOR_LABELS.get(c, c),
+            'name': FACTOR_LABELS.get(c, c),
             'id': c,
             **_col_fmt(c),
         }
@@ -1005,6 +1005,22 @@ def render_results_table(result: dict | None) -> Any:
     )
 
 
+def _build_summary(steps: list) -> str:
+    parts = []
+    for s in steps:
+        label = s.get('label', '')
+        if not label:
+            continue
+        t = s.get('type', '')
+        if t == 'range':
+            parts.append(label)
+        elif t == 'keep':
+            parts.append(f'+{label}')
+        elif t == 'remove':
+            parts.append(f'-{label}')
+    return '; '.join(parts)
+
+
 @callback(
     Output('screener-watchlist-name', 'value'),
     Input('screener-steps-store', 'data'),
@@ -1012,6 +1028,14 @@ def render_results_table(result: dict | None) -> Any:
 )
 def auto_name(steps: list | None, date_str: str | None) -> str:
     return _auto_name(steps or [], date_str)
+
+
+@callback(
+    Output('screener-wl-description', 'children'),
+    Input('screener-steps-store', 'data'),
+)
+def auto_description(steps: list | None) -> str:
+    return _build_summary(steps or [])
 
 
 @callback(
@@ -1037,9 +1061,7 @@ def save_watchlist_action(
     if not name:
         return 'Enter a name first.', trigger or 0
     tickers = [r['Ticker'] for r in result['records'] if r.get('Ticker')]
-    summary = ', '.join(
-        s.get('label', '') for s in (steps or []) if s.get('type') == 'range'
-    )
+    summary = _build_summary(steps or [])
     try:
         watchlist_service.save_watchlist(name, tickers, summary)
     except Exception as exc:
