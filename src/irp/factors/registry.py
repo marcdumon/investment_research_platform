@@ -13,7 +13,7 @@ class FactorDef:
     label: str   # UI display label, e.g. 'P/E'
     pct: bool = False           # format as percentage in UI
     group: str = ''             # 'valuation' | 'profitability' | 'momentum' | 'leverage'
-    positive_only: bool = False # mask non-positive values as NaN (e.g. P/E for loss-makers)
+    positive_only: bool = False # hint: ratio is economically meaningful only when positive (stored as-is; callers may filter)
 
 
 _REGISTRY: dict[str, FactorDef] = {}
