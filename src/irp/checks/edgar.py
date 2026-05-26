@@ -28,8 +28,10 @@ def _fetch_chunk(filename: str) -> dict:
     """
     cache = CACHE_DIR / filename
     if cache.exists() and (time.time() - cache.stat().st_mtime) < CACHE_TTL_SECONDS:
+        logger.debug(f'EDGAR chunk cache hit: {filename}')
         return json.loads(cache.read_text())
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info(f'GET https://data.sec.gov/submissions/{filename}')
     r = requests.get(
         f'https://data.sec.gov/submissions/{filename}',
         headers=HEADERS,
@@ -56,9 +58,11 @@ def _fetch_submissions(cik: int) -> dict:
     cik_str = f'{cik:010d}'
     cache = CACHE_DIR / f'{cik_str}.json'
     if cache.exists() and (time.time() - cache.stat().st_mtime) < CACHE_TTL_SECONDS:
+        logger.debug(f'EDGAR submissions cache hit: CIK {cik}')
         data = json.loads(cache.read_text())
     else:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        logger.info(f'GET https://data.sec.gov/submissions/CIK{cik_str}.json')
         r = requests.get(
             f'https://data.sec.gov/submissions/CIK{cik_str}.json',
             headers=HEADERS,
@@ -110,7 +114,8 @@ def filing_url(cik: int | None, report_date: str | None, period: str, tol_days: 
     target = _parse(report_date) if report_date else None
     if not cik or target is None:
         return None
-    form = '10-K' if period == 'A' else '10-Q'
+    # Accept historical form variants (10-K405, 10-KSB used pre-2002; 10-QSB for small filers)
+    forms = {'10-K', '10-K405', '10-KSB'} if period == 'A' else {'10-Q', '10-QSB'}
     try:
         data = _fetch_submissions(int(cik))
     except (requests.RequestException, ValueError) as e:
@@ -126,7 +131,7 @@ def filing_url(cik: int | None, report_date: str | None, period: str, tol_days: 
     best = None
     best_delta = tol_days + 1
     for f, acc, doc, rdate in rows:
-        if f != form or not rdate or not doc:
+        if f not in forms or not rdate or not doc:
             continue
         rd = _parse(rdate)
         if rd is None:
