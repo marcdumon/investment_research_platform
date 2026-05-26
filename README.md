@@ -277,6 +277,29 @@ data/
 
 ---
 
+## Panel Layer
+
+`irp.panel` materializes wide-format parquet panels from DuckDB for hot-path factor computation. All factor work runs here — pure polars/numpy, no SQL at query time.
+
+```
+data/panel/
+  prices.parquet           # long-format (Ticker, Date, Close, Volume), loaded as dense float32 matrix
+  income_A.parquet         # PIT-aligned income statement, annual
+  income_Q.parquet
+  balance_A.parquet / balance_Q.parquet
+  cashflow_A.parquet / cashflow_Q.parquet
+```
+
+Rebuild after each ETL refresh via the Ingest page (*rebuild panel*) or:
+
+```bash
+uv run python -m irp.panel.build
+```
+
+The price panel (~1.2 GB, 25K dates × 12K tickers) is loaded once per process and cached in-memory. Factor decay over 10 years runs in ~3s warm vs ~25 minutes with the old SQL engine.
+
+---
+
 ## Factors Analysis
 
 `irp.factors` computes quant factors from stored fundamentals and prices. All results are point-in-time (PIT) safe: only data with `Publish Date <= as_of_date` (falling back to `Report Date + 60 days` when Publish Date is unavailable) and prices with `Date <= as_of_date` are used.
@@ -285,10 +308,14 @@ data/
 
 | Group | Factors |
 |---|---|
-| Valuation | mktcap, pe, pb, ps, ev_ebitda, ev_ebit, ev_sales, fcf_yield |
-| Profitability | gross_margin, op_margin, net_margin, roe, roa, roic, fcf_margin |
-| Momentum | mom_12_1, mom_6_1, vol_21d, ma200_ratio |
-| Leverage | debt_equity, net_debt_ebitda, interest_coverage |
+| Size | `mktcap` ($B) |
+| Fundamentals | `revenue`, `net_income`, `total_assets`, `total_equity`, `op_cashflow` (all $B) |
+| Valuation | `pe`, `pb`, `ps`, `ev_ebitda`, `ev_ebit`, `ev_sales`, `fcf_yield` |
+| Profitability | `gross_margin`, `op_margin`, `net_margin`, `roe`, `roa`, `roic`, `fcf_margin`, `asset_turnover`, `cfo_ni_ratio`, `accruals` |
+| Momentum | `mom_12_1`, `mom_6_1`, `vol_21d`, `ma200_ratio` |
+| Leverage | `debt_equity`, `net_debt_ebitda`, `interest_coverage` |
+| Growth | `rev_growth_1y`, `earn_growth_1y` |
+| Quality | `piotroski_fscore` (0–9, 9 binary signals) |
 
 **Momentum factor definitions:**
 
@@ -300,6 +327,15 @@ data/
 | `ma200_ratio` | P₀ / SMA(Close, 200d) | Price relative to 200-day moving average |
 
 Calendar-day lags approximate trading-day lags. Skipping the last month avoids short-term reversal bias.
+
+### Adding a factor
+
+Four steps — UI and normalization derive from the registry automatically. See `md_scratchpad/quant_research_overview.md` for the full walkthrough and table of available intermediate columns.
+
+1. Formula in `_apply_formulas` in `irp/panel/cross_section.py`
+2. `register('col', 'Label', pct=..., group=...)` in the relevant compute module
+3. Append name to `_FACTOR_COLS_ORDER` in `cross_section.py`
+4. Clear + rebuild the factor cache
 
 ### Usage
 
@@ -445,10 +481,12 @@ Multi-page web UI. All pages linked in the navbar.
 | Route | Description |
 |---|---|
 | `/` | Home |
-| `/ingest` | Data ingestion controls + live log |
+| `/ingest` | Data ingestion — pipeline steps (fetch/transform/store/cleanup) + maintenance tasks (universe, catalog, panel rebuild, factor cache) |
 | `/ticker` | Per-ticker fundamentals, prices, corporate actions |
 | `/factors` | Cross-section screening (filterable by market/sector/date) + single-ticker factor history |
-| `/backtest` | Single-factor and composite backtests — color-coded IC/t-stat chips, IC ±0.05 bands, Q1/Q5 terminal annotations |
+| `/backtest` | Single-factor and composite backtests — color-coded IC/t-stat chips, quintile cumulative returns, factor decay |
+| `/screener` | Progressive filter stack on all factors + raw accounting items; scatter/histogram/price charts; lasso keep/remove; save as watchlist |
+| `/correlation` | Factor-to-factor Pearson correlation heatmap (one cross-section snapshot) or ticker return-correlation heatmap (trailing window) |
 
 ---
 
