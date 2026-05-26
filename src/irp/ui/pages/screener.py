@@ -1161,9 +1161,10 @@ def render_scatter(
 
     traces = []
     if cat_col:
-        groups = sorted(df[cat_col].fillna('Unknown').unique())
+        cat_series = df[cat_col].fillna('').replace('', 'Unknown')
+        groups = sorted(cat_series.unique())
         for i, grp in enumerate(groups):
-            mask = df[cat_col].fillna('Unknown') == grp
+            mask = cat_series == grp
             sub = df[mask]
             if sub.empty:
                 continue

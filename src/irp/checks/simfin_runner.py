@@ -26,10 +26,13 @@ def run(
     tickers: list[str] | None = None,
     variant: Literal['A', 'Q'] = 'A',
     skip_reviewed: bool = True,
+    fetch_edgar: bool = True,
 ) -> pd.DataFrame:
     """Run all registered quality rules. Returns violations enriched with
-    Period_str, CIK, EDGAR. When skip_reviewed=True, filters out items
-    already in the anomaly_reviews.toml."""
+    Period_str, CIK, and optionally EDGAR.
+
+    Set fetch_edgar=False to skip SEC HTTP calls (results will have CIK but
+    no EDGAR column). Fetch URLs lazily per-row when needed."""
     data = {
         'income':   fundamentals(tickers, 'income',   variant),
         'balance':  fundamentals(tickers, 'balance',  variant),
@@ -67,14 +70,17 @@ def run(
 
     cik = _cik_map(df['Ticker'].unique().tolist())
     df['CIK'] = df['Ticker'].map(cik)
-    df['EDGAR'] = [
-        filing_url(
-            int(c) if pd.notna(c) else None,
-            rdate.strftime('%Y-%m-%d') if pd.notna(rdate) else None,
-            str(p),
-        )
-        for c, rdate, p in zip(df['CIK'], df['Report Date'], df['Period'])
-    ]
+    if fetch_edgar:
+        df['EDGAR'] = [
+            filing_url(
+                int(c) if pd.notna(c) else None,
+                rdate.strftime('%Y-%m-%d') if pd.notna(rdate) else None,
+                str(p),
+            )
+            for c, rdate, p in zip(df['CIK'], df['Report Date'], df['Period'])
+        ]
+    else:
+        df['EDGAR'] = None
 
     df = df.sort_values(
         ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period', 'Rule'],
