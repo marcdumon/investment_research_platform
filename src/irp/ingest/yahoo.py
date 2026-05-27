@@ -552,7 +552,8 @@ class YahooSource:
         if self.markers.is_fresh(f'stored_{feed}', f'transformed_{feed}'):
             logger.info(f'store({feed}): already up to date, skipping')
             return
-        with duckdb.connect(config.database.path) as con:
+        from irp.core.db import write_session
+        with write_session() as con:
             _store_dividends(con)
             _store_splits(con)
             _store_prices(con)

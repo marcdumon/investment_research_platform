@@ -79,7 +79,8 @@ def refresh() -> int:
         f'ya_queried={len(ya_queried)}'
     )
 
-    with duckdb.connect(config.database.path) as con:
+    from irp.core.db import write_session
+    with write_session() as con:
         for view, items, col in [
             ('_yp_q', yp_queried, 'yp_q'),
             ('_yp_e', yp_errors,  'yp_e'),

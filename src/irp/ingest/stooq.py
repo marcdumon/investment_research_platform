@@ -220,7 +220,8 @@ class StooqSource:
             logger.info(f'store({feed}): already up to date, skipping')
             return
         spec = FEED_SPECS[feed]
-        with duckdb.connect(config.database.path) as con:
+        from irp.core.db import write_session
+        with write_session() as con:
             _store_prices(con, spec)
         self.markers.touch(f'stored_{feed}')
         logger.debug(f'Stooq {feed} data stored successfully.')
