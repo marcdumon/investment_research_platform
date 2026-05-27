@@ -174,8 +174,6 @@ def start_run(
     irp_logger.addHandler(handler)
 
     def _run() -> None:
-        from irp.core.db import db_close
-        db_close()
         try:
             _run_pipeline(
                 providers or [],

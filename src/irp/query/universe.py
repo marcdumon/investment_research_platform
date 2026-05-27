@@ -141,7 +141,8 @@ def refresh(universe_csv: Path | None = None) -> int:
         )
 
     logger.debug(f'universe.refresh: {len(df):,} rows read, writing to DB')
-    with duckdb.connect(config.database.path) as con:
+    from irp.core.db import write_session
+    with write_session() as con:
         con.register('_universe_new', df)
         con.execute('CREATE OR REPLACE TABLE universe AS SELECT * FROM _universe_new')
         count: int = con.execute('SELECT COUNT(*) FROM main.universe').fetchone()[0]  # type: ignore[index]

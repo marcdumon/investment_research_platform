@@ -1,48 +1,64 @@
-"""Per-thread read-only DuckDB connections for notebooks and data accessors.
+"""Short-lived read-only DuckDB connections for notebooks and data accessors.
 
-Each thread gets its own connection so concurrent Dash callbacks don't
-share state. A global registry lets db_close() drain all connections
-before a write connection is opened (DuckDB requires exclusive access
-for writes).
+Each call to db() opens a fresh read-only connection. In CPython, the
+connection closes immediately when the caller's expression completes
+(reference count drops to zero) releasing the file lock. This avoids the
+long-lived lock that would block write_session() from getting exclusive
+access.
 
-Sources open their own short-lived read-write connections via
-duckdb.connect(config.database.path). Call db_close() before any store
-step in the same process.
+write_session() clears the gate (so db() callers block), then retries
+duckdb.connect until in-flight read-only connections have been released.
 """
+import time
 import threading
+from contextlib import contextmanager
+from typing import Generator
 
 import duckdb
 
 from irp.core.config import config
 
-_local = threading.local()
-_registry_lock = threading.Lock()
-_registry: set[duckdb.DuckDBPyConnection] = set()
+# Cleared while a write is in progress; db() callers block until set.
+_write_gate = threading.Event()
+_write_gate.set()
 
 
 def db() -> duckdb.DuckDBPyConnection:
-    con = getattr(_local, 'con', None)
-    if con is None:
-        con = duckdb.connect(str(config.database.path), read_only=True)
-        _local.con = con
-        with _registry_lock:
-            _registry.add(con)
-    return con
+    """Return a fresh read-only connection. Blocks during active writes."""
+    _write_gate.wait(timeout=60)
+    return duckdb.connect(str(config.database.path), read_only=True)
 
 
+# Kept for backwards compat; no-op now that connections are not cached.
 def db_close() -> None:
-    """Close all read-only connections so a write connection can be opened.
+    pass
 
-    Increments a generation counter so threads that try to use a stale
-    connection will reopen on next db() call.
+
+@contextmanager
+def write_session() -> Generator[duckdb.DuckDBPyConnection, None, None]:
+    """Exclusive write connection.
+
+    Blocks new db() callers, then retries until all in-flight read-only
+    connections have been released (CPython drops them quickly after each
+    db().execute().df() expression completes).
     """
     import logging
     log = logging.getLogger(__name__)
-    with _registry_lock:
-        for con in list(_registry):
+    _write_gate.clear()
+    try:
+        con = None
+        for attempt in range(40):   # up to 10 s (40 × 0.25 s)
             try:
-                con.close()
-            except Exception as exc:
-                log.debug(f'db_close: ignoring error closing stale connection: {exc}')
-        _registry.clear()
-    _local.con = None
+                con = duckdb.connect(str(config.database.path))
+                break
+            except duckdb.IOException:
+                if attempt == 39:
+                    raise
+                log.debug('write_session: waiting for read locks to release (attempt %d)', attempt + 1)
+                time.sleep(0.25)
+        try:
+            yield con
+        finally:
+            con.close()
+    finally:
+        _write_gate.set()
