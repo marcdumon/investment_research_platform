@@ -53,7 +53,7 @@ def add_review(ticker: str, period: str, rule: str, status: str, note: str) -> N
             '# period: calendar year as string, e.g. "2024".\n'
             '# status: ok | data_error | to_check\n'
         )
-    note_escaped = note.replace('\\', '\\\\').replace('"', '\\"')
+    note_escaped = note.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '')
     block = (
         '\n[[reviews]]\n'
         f'ticker      = "{ticker}"\n'

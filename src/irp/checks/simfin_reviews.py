@@ -75,7 +75,7 @@ def _write(ticker: str, period: str, rule: str, status: str, note: str, subject:
             '# status: ok | data_error | to_check\n'
         )
     def esc(s: str) -> str:
-        return s.replace('\\', '\\\\').replace('"', '\\"')
+        return s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '')
     block = (
         '\n[[reviews]]\n'
         f'ticker      = "{ticker}"\n'
