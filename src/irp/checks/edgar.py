@@ -15,6 +15,13 @@ HEADERS = {'User-Agent': 'irp data-quality (admin@local)'}
 EDGAR_DOC_URL = 'https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{primary_doc}'
 CACHE_TTL_SECONDS = 86400 * 7
 
+# CIKs for companies that reorganised under a new SEC entity.
+# Maps current CIK → list of predecessor CIKs to try when the current CIK
+# has no filings old enough to match the target date.
+_LEGACY_CIKS: dict[int, list[int]] = {
+    1652044: [1288776],  # Alphabet Inc. → Google Inc. (pre-2015 filings)
+}
+
 
 def _fetch_chunk(filename: str) -> dict:
     """Fetch one older-filings chunk listed in `filings.files[]`.
@@ -92,32 +99,10 @@ def _parse(d: str) -> date | None:
         return None
 
 
-@lru_cache(maxsize=10000)
-def filing_url(cik: int | None, report_date: str | None, period: str, tol_days: int = 10) -> str | None:
-    """Build the direct EDGAR document URL for one (cik, report_date, period).
-
-    Picks the form by period ('A' -> 10-K, 'Q' -> 10-Q) and scans the
-    SEC submissions JSON for a filing whose `reportDate` is within
-    `tol_days` of `report_date`, returning the row with the smallest
-    delta. The tolerance handles SimFin's month-end normalisation
-    (e.g. 2024-09-30) versus SEC's actual fiscal end (e.g. 2024-09-28).
-
-    Returns a URL of the form
-        https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{primary_doc}
-    or None if the CIK/report_date is missing, the fetch fails, or no
-    filing matches within the tolerance.
-
-    `report_date` must be 'YYYY-MM-DD'. Memoised per (cik, report_date,
-    period, tol_days) for the process lifetime; the underlying submissions
-    JSON is disk-cached separately by `_fetch_submissions`.
-    """
-    target = _parse(report_date) if report_date else None
-    if not cik or target is None:
-        return None
-    # Accept historical form variants (10-K405, 10-KSB used pre-2002; 10-QSB for small filers)
-    forms = {'10-K', '10-K405', '10-KSB'} if period == 'A' else {'10-Q', '10-QSB'}
+def _search_submissions(cik: int, target, forms: set[str], tol_days: int) -> tuple[str, str, int] | None:
+    """Scan submissions for one CIK; return (accessionNumber, primaryDoc, cik) or None."""
     try:
-        data = _fetch_submissions(int(cik))
+        data = _fetch_submissions(cik)
     except (requests.RequestException, ValueError) as e:
         logger.debug(f'EDGAR fetch failed for CIK {cik}: {type(e).__name__}: {e}')
         return None
@@ -143,6 +128,43 @@ def filing_url(cik: int | None, report_date: str | None, period: str, tol_days: 
     if best is None:
         return None
     acc, doc = best
-    return EDGAR_DOC_URL.format(
-        cik=int(cik), acc_no_dashes=acc.replace('-', ''), primary_doc=doc
-    )
+    return acc, doc, cik
+
+
+@lru_cache(maxsize=10000)
+def filing_url(cik: int | None, report_date: str | None, period: str, tol_days: int = 10) -> str | None:
+    """Build the direct EDGAR document URL for one (cik, report_date, period).
+
+    Picks the form by period ('A' -> 10-K, 'Q' -> 10-Q) and scans the
+    SEC submissions JSON for a filing whose `reportDate` is within
+    `tol_days` of `report_date`, returning the row with the smallest
+    delta. The tolerance handles SimFin's month-end normalisation
+    (e.g. 2024-09-30) versus SEC's actual fiscal end (e.g. 2024-09-28).
+
+    For companies that reorganised under a new SEC entity (e.g. Alphabet/Google),
+    falls back to `_LEGACY_CIKS` if the primary CIK has no matching filing.
+
+    Returns a URL of the form
+        https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{primary_doc}
+    or None if the CIK/report_date is missing, the fetch fails, or no
+    filing matches within the tolerance.
+
+    `report_date` must be 'YYYY-MM-DD'. Memoised per (cik, report_date,
+    period, tol_days) for the process lifetime; the underlying submissions
+    JSON is disk-cached separately by `_fetch_submissions`.
+    """
+    target = _parse(report_date) if report_date else None
+    if not cik or target is None:
+        return None
+    # Accept historical form variants (10-K405, 10-KSB used pre-2002; 10-QSB for small filers)
+    forms = {'10-K', '10-K405', '10-KSB'} if period == 'A' else {'10-Q', '10-QSB'}
+
+    ciks_to_try = [int(cik)] + _LEGACY_CIKS.get(int(cik), [])
+    for try_cik in ciks_to_try:
+        result = _search_submissions(try_cik, target, forms, tol_days)
+        if result is not None:
+            acc, doc, matched_cik = result
+            return EDGAR_DOC_URL.format(
+                cik=matched_cik, acc_no_dashes=acc.replace('-', ''), primary_doc=doc
+            )
+    return None
