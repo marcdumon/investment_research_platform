@@ -654,7 +654,7 @@ def _edgar_period_strip(ticker: str, name: str, period_cols: list) -> html.Div:
     for p in period_cols:
         p_str = str(p)
         rd = report_dates.get(p_str)
-        variant = 'A' if p_str.endswith('FY') else 'Q'
+        variant = 'A' if (p_str.endswith('FY') or p_str.endswith('Q4')) else 'Q'
         url = None
         if cik and rd:
             try:
