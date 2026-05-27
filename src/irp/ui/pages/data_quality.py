@@ -565,16 +565,18 @@ def _render_annotation_table(
         except (TypeError, ValueError):
             store_payload[item] = None
 
-    _TH_A = {**_TH, 'width': '45%', 'textAlign': 'left'}
-    _TH_V = {**_TH, 'width': '20%', 'textAlign': 'right'}
-    _TH_I = {**_TH, 'width': '25%'}
-    _TH_F = {**_TH, 'width': '10%', 'textAlign': 'center'}
+    _TH_A = {**_TH, 'width': '260px', 'textAlign': 'left'}
+    _TH_V = {**_TH, 'width': '120px', 'textAlign': 'right'}
+    _TH_I = {**_TH, 'width': '140px'}
+    _TH_F = {**_TH, 'width': '32px', 'textAlign': 'center'}
+    _TH_SP = {**_TH, 'border': 'none', 'backgroundColor': 'transparent'}
 
     header = html.Tr([
         html.Th('Line Item', style=_TH_A),
         html.Th('SimFin', style=_TH_V),
         html.Th('EDGAR', style=_TH_I),
         html.Th('', style=_TH_F),
+        html.Th('', style=_TH_SP),
     ])
     rows = []
     for i, item in enumerate(items):
@@ -608,6 +610,7 @@ def _render_annotation_table(
             html.Td('●' if differs else '',
                     style={**_TD, 'textAlign': 'center',
                            'color': ACCENT if differs else 'transparent'}),
+            html.Td('', style={'border': 'none'}),
         ]))
 
     table_div = html.Div(style={'overflowX': 'auto'}, children=[
@@ -1288,11 +1291,10 @@ def select_manual_period(n_clicks_list, periods_data):
 @callback(
     Output('dq-manual-sel', 'data', allow_duplicate=True),
     Input('dq-manual-ticker', 'value'),
-    Input('dq-manual-stmt-kind', 'value'),
     Input('dq-manual-variant', 'value'),
     prevent_initial_call=True,
 )
-def reset_manual_sel(ticker, kind, variant):
+def reset_manual_sel(ticker, variant):
     return None
 
 
@@ -1300,13 +1302,14 @@ def reset_manual_sel(ticker, kind, variant):
     Output('dq-manual-table-wrap', 'children'),
     Output('dq-manual-corrections', 'data'),
     Input('dq-manual-sel', 'data'),
+    Input('dq-manual-stmt-kind', 'value'),
     prevent_initial_call=True,
 )
-def load_manual_annotation_table(sel):
+def load_manual_annotation_table(sel, kind):
     if not sel:
         raise PreventUpdate
     ticker = sel['ticker']
-    kind = sel['kind']
+    kind = kind or sel.get('kind', 'income')
     period = sel['period']
     existing = dq.load_edgar_corrections(ticker, period, kind)
     table_div, store_payload = _render_annotation_table(
@@ -1318,9 +1321,10 @@ def load_manual_annotation_table(sel):
 @callback(
     Output('dq-manual-edgar-wrap', 'children'),
     Input('dq-manual-sel', 'data'),
+    Input('dq-manual-stmt-kind', 'value'),
     prevent_initial_call=True,
 )
-def fetch_manual_edgar(sel):
+def fetch_manual_edgar(sel, kind):
     _wrap = {'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between',
              'padding': '8px 12px', 'marginBottom': '10px',
              'backgroundColor': 'rgba(255,255,255,0.03)',
@@ -1331,7 +1335,7 @@ def fetch_manual_edgar(sel):
                                'fontStyle': 'italic'})
     ticker = sel['ticker']
     period = sel['period']
-    kind = sel.get('kind', '')
+    kind = kind or sel.get('kind', 'income')
     report_date = sel.get('report_date')
     kind_label = {'income': 'Income', 'balance': 'Balance Sheet',
                   'cashflow': 'Cash Flow'}.get(kind, kind.capitalize())
@@ -1342,7 +1346,7 @@ def fetch_manual_edgar(sel):
         edgar_el = html.Span('No EDGAR link', style={'fontSize': '12px', 'color': MUTED,
                                                       'opacity': '0.5'})
     else:
-        period_code = 'A' if period.endswith('FY') else 'Q'
+        period_code = 'A' if (period.endswith('FY') or period.endswith('Q4')) else 'Q'
         try:
             url = dq.fetch_edgar_url(cik, report_date, period_code)
         except Exception:
@@ -1362,17 +1366,19 @@ def fetch_manual_edgar(sel):
     Output('dq-manual-msg', 'children'),
     Input('dq-manual-save', 'n_clicks'),
     State('dq-manual-sel', 'data'),
+    State('dq-manual-stmt-kind', 'value'),
     State('dq-manual-corrections', 'data'),
     State({'type': 'edgar-input-manual', 'index': ALL}, 'value'),
     prevent_initial_call=True,
 )
-def save_manual_annotations(n, sel, corrections_store, input_values):
+def save_manual_annotations(n, sel, kind, corrections_store, input_values):
     if not sel or not corrections_store:
         raise PreventUpdate
     items = corrections_store.get('_items', [])
     if not items or not input_values:
         raise PreventUpdate
-    ticker, kind, period = sel['ticker'], sel['kind'], sel['period']
+    ticker, period = sel['ticker'], sel['period']
+    kind = kind or sel.get('kind', 'income')
     edgar_values: dict[str, float] = {}
     simfin_values: dict[str, float] = {}
     for item, raw in zip(items, input_values):
