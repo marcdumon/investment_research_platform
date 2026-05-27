@@ -22,6 +22,15 @@ _SIMFIN_RULE_NAMES = [r.name for r in _simfin_rules.REGISTRY]
 _STOOQ_RULE_OPTIONS = [{'label': r.name, 'value': r.name} for r in _stooq_rules.REGISTRY]
 _STOOQ_RULE_NAMES = [r.name for r in _stooq_rules.REGISTRY]
 
+_SF_RULE_INFO: dict[str, str] = {
+    r.name: f'{r.lhs} == {r.rhs}'
+    for r in _simfin_rules.REGISTRY
+}
+_STQ_RULE_INFO: dict[str, str] = {
+    r.name: r.description
+    for r in _stooq_rules.REGISTRY
+}
+
 # Dynamic options loaded once at startup
 def _market_opts(markets: list[str]) -> list[dict]:
     return [{'label': 'All', 'value': ''}] + [{'label': m, 'value': m} for m in sorted(markets)]
@@ -64,6 +73,34 @@ def _chip(label: str, value: str | int, color: str = MUTED) -> html.Div:
     return html.Div(className='metric-chip', children=[
         html.Span(str(value), style={'color': color, 'fontWeight': '700', 'fontSize': '18px'}),
         html.Span(label, style={'color': MUTED, 'fontSize': '11px', 'marginLeft': '4px'}),
+    ])
+
+
+_TH = {'padding': '4px 10px', 'fontSize': '11px', 'color': MUTED,
+        'border': '1px solid rgba(255,255,255,0.08)',
+        'backgroundColor': 'rgba(255,255,255,0.05)', 'whiteSpace': 'nowrap'}
+_TD = {'padding': '3px 10px', 'fontSize': '12px', 'color': MUTED,
+        'border': '1px solid rgba(255,255,255,0.08)'}
+
+
+def _rules_reference(rule_info: dict[str, str], col2_header: str) -> html.Details:
+    """Collapsible table listing every rule with its definition."""
+    header = html.Tr([html.Th('Rule', style=_TH), html.Th(col2_header, style={**_TH, 'width': '100%'})])
+    rows = [
+        html.Tr([
+            html.Td(name, style={**_TD, 'whiteSpace': 'nowrap', 'fontFamily': 'monospace'}),
+            html.Td(desc, style=_TD),
+        ])
+        for name, desc in rule_info.items()
+    ]
+    return html.Details(style={'marginBottom': '12px'}, children=[
+        html.Summary('Rules reference', style={
+            'cursor': 'pointer', 'color': MUTED, 'fontSize': '13px', 'userSelect': 'none',
+        }),
+        html.Div(style={'marginTop': '8px', 'overflowX': 'auto'}, children=[
+            html.Table([html.Thead(header), html.Tbody(rows)],
+                       style={'borderCollapse': 'collapse', 'width': '100%'}),
+        ]),
     ])
 
 
@@ -133,6 +170,9 @@ _fund_tab = html.Div(children=[
         ),
     ]),
 
+    # Rules reference
+    _rules_reference(_SF_RULE_INFO, 'Checks (LHS == RHS)'),
+
     # Table
     dcc.Loading(type='circle', color=ACCENT, children=html.Div(id='dq-sf-table-wrap')),
 
@@ -155,6 +195,26 @@ _fund_tab = html.Div(children=[
                          className='filter-dropdown', style={'minWidth': '240px', 'fontSize': '12px'}),
         ]),
         html.Div(id='dq-sf-inspect-table'),
+        # SimFin statement section for EDGAR comparison
+        html.Div(style={'marginTop': '16px', 'borderTop': '1px solid rgba(255,255,255,0.08)',
+                        'paddingTop': '12px'}, children=[
+            html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '12px',
+                            'marginBottom': '8px'}, children=[
+                html.Span('SimFin Statement', style={'color': MUTED, 'fontSize': '13px',
+                                                     'fontWeight': '600', 'whiteSpace': 'nowrap'}),
+                dcc.RadioItems(
+                    id='dq-sf-stmt-kind',
+                    options=[
+                        {'label': 'Income', 'value': 'income'},
+                        {'label': 'Balance', 'value': 'balance'},
+                        {'label': 'Cash Flow', 'value': 'cashflow'},
+                    ],
+                    value='income', inline=True, labelClassName='check-item',
+                ),
+            ]),
+            dcc.Loading(type='circle', color=ACCENT,
+                        children=html.Div(id='dq-sf-statement-wrap')),
+        ]),
         _review_form('dq-sf'),
     ]),
 
@@ -216,6 +276,9 @@ _prices_tab = html.Div(children=[
             className='filter-dropdown', style={'minWidth': '200px', 'fontSize': '12px'},
         ),
     ]),
+    # Rules reference
+    _rules_reference(_STQ_RULE_INFO, 'Description'),
+
     dcc.Loading(type='circle', color=ACCENT, children=html.Div(id='dq-stq-table-wrap')),
     html.Div(id='dq-stq-detail', style={'display': 'none'}, children=[
         html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
@@ -379,6 +442,43 @@ def _inspect_html(df: pd.DataFrame) -> html.Div:
     ])
 
 
+def _fmt_num(x) -> str:
+    try:
+        if pd.isna(x):
+            return '—'
+        return f'{int(round(float(x))):,}'
+    except (TypeError, ValueError):
+        return str(x) if x is not None else '—'
+
+
+def _render_statement(ticker: str, period_str: str, kind: str) -> html.Div:
+    """SimFin statement table focused on the selected period + 3 older."""
+    try:
+        df = _uv.get_statement(ticker, kind)
+    except Exception as exc:
+        logger.debug(f'statement load error: {exc}')
+        return html.Div('No data.', style={'color': MUTED, 'fontSize': '12px'})
+    if df is None or df.empty:
+        return html.Div('No data.', style={'color': MUTED, 'fontSize': '12px'})
+
+    variant = 'A' if period_str.endswith('FY') else 'Q'
+    all_cols = list(df.columns)
+    matching = [c for c in all_cols if c.endswith('FY')] if variant == 'A' \
+        else [c for c in all_cols if not c.endswith('FY')]
+    if not matching:
+        return html.Div('No matching periods.', style={'color': MUTED, 'fontSize': '12px'})
+
+    start = matching.index(period_str) if period_str in matching else 0
+    show_cols = matching[start:start + 4]
+
+    sub = df[show_cols].copy()
+    for col in show_cols:
+        sub[col] = sub[col].apply(_fmt_num)
+    sub = sub.reset_index()
+    sub.rename(columns={sub.columns[0]: 'Line Item'}, inplace=True)
+    return _inspect_html(sub)
+
+
 # ── Callbacks: Fundamentals ───────────────────────────────────────────
 
 def _apply_filters(records: list[dict], tickers: list | None, market: str | None,
@@ -441,8 +541,10 @@ def _violations_summary(violations: list[dict]) -> html.Div:
         diff = v.get('rel_diff_pct') or 0
         rows.append(html.Tr([
             html.Td(v['Rule'],
+                    title=_SF_RULE_INFO.get(v['Rule'], ''),
                     style={'padding': '3px 10px', 'fontSize': '12px', 'color': MUTED,
-                           'border': '1px solid rgba(255,255,255,0.08)'}),
+                           'border': '1px solid rgba(255,255,255,0.08)',
+                           'cursor': 'help', 'fontFamily': 'monospace'}),
             html.Td(f'{diff:+.2f}%',
                     style={'padding': '3px 10px', 'fontSize': '12px',
                            'color': 'rgba(231,76,60,0.9)' if abs(diff) >= 1 else MUTED,
@@ -468,6 +570,7 @@ def _violations_summary(violations: list[dict]) -> html.Div:
     Output('dq-sf-rule-select', 'options'),
     Output('dq-sf-rule-select', 'value'),
     Output('dq-sf-sel', 'data'),
+    Output('dq-sf-note', 'value', allow_duplicate=True),
     Input('dq-sf-table', 'active_cell'),
     Input('dq-sf-close', 'n_clicks'),
     State('dq-sf-table', 'data'),
@@ -478,7 +581,7 @@ def show_simfin_detail(cell, close_n, table_data, results):
     from dash import ctx
     _hide = {'display': 'none'}
     _show = {'display': 'block'}
-    _empty = (_hide, '', '', html.Div(), [], None, None)
+    _empty = (_hide, '', '', html.Div(), [], None, None, '')
 
     if ctx.triggered_id == 'dq-sf-close' or not cell or not table_data:
         return _empty
@@ -503,7 +606,13 @@ def show_simfin_detail(cell, close_n, table_data, results):
         'Report Date': filing.get('Report Date', ''),
         'Period': filing.get('Period', ''),
     }
-    return _show, title, '', summary, rule_opts, violations[0]['Rule'], sel
+    note_lines = [
+        f'{v["Rule"]}: SimFin {_fmt_num(v.get("LHS_value"))} vs {_fmt_num(v.get("RHS_value"))}'
+        f' ({v.get("rel_diff_pct", 0):+.1f}%)'
+        for v in violations
+    ]
+    note_template = '\n'.join(note_lines) + '\n\nEDGAR: '
+    return _show, title, '', summary, rule_opts, violations[0]['Rule'], sel, note_template
 
 
 @callback(
@@ -535,6 +644,18 @@ def update_simfin_inspect(rule, sel, results):
     except Exception as exc:
         logger.debug(f'inspect error: {exc}')
     return inspect_div, dq.auto_suggest_status(violation.get('rel_diff', 0.0))
+
+
+@callback(
+    Output('dq-sf-statement-wrap', 'children'),
+    Input('dq-sf-sel', 'data'),
+    Input('dq-sf-stmt-kind', 'value'),
+    prevent_initial_call=True,
+)
+def update_sf_statement(sel, kind):
+    if not sel:
+        raise PreventUpdate
+    return _render_statement(sel['Ticker'], sel['Period_str'], kind or 'income')
 
 
 @callback(

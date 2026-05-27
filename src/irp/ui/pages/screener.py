@@ -199,7 +199,7 @@ layout = html.Div(
                             style={'fontSize': '11px', 'padding': '4px 10px'},
                         ),
                         html.Span(
-                            '(% factors: decimal, e.g. 0.15 for 15%)',
+                            '(% factors: enter as %, e.g. 15 for 15%)',
                             style={'color': MUTED, 'fontSize': '11px'},
                         ),
                     ],
@@ -981,18 +981,23 @@ def mutate_steps(
             raise PreventUpdate
         if add_min is None and add_max is None:
             raise PreventUpdate
+        is_pct = add_factor in _PCT_FACTORS
+        stored_min = add_min / 100 if (is_pct and add_min is not None) else add_min
+        stored_max = add_max / 100 if (is_pct and add_max is not None) else add_max
+        def _fmt(v):
+            return f'{v:g}%' if is_pct else f'{v:g}'
         label = FACTOR_LABELS.get(add_factor, add_factor)
         if add_min is not None and add_max is not None:
-            label += f' {add_min}–{add_max}'
+            label += f' {_fmt(add_min)}–{_fmt(add_max)}'
         elif add_min is not None:
-            label += f' ≥ {add_min}'
+            label += f' ≥ {_fmt(add_min)}'
         else:
-            label += f' ≤ {add_max}'
+            label += f' ≤ {_fmt(add_max)}'
         steps.append({
             'type': 'range',
             'col': add_factor,
-            'min': add_min,
-            'max': add_max,
+            'min': stored_min,
+            'max': stored_max,
             'label': label,
         })
         return steps
