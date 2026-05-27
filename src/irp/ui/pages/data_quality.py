@@ -5,7 +5,7 @@ import re
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import ALL, Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
 import irp.checks.simfin_rules as _simfin_rules
@@ -200,12 +200,12 @@ _fund_tab = html.Div(children=[
                          className='filter-dropdown', style={'minWidth': '240px', 'fontSize': '12px'}),
         ]),
         html.Div(id='dq-sf-inspect-table'),
-        # SimFin statement section for EDGAR comparison
+        # EDGAR annotation table
         html.Div(style={'marginTop': '16px', 'borderTop': '1px solid rgba(255,255,255,0.08)',
                         'paddingTop': '12px'}, children=[
             html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '12px',
-                            'marginBottom': '8px'}, children=[
-                html.Span('SimFin Statement', style={'color': MUTED, 'fontSize': '13px',
+                            'marginBottom': '8px', 'flexWrap': 'wrap'}, children=[
+                html.Span('EDGAR Annotation', style={'color': MUTED, 'fontSize': '13px',
                                                      'fontWeight': '600', 'whiteSpace': 'nowrap'}),
                 dcc.RadioItems(
                     id='dq-sf-stmt-kind',
@@ -216,6 +216,10 @@ _fund_tab = html.Div(children=[
                     ],
                     value='income', inline=True, labelClassName='check-item',
                 ),
+                html.Button('Save annotations', id='dq-sf-annotation-save',
+                            className='run-btn', n_clicks=0),
+                html.Span(id='dq-sf-annotation-msg',
+                          style={'color': ACCENT, 'fontSize': '12px'}),
             ]),
             dcc.Loading(type='circle', color=ACCENT,
                         children=html.Div(id='dq-sf-statement-wrap')),
@@ -316,6 +320,8 @@ layout = html.Div(className='page-content', children=[
     dcc.Store(id='dq-sf-sel'),
     dcc.Store(id='dq-stq-sel'),
     dcc.Store(id='dq-sf-edgar-url'),
+    dcc.Store(id='dq-sf-corrections'),
+    dcc.Store(id='dq-manual-corrections'),
     html.H2('Data Quality', className='page-title'),
     html.P('Triage fundamental and price anomalies; mark reviewed; add manual flags.',
            className='page-subtitle'),
@@ -330,6 +336,10 @@ layout = html.Div(className='page-content', children=[
                     selected_className='page-tab-selected', children=[_prices_tab]),
             dcc.Tab(label='Dashboard', value='dashboard', className='page-tab',
                     selected_className='page-tab-selected', children=[_dashboard_tab]),
+            dcc.Tab(label='EDGAR Corrections', value='edgar-corrections', className='page-tab',
+                    selected_className='page-tab-selected',
+                    children=[html.Div(id='dq-edgar-corrections-tab',
+                                       style={'padding': '16px 0'})]),
         ],
     ),
 ])
@@ -516,6 +526,95 @@ def _render_statement(ticker: str, period_str: str, kind: str) -> html.Div:
     return _inspect_html(sub)
 
 
+def _render_annotation_table(
+    ticker: str,
+    period_str: str,
+    kind: str,
+    existing: dict[str, float],
+    input_type: str = 'edgar-input',
+) -> tuple[html.Div, dict]:
+    """Comparison table: Line Item | SimFin value | EDGAR input | flag.
+
+    Returns (html.Div, store_payload) where store_payload holds row order + simfin values.
+    input_type distinguishes violation-panel inputs ('edgar-input') from manual ones ('edgar-input-manual').
+    """
+    try:
+        df = _uv.get_statement(ticker, kind)
+    except Exception as exc:
+        logger.debug(f'annotation table load error: {exc}')
+        return html.Div('No data.', style={'color': MUTED, 'fontSize': '12px'}), {}
+    if df is None or df.empty:
+        return html.Div('No data.', style={'color': MUTED, 'fontSize': '12px'}), {}
+
+    variant = 'A' if period_str.endswith('FY') else 'Q'
+    matching = [c for c in df.columns if c.endswith('FY')] if variant == 'A' \
+        else [c for c in df.columns if not c.endswith('FY')]
+    if not matching or period_str not in matching:
+        return html.Div('Period not found.', style={'color': MUTED, 'fontSize': '12px'}), {}
+
+    items = list(df.index)
+    sf_col = df[period_str]
+
+    store_payload: dict = {'_items': items}
+    for item in items:
+        v = sf_col.get(item)
+        try:
+            store_payload[item] = float(v) if v is not None and str(v) not in ('nan', 'None') else None
+        except (TypeError, ValueError):
+            store_payload[item] = None
+
+    _TH_A = {**_TH, 'width': '45%', 'textAlign': 'left'}
+    _TH_V = {**_TH, 'width': '20%', 'textAlign': 'right'}
+    _TH_I = {**_TH, 'width': '25%'}
+    _TH_F = {**_TH, 'width': '10%', 'textAlign': 'center'}
+
+    header = html.Tr([
+        html.Th('Line Item', style=_TH_A),
+        html.Th('SimFin', style=_TH_V),
+        html.Th('EDGAR', style=_TH_I),
+        html.Th('', style=_TH_F),
+    ])
+    rows = []
+    for i, item in enumerate(items):
+        sf_raw = store_payload.get(item)
+        sf_fmt = _fmt_num(sf_raw)
+        edgar_val = existing.get(item)
+        prefilled = str(int(edgar_val)) if edgar_val is not None else ''
+        try:
+            differs = edgar_val is not None and (
+                sf_raw is None or abs(float(edgar_val) - float(sf_raw)) > 0.5
+            )
+        except (TypeError, ValueError):
+            differs = False
+        row_style = {'backgroundColor': 'rgba(88,166,255,0.08)'} if differs else {}
+        rows.append(html.Tr(style=row_style, children=[
+            html.Td(item, style={**_TD, 'whiteSpace': 'nowrap'}),
+            html.Td(sf_fmt, style={**_TD, 'textAlign': 'right', 'fontFamily': 'monospace'}),
+            html.Td(dcc.Input(
+                id={'type': input_type, 'index': i},
+                value=prefilled,
+                placeholder='EDGAR value',
+                debounce=False,
+                type='text',
+                style={
+                    'width': '100%', 'fontSize': '12px',
+                    'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
+                    'border': '1px solid rgba(255,255,255,0.12)',
+                    'borderRadius': '3px', 'padding': '2px 6px',
+                },
+            ), style={**_TD, 'padding': '2px 6px'}),
+            html.Td('●' if differs else '',
+                    style={**_TD, 'textAlign': 'center',
+                           'color': ACCENT if differs else 'transparent'}),
+        ]))
+
+    table_div = html.Div(style={'overflowX': 'auto'}, children=[
+        html.Table([html.Thead(header), html.Tbody(rows)],
+                   style={'borderCollapse': 'collapse', 'width': '100%'}),
+    ])
+    return table_div, store_payload
+
+
 # ── Callbacks: Fundamentals ───────────────────────────────────────────
 
 def _apply_filters(records: list[dict], tickers: list | None, market: str | None,
@@ -688,14 +787,61 @@ def update_simfin_inspect(rule, sel, results):
 
 @callback(
     Output('dq-sf-statement-wrap', 'children'),
+    Output('dq-sf-corrections', 'data'),
     Input('dq-sf-sel', 'data'),
     Input('dq-sf-stmt-kind', 'value'),
     prevent_initial_call=True,
 )
-def update_sf_statement(sel, kind):
+def update_sf_annotation_table(sel, kind):
     if not sel:
         raise PreventUpdate
-    return _render_statement(sel['Ticker'], sel['Period_str'], kind or 'income')
+    ticker = sel['Ticker']
+    period = sel['Period_str']
+    stmt_kind = kind or 'income'
+    existing = dq.load_edgar_corrections(ticker, period, stmt_kind)
+    table_div, store_payload = _render_annotation_table(ticker, period, stmt_kind, existing)
+    return table_div, store_payload
+
+
+@callback(
+    Output('dq-sf-annotation-msg', 'children'),
+    Input('dq-sf-annotation-save', 'n_clicks'),
+    State('dq-sf-sel', 'data'),
+    State('dq-sf-stmt-kind', 'value'),
+    State('dq-sf-corrections', 'data'),
+    State({'type': 'edgar-input', 'index': ALL}, 'value'),
+    prevent_initial_call=True,
+)
+def save_edgar_annotations(n, sel, kind, corrections_store, input_values):
+    if not sel or not corrections_store:
+        raise PreventUpdate
+    items = corrections_store.get('_items', [])
+    if not items or not input_values:
+        raise PreventUpdate
+    ticker, period, stmt_kind = sel['Ticker'], sel['Period_str'], kind or 'income'
+    edgar_values: dict[str, float] = {}
+    simfin_values: dict[str, float] = {}
+    for item, raw in zip(items, input_values):
+        if raw and str(raw).strip():
+            try:
+                edgar_values[item] = float(str(raw).replace(',', '').strip())
+            except ValueError:
+                continue
+        sf = corrections_store.get(item)
+        if sf is not None:
+            try:
+                simfin_values[item] = float(sf)
+            except (TypeError, ValueError):
+                pass
+    if not edgar_values:
+        return 'Nothing to save (enter at least one EDGAR value).'
+    try:
+        dq.save_edgar_corrections(ticker, period, stmt_kind, edgar_values,
+                                   simfin_values or None)
+    except Exception as exc:
+        logger.warning(f'annotation save error: {exc}')
+        return f'Error: {exc}'
+    return f'Saved {len(edgar_values)} correction(s).'
 
 
 @callback(
@@ -942,4 +1088,226 @@ def update_dashboard(tab, sf_results, stq_results):
     return html.Div([
         _section('Fundamentals (SimFin)', sf_results, dq.get_all_simfin_reviews),
         _section('Prices (Stooq)', stq_results, dq.get_all_stooq_reviews),
+    ])
+
+
+# ── EDGAR Corrections tab ──────────────────────────────────────────────
+
+def _manual_annotation_section() -> html.Details:
+    """Collapsible section for annotating any ticker/period without a flagged violation."""
+    return html.Details(style={'marginBottom': '24px'}, children=[
+        html.Summary('Annotate a statement', style={
+            'cursor': 'pointer', 'color': MUTED, 'fontSize': '13px',
+            'fontWeight': '600', 'userSelect': 'none', 'marginBottom': '8px',
+        }),
+        html.Div(style={'marginTop': '12px'}, children=[
+            html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '10px',
+                            'flexWrap': 'wrap', 'marginBottom': '10px'}, children=[
+                dcc.Input(id='dq-manual-ticker', type='text', placeholder='Ticker (e.g. AAPL)',
+                          debounce=True,
+                          style={'width': '140px', 'fontSize': '12px',
+                                 'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
+                                 'border': '1px solid rgba(255,255,255,0.12)',
+                                 'borderRadius': '3px', 'padding': '4px 8px'}),
+                dcc.RadioItems(
+                    id='dq-manual-stmt-kind',
+                    options=[
+                        {'label': 'Income', 'value': 'income'},
+                        {'label': 'Balance', 'value': 'balance'},
+                        {'label': 'Cash Flow', 'value': 'cashflow'},
+                    ],
+                    value='income', inline=True, labelClassName='check-item',
+                ),
+                dcc.Dropdown(id='dq-manual-period', placeholder='Period…',
+                             clearable=False, className='filter-dropdown',
+                             style={'minWidth': '120px', 'fontSize': '12px'}),
+                html.Button('Load', id='dq-manual-load', className='run-btn', n_clicks=0),
+            ]),
+            dcc.Loading(type='circle', color=ACCENT,
+                        children=html.Div(id='dq-manual-table-wrap')),
+            html.Div(style={'display': 'flex', 'gap': '8px', 'marginTop': '8px',
+                            'alignItems': 'center'}, children=[
+                html.Button('Save annotations', id='dq-manual-save',
+                            className='run-btn', n_clicks=0),
+                html.Span(id='dq-manual-msg', style={'color': ACCENT, 'fontSize': '12px'}),
+            ]),
+        ]),
+    ])
+
+
+@callback(
+    Output('dq-manual-period', 'options'),
+    Output('dq-manual-period', 'value'),
+    Input('dq-manual-ticker', 'value'),
+    Input('dq-manual-stmt-kind', 'value'),
+    prevent_initial_call=True,
+)
+def update_manual_period_options(ticker, kind):
+    if not ticker or not kind:
+        return [], None
+    try:
+        dates = _uv.get_period_report_dates(ticker.strip().upper(), kind)
+    except Exception:
+        return [], None
+    if not dates:
+        return [], None
+
+    def _sort_key(p: str) -> tuple:
+        try:
+            year = int(p[:4])
+            q = 0 if p.endswith('FY') else int(p[5])
+        except (ValueError, IndexError):
+            return (0, 0)
+        return (-year, -q)
+
+    periods = sorted(dates.keys(), key=_sort_key)
+    opts = [{'label': p, 'value': p} for p in periods]
+    return opts, periods[0] if periods else None
+
+
+@callback(
+    Output('dq-manual-table-wrap', 'children'),
+    Output('dq-manual-corrections', 'data'),
+    Input('dq-manual-load', 'n_clicks'),
+    State('dq-manual-ticker', 'value'),
+    State('dq-manual-stmt-kind', 'value'),
+    State('dq-manual-period', 'value'),
+    prevent_initial_call=True,
+)
+def load_manual_annotation_table(n, ticker, kind, period):
+    if not ticker or not kind or not period:
+        return html.P('Select ticker, statement, and period first.',
+                      style={'color': MUTED, 'fontSize': '12px'}), {}
+    ticker = ticker.strip().upper()
+    existing = dq.load_edgar_corrections(ticker, period, kind)
+    table_div, store_payload = _render_annotation_table(
+        ticker, period, kind, existing, input_type='edgar-input-manual'
+    )
+    return table_div, store_payload
+
+
+@callback(
+    Output('dq-manual-msg', 'children'),
+    Input('dq-manual-save', 'n_clicks'),
+    State('dq-manual-ticker', 'value'),
+    State('dq-manual-stmt-kind', 'value'),
+    State('dq-manual-period', 'value'),
+    State('dq-manual-corrections', 'data'),
+    State({'type': 'edgar-input-manual', 'index': ALL}, 'value'),
+    prevent_initial_call=True,
+)
+def save_manual_annotations(n, ticker, kind, period, corrections_store, input_values):
+    if not ticker or not kind or not period or not corrections_store:
+        raise PreventUpdate
+    items = corrections_store.get('_items', [])
+    if not items or not input_values:
+        raise PreventUpdate
+    ticker = ticker.strip().upper()
+    edgar_values: dict[str, float] = {}
+    simfin_values: dict[str, float] = {}
+    for item, raw in zip(items, input_values):
+        if raw and str(raw).strip():
+            try:
+                edgar_values[item] = float(str(raw).replace(',', '').strip())
+            except ValueError:
+                continue
+        sf = corrections_store.get(item)
+        if sf is not None:
+            try:
+                simfin_values[item] = float(sf)
+            except (TypeError, ValueError):
+                pass
+    if not edgar_values:
+        return 'Nothing to save (enter at least one EDGAR value).'
+    try:
+        dq.save_edgar_corrections(ticker, period, kind, edgar_values,
+                                   simfin_values or None)
+    except Exception as exc:
+        logger.warning(f'manual annotation save error: {exc}')
+        return f'Error: {exc}'
+    return f'Saved {len(edgar_values)} correction(s).'
+
+
+@callback(
+    Output('dq-edgar-corrections-tab', 'children'),
+    Input('dq-tabs', 'value'),
+    prevent_initial_call=True,
+)
+def update_edgar_corrections_tab(tab):
+    if tab != 'edgar-corrections':
+        raise PreventUpdate
+
+    manual_section = _manual_annotation_section()
+
+    try:
+        df = dq.get_all_edgar_corrections()
+    except Exception as exc:
+        logger.warning(f'corrections load error: {exc}')
+        return html.Div([manual_section,
+                         html.P(f'Error loading corrections: {exc}',
+                                style={'color': MUTED})])
+
+    if df.empty:
+        return html.Div([
+            manual_section,
+            html.P('No EDGAR corrections saved yet.',
+                   style={'color': MUTED, 'padding': '8px 0'}),
+        ])
+
+    df = df.copy()
+
+    def _diff_pct(row):
+        try:
+            sf, ed = float(row['simfin_value']), float(row['edgar_value'])
+            return round((ed - sf) / abs(sf) * 100, 2) if sf != 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    df['diff_pct'] = df.apply(_diff_pct, axis=1)
+    df['stmt_kind'] = df['stmt_kind'].str.capitalize()
+
+    display_cols = [
+        {'name': 'Ticker',    'id': 'ticker'},
+        {'name': 'Period',    'id': 'period'},
+        {'name': 'Statement', 'id': 'stmt_kind'},
+        {'name': 'Line Item', 'id': 'line_item'},
+        {'name': 'SimFin',    'id': 'simfin_value', 'type': 'numeric'},
+        {'name': 'EDGAR',     'id': 'edgar_value',  'type': 'numeric'},
+        {'name': 'Diff %',    'id': 'diff_pct',     'type': 'numeric'},
+        {'name': 'Date',      'id': 'annotated_at'},
+        {'name': '',          'id': '_spacer'},
+    ]
+    records = df[['ticker', 'period', 'stmt_kind', 'line_item',
+                  'simfin_value', 'edgar_value', 'diff_pct', 'annotated_at']].copy()
+    records['_spacer'] = ''
+    _nw = {'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap'}
+    report_table = dash.dash_table.DataTable(
+        data=records.to_dict('records'),
+        columns=display_cols,
+        sort_action='native',
+        filter_action='native',
+        page_size=50,
+        style_table={'overflowX': 'auto', 'width': '100%'},
+        style_cell_conditional=[
+            {'if': {'column_id': 'ticker'},       'width': '70px',  **_nw},
+            {'if': {'column_id': 'period'},       'width': '80px',  **_nw},
+            {'if': {'column_id': 'stmt_kind'},    'width': '80px',  **_nw},
+            {'if': {'column_id': 'line_item'},    'width': '240px', **_nw},
+            {'if': {'column_id': 'simfin_value'}, 'width': '110px', 'textAlign': 'right', **_nw},
+            {'if': {'column_id': 'edgar_value'},  'width': '110px', 'textAlign': 'right', **_nw},
+            {'if': {'column_id': 'diff_pct'},     'width': '70px',  'textAlign': 'right', **_nw},
+            {'if': {'column_id': 'annotated_at'}, 'width': '90px',  **_nw},
+        ],
+        style_data_conditional=[
+            {'if': {'filter_query': '{diff_pct} < -5 || {diff_pct} > 5'},
+             'backgroundColor': 'rgba(231,76,60,0.10)'},
+        ],
+        **_TABLE_STYLE,
+    )
+
+    return html.Div([
+        manual_section,
+        html.H5('Saved Corrections', style={'color': MUTED, 'fontSize': '13px',
+                                             'fontWeight': '600', 'marginBottom': '8px'}),
+        report_table,
     ])
