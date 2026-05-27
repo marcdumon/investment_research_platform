@@ -325,23 +325,23 @@ layout = html.Div(className='page-content', children=[
     dcc.Store(id='dq-manual-sel'),
     dcc.Store(id='dq-manual-periods-data'),
     html.H2('Data Quality', className='page-title'),
-    html.P('Triage fundamental and price anomalies; mark reviewed; add manual flags.',
+    html.P('Rule-based and manual data quality checks for fundamentals and prices.',
            className='page-subtitle'),
     dcc.Tabs(
         id='dq-tabs',
         value='fundamentals',
         className='page-tabs',
         children=[
-            dcc.Tab(label='Fundamentals', value='fundamentals', className='page-tab',
+            dcc.Tab(label='Rule Check', value='fundamentals', className='page-tab',
                     selected_className='page-tab-selected', children=[_fund_tab]),
+            dcc.Tab(label='Manual Check', value='edgar-corrections', className='page-tab',
+                    selected_className='page-tab-selected',
+                    children=[html.Div(id='dq-edgar-corrections-tab',
+                                       style={'padding': '16px 0'})]),
             dcc.Tab(label='Prices', value='prices', className='page-tab',
                     selected_className='page-tab-selected', children=[_prices_tab]),
             dcc.Tab(label='Dashboard', value='dashboard', className='page-tab',
                     selected_className='page-tab-selected', children=[_dashboard_tab]),
-            dcc.Tab(label='EDGAR Corrections', value='edgar-corrections', className='page-tab',
-                    selected_className='page-tab-selected',
-                    children=[html.Div(id='dq-edgar-corrections-tab',
-                                       style={'padding': '16px 0'})]),
         ],
     ),
 ])
@@ -1095,31 +1095,46 @@ def update_dashboard(tab, sf_results, stq_results):
 
 # ── EDGAR Corrections tab ──────────────────────────────────────────────
 
-def _manual_annotation_section(ticker_options: list[dict] | None = None) -> html.Details:
-    """Collapsible section for annotating any ticker/period without a flagged violation."""
-    return html.Details(style={'marginBottom': '24px'}, children=[
-        html.Summary('Annotate a statement', style={
-            'cursor': 'pointer', 'color': MUTED, 'fontSize': '13px',
-            'fontWeight': '600', 'userSelect': 'none', 'marginBottom': '8px',
-        }),
-        html.Div(style={'marginTop': '12px'}, children=[
-            html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '14px',
-                            'flexWrap': 'wrap'}, children=[
+def _manual_annotation_section(ticker_options: list[dict] | None = None) -> html.Div:
+    """Manual check page content: controls + two-column filing list / annotation table."""
+    _ctrl_sep = {'width': '1px', 'height': '20px', 'backgroundColor': 'rgba(255,255,255,0.12)',
+                 'flexShrink': '0'}
+    _label = {'fontSize': '10px', 'color': MUTED, 'textTransform': 'uppercase',
+              'letterSpacing': '0.06em', 'marginBottom': '4px'}
+    return html.Div([
+        # ── Controls bar ──────────────────────────────────────────────────
+        html.Div(style={
+            'display': 'flex', 'alignItems': 'center', 'gap': '16px',
+            'flexWrap': 'wrap', 'padding': '10px 14px',
+            'backgroundColor': 'rgba(255,255,255,0.03)',
+            'borderRadius': '6px', 'border': '1px solid rgba(255,255,255,0.07)',
+            'marginBottom': '16px',
+        }, children=[
+            html.Div([
+                html.Div('Ticker', style=_label),
                 dcc.Dropdown(
                     id='dq-manual-ticker',
                     options=ticker_options or [],
-                    placeholder='Search ticker…',
+                    placeholder='Search…',
                     searchable=True,
                     clearable=True,
                     className='filter-dropdown',
-                    style={'minWidth': '180px', 'fontSize': '12px'},
+                    style={'minWidth': '200px', 'fontSize': '12px'},
                 ),
+            ]),
+            html.Div(style=_ctrl_sep),
+            html.Div([
+                html.Div('Variant', style=_label),
                 dcc.RadioItems(
                     id='dq-manual-variant',
                     options=[{'label': 'Annual', 'value': 'A'},
                              {'label': 'Quarterly', 'value': 'Q'}],
                     value='A', inline=True, labelClassName='check-item',
                 ),
+            ]),
+            html.Div(style=_ctrl_sep),
+            html.Div([
+                html.Div('Statement', style=_label),
                 dcc.RadioItems(
                     id='dq-manual-stmt-kind',
                     options=[
@@ -1130,20 +1145,43 @@ def _manual_annotation_section(ticker_options: list[dict] | None = None) -> html
                     value='income', inline=True, labelClassName='check-item',
                 ),
             ]),
-            # Period chip strip — populated by callback
-            html.Div(id='dq-manual-period-strip',
-                     style={'display': 'flex', 'flexWrap': 'wrap', 'gap': '6px',
-                            'marginTop': '10px', 'minHeight': '28px'}),
-            # EDGAR link for selected period
-            html.Div(id='dq-manual-edgar-wrap', style={'marginTop': '6px'}),
-            dcc.Loading(type='circle', color=ACCENT,
-                        children=html.Div(id='dq-manual-table-wrap',
-                                          style={'marginTop': '10px'})),
-            html.Div(style={'display': 'flex', 'gap': '8px', 'marginTop': '8px',
-                            'alignItems': 'center'}, children=[
-                html.Button('Save annotations', id='dq-manual-save',
-                            className='run-btn', n_clicks=0),
-                html.Span(id='dq-manual-msg', style={'color': ACCENT, 'fontSize': '12px'}),
+        ]),
+
+        # ── Two-column body ───────────────────────────────────────────────
+        html.Div(style={'display': 'flex', 'gap': '16px', 'alignItems': 'flex-start'}, children=[
+
+            # Left: filing list
+            html.Div(style={
+                'width': '160px', 'flexShrink': '0',
+                'border': '1px solid rgba(255,255,255,0.07)',
+                'borderRadius': '6px', 'overflow': 'hidden',
+            }, children=[
+                html.Div('Filings', style={
+                    'padding': '8px 12px', 'fontSize': '10px', 'fontWeight': '600',
+                    'textTransform': 'uppercase', 'letterSpacing': '0.06em', 'color': MUTED,
+                    'backgroundColor': 'rgba(255,255,255,0.04)',
+                    'borderBottom': '1px solid rgba(255,255,255,0.07)',
+                }),
+                html.Div(id='dq-manual-period-strip',
+                         style={'display': 'flex', 'flexDirection': 'column',
+                                'overflowY': 'auto', 'maxHeight': '520px'}),
+            ]),
+
+            # Right: annotation area
+            html.Div(style={'flex': '1', 'minWidth': '0'}, children=[
+                # Header: context + EDGAR link (populated by callback)
+                html.Div(id='dq-manual-edgar-wrap'),
+                # Annotation table
+                dcc.Loading(type='circle', color=ACCENT,
+                            children=html.Div(id='dq-manual-table-wrap')),
+                # Save row
+                html.Div(style={'display': 'flex', 'gap': '10px', 'marginTop': '10px',
+                                'alignItems': 'center'}, children=[
+                    html.Button('Save annotations', id='dq-manual-save',
+                                className='run-btn', n_clicks=0),
+                    html.Span(id='dq-manual-msg',
+                              style={'color': ACCENT, 'fontSize': '12px'}),
+                ]),
             ]),
         ]),
     ])
@@ -1195,23 +1233,29 @@ def update_manual_period_strip(ticker, kind, variant, sel):
                     'periods': periods, 'report_dates': report_dates}
 
     sel_period = (sel or {}).get('period')
-    _CHIP = {
-        'fontSize': '12px', 'padding': '3px 10px', 'borderRadius': '3px',
-        'cursor': 'pointer', 'border': '1px solid rgba(255,255,255,0.15)',
-        'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
+    _BASE = {
+        'width': '100%', 'textAlign': 'left', 'cursor': 'pointer',
+        'padding': '7px 12px', 'border': 'none', 'borderBottom': '1px solid rgba(255,255,255,0.06)',
+        'backgroundColor': 'transparent', 'color': MUTED, 'display': 'block',
     }
-    _CHIP_SEL = {**_CHIP,
-                 'border': f'1px solid {ACCENT}',
-                 'backgroundColor': 'rgba(88,166,255,0.12)', 'color': ACCENT}
-    chips = [
-        html.Button(
-            p,
+    _SEL = {**_BASE, 'backgroundColor': 'rgba(88,166,255,0.10)', 'color': ACCENT,
+            'borderLeft': f'2px solid {ACCENT}', 'paddingLeft': '10px'}
+    chips = []
+    for i, p in enumerate(periods):
+        rd = report_dates.get(p, '')
+        date_label = str(rd)[:10] if rd else ''
+        is_sel = p == sel_period
+        chips.append(html.Button(
+            html.Div([
+                html.Span(p, style={'fontSize': '12px', 'fontWeight': '600' if is_sel else '400',
+                                    'display': 'block'}),
+                html.Span(date_label, style={'fontSize': '10px', 'opacity': '0.55',
+                                             'display': 'block', 'marginTop': '1px'}),
+            ]),
             id={'type': 'manual-period-btn', 'index': i},
-            style=_CHIP_SEL if p == sel_period else _CHIP,
+            style=_SEL if is_sel else _BASE,
             n_clicks=0,
-        )
-        for i, p in enumerate(periods)
-    ]
+        ))
     return chips, periods_data
 
 
@@ -1277,27 +1321,41 @@ def load_manual_annotation_table(sel):
     prevent_initial_call=True,
 )
 def fetch_manual_edgar(sel):
+    _wrap = {'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between',
+             'padding': '8px 12px', 'marginBottom': '10px',
+             'backgroundColor': 'rgba(255,255,255,0.03)',
+             'borderRadius': '6px', 'border': '1px solid rgba(255,255,255,0.07)'}
     if not sel:
-        return []
+        return html.Div('← Select a filing from the list',
+                        style={**_wrap, 'color': MUTED, 'fontSize': '12px',
+                               'fontStyle': 'italic'})
     ticker = sel['ticker']
     period = sel['period']
+    kind = sel.get('kind', '')
     report_date = sel.get('report_date')
+    kind_label = {'income': 'Income', 'balance': 'Balance Sheet',
+                  'cashflow': 'Cash Flow'}.get(kind, kind.capitalize())
+    context = html.Span(f'{ticker}  ·  {period}  ·  {kind_label}',
+                        style={'fontSize': '13px', 'fontWeight': '600', 'color': MUTED})
     cik = _uv.get_ticker_cik(ticker)
     if not cik or not report_date:
-        return html.Span('No EDGAR link (missing CIK or report date)',
-                         style={'color': MUTED, 'fontSize': '12px'})
-    period_code = 'A' if period.endswith('FY') else 'Q'
-    try:
-        url = dq.fetch_edgar_url(cik, report_date, period_code)
-    except Exception as exc:
-        return html.Span(f'EDGAR lookup error: {exc}',
-                         style={'color': MUTED, 'fontSize': '12px'})
-    if not url:
-        return html.Span('No EDGAR filing found',
-                         style={'color': MUTED, 'fontSize': '12px'})
-    return html.A(f'Open EDGAR filing ({period}) ↗', href=url, target='_blank',
-                  rel='noopener noreferrer',
-                  style={'fontSize': '12px', 'color': ACCENT, 'textDecoration': 'none'})
+        edgar_el = html.Span('No EDGAR link', style={'fontSize': '12px', 'color': MUTED,
+                                                      'opacity': '0.5'})
+    else:
+        period_code = 'A' if period.endswith('FY') else 'Q'
+        try:
+            url = dq.fetch_edgar_url(cik, report_date, period_code)
+        except Exception:
+            url = None
+        if url:
+            edgar_el = html.A('Open EDGAR ↗', href=url, target='_blank',
+                              rel='noopener noreferrer',
+                              style={'fontSize': '12px', 'color': ACCENT,
+                                     'textDecoration': 'none', 'fontWeight': '600'})
+        else:
+            edgar_el = html.Span('No EDGAR filing found',
+                                 style={'fontSize': '12px', 'color': MUTED, 'opacity': '0.5'})
+    return html.Div([context, edgar_el], style=_wrap)
 
 
 @callback(
@@ -1364,15 +1422,11 @@ def update_edgar_corrections_tab(tab):
         df = dq.get_all_edgar_corrections()
     except Exception as exc:
         logger.warning(f'corrections load error: {exc}')
-        return html.Div([manual_section,
-                         html.P(f'Error loading corrections: {exc}',
-                                style={'color': MUTED})])
+        return html.Div([manual_section])
 
     if df.empty:
         return html.Div([
             manual_section,
-            html.P('No EDGAR corrections saved yet.',
-                   style={'color': MUTED, 'padding': '8px 0'}),
         ])
 
     df = df.copy()
@@ -1426,9 +1480,13 @@ def update_edgar_corrections_tab(tab):
         **_TABLE_STYLE,
     )
 
+    _divider = {'borderColor': 'rgba(255,255,255,0.07)', 'margin': '24px 0 16px'}
     return html.Div([
         manual_section,
-        html.H5('Saved Corrections', style={'color': MUTED, 'fontSize': '13px',
-                                             'fontWeight': '600', 'marginBottom': '8px'}),
+        html.Hr(style=_divider),
+        html.Div('Saved Corrections', style={
+            'fontSize': '11px', 'fontWeight': '600', 'textTransform': 'uppercase',
+            'letterSpacing': '0.06em', 'color': MUTED, 'marginBottom': '10px',
+        }),
         report_table,
     ])
