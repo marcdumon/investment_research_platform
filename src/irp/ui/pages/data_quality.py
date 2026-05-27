@@ -388,8 +388,6 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
 
     cols = [
         {'name': 'Ticker',   'id': 'Ticker'},
-        {'name': 'Company',  'id': 'Company Name'},
-        {'name': 'Market',   'id': 'Market'},
         {'name': 'Period',   'id': 'Period_str'},
         {'name': 'Max Δ%',   'id': 'max_diff_pct', 'type': 'numeric',
          'format': Fmt.Format(precision=2, scheme=Fmt.Scheme.fixed)},
@@ -403,7 +401,7 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
         id='dq-sf-table',
         data=rows,
         columns=cols,
-        hidden_columns=['CIK', 'Report Date', 'Period'],
+        hidden_columns=['CIK', 'Report Date', 'Period', 'Company Name', 'Market'],
         row_selectable=False,
         active_cell=None,
         page_size=25,
@@ -412,8 +410,6 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
         style_table={'overflowX': 'auto', 'width': '100%'},
         style_cell_conditional=[
             {'if': {'column_id': 'Ticker'},       'width': '70px',  **_nw},
-            {'if': {'column_id': 'Company Name'}, 'width': '190px', **_nw},
-            {'if': {'column_id': 'Market'},       'width': '70px',  **_nw},
             {'if': {'column_id': 'Period_str'},   'width': '80px',  **_nw},
             {'if': {'column_id': 'max_diff_pct'}, 'width': '70px',  **_nw},
             {'if': {'column_id': 'rules_str'},    'width': '300px', **_nw},
@@ -466,17 +462,26 @@ def _inspect_html(df: pd.DataFrame) -> html.Div:
     if df.empty:
         return html.Div()
     num_cols = df.select_dtypes('number').columns.tolist()
+    label_col = next((c for c in df.columns if c not in num_cols), None)
+    _cell = {'padding': '4px 8px', 'fontSize': '12px', 'color': MUTED,
+             'border': '1px solid rgba(255,255,255,0.08)'}
+    _hdr = {'padding': '4px 8px', 'fontSize': '11px', 'color': MUTED,
+            'border': '1px solid rgba(255,255,255,0.08)',
+            'backgroundColor': 'rgba(255,255,255,0.05)'}
     rows = []
     for _, row in df.iterrows():
-        cells = [html.Td(str(row[c]) if c not in num_cols else f'{row[c]:,.2f}',
-                         style={'padding': '4px 8px', 'fontSize': '12px', 'color': MUTED,
-                                'border': '1px solid rgba(255,255,255,0.08)'})
-                 for c in df.columns]
+        cells = []
+        for c in df.columns:
+            align = 'right' if (c not in num_cols and c == label_col) or c in num_cols else 'left'
+            val = str(row[c]) if c not in num_cols else f'{row[c]:,.2f}'
+            cells.append(html.Td(val, style={**_cell, 'textAlign': align,
+                                             'whiteSpace': 'nowrap' if c == label_col else 'normal'}))
         rows.append(html.Tr(cells))
-    header = html.Tr([html.Th(c, style={'padding': '4px 8px', 'fontSize': '11px', 'color': MUTED,
-                                         'border': '1px solid rgba(255,255,255,0.08)',
-                                         'backgroundColor': 'rgba(255,255,255,0.05)'})
-                      for c in df.columns])
+    header = html.Tr([
+        html.Th(c, style={**_hdr,
+                          'textAlign': 'right' if (c not in num_cols and c == label_col) or c in num_cols else 'left'})
+        for c in df.columns
+    ])
     return html.Div(style={'overflowX': 'auto', 'marginBottom': '12px'}, children=[
         html.Table([html.Thead(header), html.Tbody(rows)],
                    style={'borderCollapse': 'collapse'}),
@@ -557,15 +562,18 @@ def _render_annotation_table(
     items = list(df.index)
     sf_col = df[period_str]
 
-    store_payload: dict = {'_items': items}
+    store_payload: dict = {'_items': []}
     for item in items:
         v = sf_col.get(item)
         try:
-            store_payload[item] = float(v) if v is not None and str(v) not in ('nan', 'None') else None
+            parsed = float(v) if v is not None and str(v) not in ('nan', 'None') else None
         except (TypeError, ValueError):
-            store_payload[item] = None
+            parsed = None
+        store_payload[item] = parsed
+        if parsed is not None:
+            store_payload['_items'].append(item)
 
-    _TH_A = {**_TH, 'width': '260px', 'textAlign': 'left'}
+    _TH_A = {**_TH, 'width': '260px', 'textAlign': 'right'}
     _TH_V = {**_TH, 'width': '120px', 'textAlign': 'right'}
     _TH_I = {**_TH, 'width': '140px'}
     _TH_F = {**_TH, 'width': '32px', 'textAlign': 'center'}
@@ -581,6 +589,8 @@ def _render_annotation_table(
     rows = []
     for i, item in enumerate(items):
         sf_raw = store_payload.get(item)
+        if sf_raw is None:
+            continue
         sf_fmt = _fmt_num(sf_raw)
         edgar_val = existing.get(item)
         prefilled = str(int(edgar_val)) if edgar_val is not None else ''
@@ -592,7 +602,7 @@ def _render_annotation_table(
             differs = False
         row_style = {'backgroundColor': 'rgba(88,166,255,0.08)'} if differs else {}
         rows.append(html.Tr(style=row_style, children=[
-            html.Td(item, style={**_TD, 'whiteSpace': 'nowrap'}),
+            html.Td(item, style={**_TD, 'whiteSpace': 'nowrap', 'textAlign': 'right'}),
             html.Td(sf_fmt, style={**_TD, 'textAlign': 'right', 'fontFamily': 'monospace'}),
             html.Td(dcc.Input(
                 id={'type': input_type, 'index': i},
