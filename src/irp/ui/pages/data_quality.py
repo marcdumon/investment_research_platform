@@ -1095,21 +1095,31 @@ def update_dashboard(tab, sf_results, stq_results):
 
 # ── EDGAR Corrections tab ──────────────────────────────────────────────
 
-def _manual_annotation_section() -> html.Details:
+def _manual_annotation_section(ticker_options: list[dict] | None = None) -> html.Details:
     """Collapsible section for annotating any ticker/period without a flagged violation."""
-    _inp = {'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
-            'border': '1px solid rgba(255,255,255,0.12)',
-            'borderRadius': '3px', 'padding': '4px 8px', 'fontSize': '12px'}
     return html.Details(style={'marginBottom': '24px'}, children=[
         html.Summary('Annotate a statement', style={
             'cursor': 'pointer', 'color': MUTED, 'fontSize': '13px',
             'fontWeight': '600', 'userSelect': 'none', 'marginBottom': '8px',
         }),
         html.Div(style={'marginTop': '12px'}, children=[
-            html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '10px',
+            html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '14px',
                             'flexWrap': 'wrap'}, children=[
-                dcc.Input(id='dq-manual-ticker', type='text', placeholder='Ticker (e.g. AAPL)',
-                          debounce=True, style={'width': '140px', **_inp}),
+                dcc.Dropdown(
+                    id='dq-manual-ticker',
+                    options=ticker_options or [],
+                    placeholder='Search ticker…',
+                    searchable=True,
+                    clearable=True,
+                    className='filter-dropdown',
+                    style={'minWidth': '180px', 'fontSize': '12px'},
+                ),
+                dcc.RadioItems(
+                    id='dq-manual-variant',
+                    options=[{'label': 'Annual', 'value': 'A'},
+                             {'label': 'Quarterly', 'value': 'Q'}],
+                    value='A', inline=True, labelClassName='check-item',
+                ),
                 dcc.RadioItems(
                     id='dq-manual-stmt-kind',
                     options=[
@@ -1153,13 +1163,14 @@ def _period_sort_key(p: str) -> tuple:
     Output('dq-manual-periods-data', 'data'),
     Input('dq-manual-ticker', 'value'),
     Input('dq-manual-stmt-kind', 'value'),
+    Input('dq-manual-variant', 'value'),
     Input('dq-manual-sel', 'data'),
     prevent_initial_call=True,
 )
-def update_manual_period_strip(ticker, kind, sel):
+def update_manual_period_strip(ticker, kind, variant, sel):
     if not ticker or not kind:
         return [], {}
-    ticker = ticker.strip().upper()
+    ticker = ticker.strip().upper() if isinstance(ticker, str) else ticker
     try:
         report_dates = _uv.get_period_report_dates(ticker, kind)
     except Exception:
@@ -1167,6 +1178,16 @@ def update_manual_period_strip(ticker, kind, sel):
                           style={'color': MUTED, 'fontSize': '12px'})], {}
     if not report_dates:
         return [html.Span('No filings found.',
+                          style={'color': MUTED, 'fontSize': '12px'})], {}
+
+    variant = variant or 'A'
+    if variant == 'A':
+        report_dates = {p: d for p, d in report_dates.items() if p.endswith('FY')}
+    else:
+        report_dates = {p: d for p, d in report_dates.items() if not p.endswith('FY')}
+
+    if not report_dates:
+        return [html.Span('No filings for selected variant.',
                           style={'color': MUTED, 'fontSize': '12px'})], {}
 
     periods = sorted(report_dates.keys(), key=_period_sort_key)
@@ -1224,9 +1245,10 @@ def select_manual_period(n_clicks_list, periods_data):
     Output('dq-manual-sel', 'data', allow_duplicate=True),
     Input('dq-manual-ticker', 'value'),
     Input('dq-manual-stmt-kind', 'value'),
+    Input('dq-manual-variant', 'value'),
     prevent_initial_call=True,
 )
-def reset_manual_sel(ticker, kind):
+def reset_manual_sel(ticker, kind, variant):
     return None
 
 
@@ -1327,7 +1349,16 @@ def update_edgar_corrections_tab(tab):
     if tab != 'edgar-corrections':
         raise PreventUpdate
 
-    manual_section = _manual_annotation_section()
+    try:
+        cos = _uv.get_companies()[['Ticker', 'Company Name']]
+        ticker_options = [
+            {'label': f"{row['Ticker']} — {row['Company Name']}" if row.get('Company Name') else row['Ticker'],
+             'value': row['Ticker']}
+            for _, row in cos.sort_values('Ticker').iterrows()
+        ]
+    except Exception:
+        ticker_options = []
+    manual_section = _manual_annotation_section(ticker_options)
 
     try:
         df = dq.get_all_edgar_corrections()
