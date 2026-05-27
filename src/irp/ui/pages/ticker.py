@@ -641,6 +641,44 @@ def render_cashflow(ticker: str | None, period: str) -> tuple[Any, str]:
     return _render_statement(ticker, 'cashflow', period)
 
 
+def _edgar_period_strip(ticker: str, name: str, period_cols: list) -> html.Div:
+    """Row of EDGAR filing links, one per displayed period column."""
+    from irp.checks.edgar import filing_url
+    try:
+        cik = universe_service.get_ticker_cik(ticker)
+        report_dates = universe_service.get_period_report_dates(ticker, name)  # type: ignore[arg-type]
+    except Exception:
+        return html.Div()
+
+    chips = []
+    for p in period_cols:
+        p_str = str(p)
+        rd = report_dates.get(p_str)
+        variant = 'A' if p_str.endswith('FY') else 'Q'
+        url = None
+        if cik and rd:
+            try:
+                url = filing_url(cik, rd, variant)
+            except Exception:
+                pass
+        chips.append(
+            html.A(p_str, href=url or '#', target='_blank',
+                   style={'pointerEvents': 'none' if not url else 'auto',
+                          'opacity': '0.35' if not url else '1',
+                          'fontSize': '11px', 'padding': '2px 7px',
+                          'border': f'1px solid {"rgba(255,255,255,0.18)" if url else "rgba(255,255,255,0.07)"}',
+                          'borderRadius': '3px', 'color': MUTED,
+                          'textDecoration': 'none', 'whiteSpace': 'nowrap'})
+        )
+    if not chips:
+        return html.Div()
+    return html.Div(
+        chips,
+        style={'display': 'flex', 'flexWrap': 'wrap', 'gap': '4px',
+               'marginBottom': '8px', 'alignItems': 'center'},
+    )
+
+
 def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, str]:
     if not ticker:
         raise PreventUpdate
@@ -704,7 +742,9 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
         page_size=40,
         **{k: v for k, v in style.items()},
     )
-    return table, note
+
+    edgar_strip = _edgar_period_strip(ticker, name, period_cols)
+    return html.Div([edgar_strip, table]), note
 
 
 @callback(

@@ -80,3 +80,24 @@ def get_all_stooq_reviews() -> pd.DataFrame:
 
 def auto_suggest_status(rel_diff: float) -> str:
     return 'ok' if abs(rel_diff) < 0.01 else 'to_check'
+
+
+from irp.checks import simfin_corrections as _sc  # noqa: E402
+
+
+def save_edgar_corrections(
+    ticker: str,
+    period: str,
+    stmt_kind: str,
+    edgar_values: dict[str, float],
+    simfin_values: dict[str, float] | None = None,
+) -> None:
+    _sc.save_corrections(ticker, period, stmt_kind, edgar_values, simfin_values)
+
+
+def load_edgar_corrections(ticker: str, period: str, stmt_kind: str) -> dict[str, float]:
+    return _sc.load_corrections(ticker, period, stmt_kind)
+
+
+def get_all_edgar_corrections() -> pd.DataFrame:
+    return _sc.get_all_corrections()

@@ -37,6 +37,39 @@ def get_sectors() -> list[str]:
     return sorted(_sector_map().dropna().unique().tolist())
 
 
+def get_ticker_cik(ticker: str) -> int | None:
+    """CIK for a ticker from the SimFin companies table, or None."""
+    df = get_companies([ticker])
+    if df.empty or 'CIK' not in df.columns:
+        return None
+    val = df.iloc[0].get('CIK')
+    try:
+        return int(val) if pd.notna(val) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def get_period_report_dates(ticker: str, kind: Literal['income', 'balance', 'cashflow']) -> dict[str, str]:
+    """Return {period_str: 'YYYY-MM-DD'} for all filings of a ticker/statement."""
+    from irp.query.simfin import fundamentals
+    parts = [fundamentals(ticker, kind, v) for v in ('A', 'Q')]
+    df = pd.concat(parts, ignore_index=True)
+    if df.empty or 'Report Date' not in df.columns:
+        return {}
+    df = df.copy()
+    df.loc[df['Period'] == 'A', 'Fiscal Period'] = 'FY'
+    df['_period'] = [
+        f'{int(fy)}FY' if p == 'A' else f'{int(fy)}{fp}'
+        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+    ]
+    df = df.drop_duplicates('_period', keep='first')
+    return {
+        row['_period']: str(row['Report Date'])[:10]
+        for _, row in df.iterrows()
+        if row.get('Report Date')
+    }
+
+
 def get_statement(
     ticker: str, kind: Literal['income', 'balance', 'cashflow']
 ) -> pd.DataFrame:
