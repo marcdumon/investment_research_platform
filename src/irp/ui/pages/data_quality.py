@@ -322,6 +322,8 @@ layout = html.Div(className='page-content', children=[
     dcc.Store(id='dq-sf-edgar-url'),
     dcc.Store(id='dq-sf-corrections'),
     dcc.Store(id='dq-manual-corrections'),
+    dcc.Store(id='dq-manual-sel'),
+    dcc.Store(id='dq-manual-periods-data'),
     html.H2('Data Quality', className='page-title'),
     html.P('Triage fundamental and price anomalies; mark reviewed; add manual flags.',
            className='page-subtitle'),
@@ -1095,6 +1097,9 @@ def update_dashboard(tab, sf_results, stq_results):
 
 def _manual_annotation_section() -> html.Details:
     """Collapsible section for annotating any ticker/period without a flagged violation."""
+    _inp = {'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
+            'border': '1px solid rgba(255,255,255,0.12)',
+            'borderRadius': '3px', 'padding': '4px 8px', 'fontSize': '12px'}
     return html.Details(style={'marginBottom': '24px'}, children=[
         html.Summary('Annotate a statement', style={
             'cursor': 'pointer', 'color': MUTED, 'fontSize': '13px',
@@ -1102,13 +1107,9 @@ def _manual_annotation_section() -> html.Details:
         }),
         html.Div(style={'marginTop': '12px'}, children=[
             html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '10px',
-                            'flexWrap': 'wrap', 'marginBottom': '10px'}, children=[
+                            'flexWrap': 'wrap'}, children=[
                 dcc.Input(id='dq-manual-ticker', type='text', placeholder='Ticker (e.g. AAPL)',
-                          debounce=True,
-                          style={'width': '140px', 'fontSize': '12px',
-                                 'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
-                                 'border': '1px solid rgba(255,255,255,0.12)',
-                                 'borderRadius': '3px', 'padding': '4px 8px'}),
+                          debounce=True, style={'width': '140px', **_inp}),
                 dcc.RadioItems(
                     id='dq-manual-stmt-kind',
                     options=[
@@ -1118,13 +1119,16 @@ def _manual_annotation_section() -> html.Details:
                     ],
                     value='income', inline=True, labelClassName='check-item',
                 ),
-                dcc.Dropdown(id='dq-manual-period', placeholder='Period…',
-                             clearable=False, className='filter-dropdown',
-                             style={'minWidth': '120px', 'fontSize': '12px'}),
-                html.Button('Load', id='dq-manual-load', className='run-btn', n_clicks=0),
             ]),
+            # Period chip strip — populated by callback
+            html.Div(id='dq-manual-period-strip',
+                     style={'display': 'flex', 'flexWrap': 'wrap', 'gap': '6px',
+                            'marginTop': '10px', 'minHeight': '28px'}),
+            # EDGAR link for selected period
+            html.Div(id='dq-manual-edgar-wrap', style={'marginTop': '6px'}),
             dcc.Loading(type='circle', color=ACCENT,
-                        children=html.Div(id='dq-manual-table-wrap')),
+                        children=html.Div(id='dq-manual-table-wrap',
+                                          style={'marginTop': '10px'})),
             html.Div(style={'display': 'flex', 'gap': '8px', 'marginTop': '8px',
                             'alignItems': 'center'}, children=[
                 html.Button('Save annotations', id='dq-manual-save',
@@ -1135,50 +1139,109 @@ def _manual_annotation_section() -> html.Details:
     ])
 
 
+def _period_sort_key(p: str) -> tuple:
+    try:
+        year = int(p[:4])
+        q = 0 if p.endswith('FY') else int(p[5])
+    except (ValueError, IndexError):
+        return (0, 0)
+    return (-year, -q)
+
+
 @callback(
-    Output('dq-manual-period', 'options'),
-    Output('dq-manual-period', 'value'),
+    Output('dq-manual-period-strip', 'children'),
+    Output('dq-manual-periods-data', 'data'),
+    Input('dq-manual-ticker', 'value'),
+    Input('dq-manual-stmt-kind', 'value'),
+    Input('dq-manual-sel', 'data'),
+    prevent_initial_call=True,
+)
+def update_manual_period_strip(ticker, kind, sel):
+    if not ticker or not kind:
+        return [], {}
+    ticker = ticker.strip().upper()
+    try:
+        report_dates = _uv.get_period_report_dates(ticker, kind)
+    except Exception:
+        return [html.Span('No data for this ticker/statement.',
+                          style={'color': MUTED, 'fontSize': '12px'})], {}
+    if not report_dates:
+        return [html.Span('No filings found.',
+                          style={'color': MUTED, 'fontSize': '12px'})], {}
+
+    periods = sorted(report_dates.keys(), key=_period_sort_key)
+    periods_data = {'ticker': ticker, 'kind': kind,
+                    'periods': periods, 'report_dates': report_dates}
+
+    sel_period = (sel or {}).get('period')
+    _CHIP = {
+        'fontSize': '12px', 'padding': '3px 10px', 'borderRadius': '3px',
+        'cursor': 'pointer', 'border': '1px solid rgba(255,255,255,0.15)',
+        'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
+    }
+    _CHIP_SEL = {**_CHIP,
+                 'border': f'1px solid {ACCENT}',
+                 'backgroundColor': 'rgba(88,166,255,0.12)', 'color': ACCENT}
+    chips = [
+        html.Button(
+            p,
+            id={'type': 'manual-period-btn', 'index': i},
+            style=_CHIP_SEL if p == sel_period else _CHIP,
+            n_clicks=0,
+        )
+        for i, p in enumerate(periods)
+    ]
+    return chips, periods_data
+
+
+@callback(
+    Output('dq-manual-sel', 'data'),
+    Input({'type': 'manual-period-btn', 'index': ALL}, 'n_clicks'),
+    State('dq-manual-periods-data', 'data'),
+    prevent_initial_call=True,
+)
+def select_manual_period(n_clicks_list, periods_data):
+    if not periods_data or not any(n_clicks_list):
+        raise PreventUpdate
+    from dash import ctx
+    triggered = ctx.triggered_id
+    if not triggered or not isinstance(triggered, dict):
+        raise PreventUpdate
+    idx = triggered['index']
+    periods = periods_data.get('periods', [])
+    if idx >= len(periods):
+        raise PreventUpdate
+    period = periods[idx]
+    return {
+        'ticker': periods_data['ticker'],
+        'kind': periods_data['kind'],
+        'period': period,
+        'report_date': periods_data.get('report_dates', {}).get(period),
+    }
+
+
+@callback(
+    Output('dq-manual-sel', 'data', allow_duplicate=True),
     Input('dq-manual-ticker', 'value'),
     Input('dq-manual-stmt-kind', 'value'),
     prevent_initial_call=True,
 )
-def update_manual_period_options(ticker, kind):
-    if not ticker or not kind:
-        return [], None
-    try:
-        dates = _uv.get_period_report_dates(ticker.strip().upper(), kind)
-    except Exception:
-        return [], None
-    if not dates:
-        return [], None
-
-    def _sort_key(p: str) -> tuple:
-        try:
-            year = int(p[:4])
-            q = 0 if p.endswith('FY') else int(p[5])
-        except (ValueError, IndexError):
-            return (0, 0)
-        return (-year, -q)
-
-    periods = sorted(dates.keys(), key=_sort_key)
-    opts = [{'label': p, 'value': p} for p in periods]
-    return opts, periods[0] if periods else None
+def reset_manual_sel(ticker, kind):
+    return None
 
 
 @callback(
     Output('dq-manual-table-wrap', 'children'),
     Output('dq-manual-corrections', 'data'),
-    Input('dq-manual-load', 'n_clicks'),
-    State('dq-manual-ticker', 'value'),
-    State('dq-manual-stmt-kind', 'value'),
-    State('dq-manual-period', 'value'),
+    Input('dq-manual-sel', 'data'),
     prevent_initial_call=True,
 )
-def load_manual_annotation_table(n, ticker, kind, period):
-    if not ticker or not kind or not period:
-        return html.P('Select ticker, statement, and period first.',
-                      style={'color': MUTED, 'fontSize': '12px'}), {}
-    ticker = ticker.strip().upper()
+def load_manual_annotation_table(sel):
+    if not sel:
+        raise PreventUpdate
+    ticker = sel['ticker']
+    kind = sel['kind']
+    period = sel['period']
     existing = dq.load_edgar_corrections(ticker, period, kind)
     table_div, store_payload = _render_annotation_table(
         ticker, period, kind, existing, input_type='edgar-input-manual'
@@ -1187,22 +1250,49 @@ def load_manual_annotation_table(n, ticker, kind, period):
 
 
 @callback(
+    Output('dq-manual-edgar-wrap', 'children'),
+    Input('dq-manual-sel', 'data'),
+    prevent_initial_call=True,
+)
+def fetch_manual_edgar(sel):
+    if not sel:
+        return []
+    ticker = sel['ticker']
+    period = sel['period']
+    report_date = sel.get('report_date')
+    cik = _uv.get_ticker_cik(ticker)
+    if not cik or not report_date:
+        return html.Span('No EDGAR link (missing CIK or report date)',
+                         style={'color': MUTED, 'fontSize': '12px'})
+    period_code = 'A' if period.endswith('FY') else 'Q'
+    try:
+        url = dq.fetch_edgar_url(cik, report_date, period_code)
+    except Exception as exc:
+        return html.Span(f'EDGAR lookup error: {exc}',
+                         style={'color': MUTED, 'fontSize': '12px'})
+    if not url:
+        return html.Span('No EDGAR filing found',
+                         style={'color': MUTED, 'fontSize': '12px'})
+    return html.A(f'Open EDGAR filing ({period}) ↗', href=url, target='_blank',
+                  rel='noopener noreferrer',
+                  style={'fontSize': '12px', 'color': ACCENT, 'textDecoration': 'none'})
+
+
+@callback(
     Output('dq-manual-msg', 'children'),
     Input('dq-manual-save', 'n_clicks'),
-    State('dq-manual-ticker', 'value'),
-    State('dq-manual-stmt-kind', 'value'),
-    State('dq-manual-period', 'value'),
+    State('dq-manual-sel', 'data'),
     State('dq-manual-corrections', 'data'),
     State({'type': 'edgar-input-manual', 'index': ALL}, 'value'),
     prevent_initial_call=True,
 )
-def save_manual_annotations(n, ticker, kind, period, corrections_store, input_values):
-    if not ticker or not kind or not period or not corrections_store:
+def save_manual_annotations(n, sel, corrections_store, input_values):
+    if not sel or not corrections_store:
         raise PreventUpdate
     items = corrections_store.get('_items', [])
     if not items or not input_values:
         raise PreventUpdate
-    ticker = ticker.strip().upper()
+    ticker, kind, period = sel['ticker'], sel['kind'], sel['period']
     edgar_values: dict[str, float] = {}
     simfin_values: dict[str, float] = {}
     for item, raw in zip(items, input_values):
