@@ -1,5 +1,6 @@
 """Data quality review page: fundamental + price anomaly triage."""
 import logging
+import re
 
 import dash
 import pandas as pd
@@ -24,6 +25,10 @@ _STOOQ_RULE_NAMES = [r.name for r in _stooq_rules.REGISTRY]
 
 _SF_RULE_INFO: dict[str, str] = {
     r.name: f'{r.lhs} == {r.rhs}'
+    for r in _simfin_rules.REGISTRY
+}
+_SF_RULE_LABELS: dict[str, tuple[str, str]] = {
+    r.name: (r.lhs, r.rhs)
     for r in _simfin_rules.REGISTRY
 }
 _STQ_RULE_INFO: dict[str, str] = {
@@ -374,10 +379,14 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
         {'name': 'Company',  'id': 'Company Name'},
         {'name': 'Market',   'id': 'Market'},
         {'name': 'Period',   'id': 'Period_str'},
-        {'name': 'Rules',    'id': 'rules_str'},
         {'name': 'Max Δ%',   'id': 'max_diff_pct', 'type': 'numeric',
          'format': Fmt.Format(precision=2, scheme=Fmt.Scheme.fixed)},
+        {'name': 'Rules',    'id': 'rules_str'},
+        {'name': '',         'id': '_sf_spacer'},
     ]
+    for r in rows:
+        r['_sf_spacer'] = ''
+    _nw = {'whiteSpace': 'nowrap', 'overflow': 'hidden', 'textOverflow': 'ellipsis'}
     return dash.dash_table.DataTable(
         id='dq-sf-table',
         data=rows,
@@ -388,7 +397,15 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
         page_size=25,
         sort_action='native',
         filter_action='native',
-        style_table={'overflowX': 'auto'},
+        style_table={'overflowX': 'auto', 'width': '100%'},
+        style_cell_conditional=[
+            {'if': {'column_id': 'Ticker'},       'width': '70px',  **_nw},
+            {'if': {'column_id': 'Company Name'}, 'width': '190px', **_nw},
+            {'if': {'column_id': 'Market'},       'width': '70px',  **_nw},
+            {'if': {'column_id': 'Period_str'},   'width': '80px',  **_nw},
+            {'if': {'column_id': 'max_diff_pct'}, 'width': '70px',  **_nw},
+            {'if': {'column_id': 'rules_str'},    'width': '300px', **_nw},
+        ],
         **_TABLE_STYLE,
     )
 
@@ -406,7 +423,11 @@ def _make_stooq_table(records: list[dict]) -> dash.dash_table.DataTable:
         {'name': 'Year',   'id': 'Period_str'},
         {'name': 'Count',  'id': 'count', 'type': 'numeric'},
         {'name': 'Sample dates', 'id': '_dates_str'},
+        {'name': '',       'id': '_stq_spacer'},
     ]
+    for d in display:
+        d['_stq_spacer'] = ''
+    _nw = {'whiteSpace': 'nowrap', 'overflow': 'hidden', 'textOverflow': 'ellipsis'}
     return dash.dash_table.DataTable(
         id='dq-stq-table',
         data=display,
@@ -416,7 +437,15 @@ def _make_stooq_table(records: list[dict]) -> dash.dash_table.DataTable:
         page_size=25,
         sort_action='native',
         filter_action='native',
-        style_table={'overflowX': 'auto'},
+        style_table={'overflowX': 'auto', 'width': '100%'},
+        style_cell_conditional=[
+            {'if': {'column_id': 'Rule'},        'width': '160px', **_nw},
+            {'if': {'column_id': 'Ticker'},      'width': '70px',  **_nw},
+            {'if': {'column_id': 'Market'},      'width': '70px',  **_nw},
+            {'if': {'column_id': 'Period_str'},  'width': '60px',  **_nw},
+            {'if': {'column_id': 'count'},       'width': '60px',  **_nw},
+            {'if': {'column_id': '_dates_str'},  'width': '280px', **_nw},
+        ],
         **_TABLE_STYLE,
     )
 
@@ -438,7 +467,7 @@ def _inspect_html(df: pd.DataFrame) -> html.Div:
                       for c in df.columns])
     return html.Div(style={'overflowX': 'auto', 'marginBottom': '12px'}, children=[
         html.Table([html.Thead(header), html.Tbody(rows)],
-                   style={'borderCollapse': 'collapse', 'width': '100%'}),
+                   style={'borderCollapse': 'collapse'}),
     ])
 
 
@@ -449,6 +478,14 @@ def _fmt_num(x) -> str:
         return f'{int(round(float(x))):,}'
     except (TypeError, ValueError):
         return str(x) if x is not None else '—'
+
+
+def _fmt_violation_line(label: str, value) -> str:
+    """'Net Income (income)' → '- Income: Net Income: -37,000,000'"""
+    m = re.match(r'^(.*?)\s*\((\w+)\)\s*$', label)
+    if m:
+        return f'- {m.group(2).capitalize()}: {m.group(1).strip()}: {_fmt_num(value)}'
+    return f'- {label}: {_fmt_num(value)}'
 
 
 def _render_statement(ticker: str, period_str: str, kind: str) -> html.Div:
@@ -606,11 +643,14 @@ def show_simfin_detail(cell, close_n, table_data, results):
         'Report Date': filing.get('Report Date', ''),
         'Period': filing.get('Period', ''),
     }
-    note_lines = [
-        f'{v["Rule"]}: SimFin {_fmt_num(v.get("LHS_value"))} vs {_fmt_num(v.get("RHS_value"))}'
-        f' ({v.get("rel_diff_pct", 0):+.1f}%)'
-        for v in violations
-    ]
+    note_lines = []
+    for v in violations:
+        lhs_label, rhs_label = _SF_RULE_LABELS.get(v['Rule'], ('LHS', 'RHS'))
+        note_lines.append(
+            f'{v["Rule"]}:\n'
+            + _fmt_violation_line(lhs_label, v.get('LHS_value')) + '\n'
+            + _fmt_violation_line(rhs_label, v.get('RHS_value'))
+        )
     note_template = '\n'.join(note_lines) + '\n\nEDGAR: '
     return _show, title, '', summary, rule_opts, violations[0]['Rule'], sel, note_template
 
