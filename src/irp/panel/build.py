@@ -72,6 +72,17 @@ _FUND_COLS = {
     'cashflow': _CASHFLOW_COLS,
 }
 
+# Restated panels keep only the columns needed for revision factors
+_INCOME_RESTATED_COLS = ['Ticker', 'Report Date', 'Restated Date', 'Period', 'Revenue', 'Net Income']
+_BALANCE_RESTATED_COLS = ['Ticker', 'Report Date', 'Restated Date', 'Period', 'Total Assets', 'Total Equity']
+_CASHFLOW_RESTATED_COLS = ['Ticker', 'Report Date', 'Restated Date', 'Period', 'Net Cash from Operating Activities']
+
+_FUND_RESTATED_COLS = {
+    'income': _INCOME_RESTATED_COLS,
+    'balance': _BALANCE_RESTATED_COLS,
+    'cashflow': _CASHFLOW_RESTATED_COLS,
+}
+
 
 def _panel_dir() -> Path:
     d = config.data.root_dir / 'panel'
@@ -131,12 +142,41 @@ def build_fundamentals_panel(
     return out
 
 
+def build_fundamentals_panel_restated(
+    stmt: Literal['income', 'balance', 'cashflow'],
+    variant: Literal['A', 'Q'],
+) -> Path:
+    """Write `<stmt>_restated_<variant>.parquet` using Restated Date as eff_date.
+
+    eff_date = COALESCE("Restated Date", "Publish Date") — the date the corrected
+    value became publicly available (PIT cutoff for revision signals).
+    """
+    cols = _FUND_RESTATED_COLS[stmt]
+    cols_sql = ', '.join(_quote(c) for c in cols)
+    conn = db()
+    arrow = conn.execute(f"""
+        SELECT {cols_sql},
+               COALESCE("Restated Date", "Publish Date") AS eff_date
+        FROM {stmt}_restated
+        WHERE Period = '{variant}'
+        ORDER BY Ticker, eff_date
+    """).arrow()
+    df: pl.DataFrame = pl.from_arrow(arrow)  # type: ignore[assignment]
+    out = _panel_dir() / f'{stmt}_restated_{variant}.parquet'
+    df.write_parquet(out, compression='zstd', statistics=True)
+    logger.info(
+        f'{stmt}_restated_{variant} panel: {len(df):,} rows, {df["Ticker"].n_unique():,} tickers → {out}'
+    )
+    return out
+
+
 def build_panels() -> list[Path]:
     """Materialize all panels. Idempotent — overwrites existing files."""
     outs = [build_prices_panel()]
     for stmt in ('income', 'balance', 'cashflow'):
         for variant in ('A', 'Q'):
             outs.append(build_fundamentals_panel(stmt, variant))
+            outs.append(build_fundamentals_panel_restated(stmt, variant))
     logger.info(f'panel build complete: {len(outs)} files')
     return outs
 

@@ -96,7 +96,20 @@ def load_fundamentals(
     return df
 
 
+@lru_cache(maxsize=12)
+def load_fundamentals_restated(
+    stmt: Literal['income', 'balance', 'cashflow'],
+    variant: Literal['A', 'Q'],
+) -> pl.DataFrame:
+    """Restated fundamentals panel — eff_date = Restated Date (PIT for revision signals)."""
+    src = panel_root() / f'{stmt}_restated_{variant}.parquet'
+    df = pl.read_parquet(src)
+    logger.debug(f'loaded {stmt}_restated_{variant}: {len(df):,} rows')
+    return df
+
+
 def clear_cache() -> None:
     """Drop in-memory panel caches (call after rebuild)."""
     load_prices_wide.cache_clear()
     load_fundamentals.cache_clear()
+    load_fundamentals_restated.cache_clear()
