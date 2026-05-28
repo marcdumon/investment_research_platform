@@ -243,8 +243,22 @@ layout = html.Div(
                                             inline=True,
                                             labelClassName='check-item',
                                         ),
+                                        dcc.RadioItems(
+                                            id='restatements-scale',
+                                            options=[
+                                                {'label': ' Auto', 'value': 'auto'},
+                                                {'label': ' K',    'value': 'K'},
+                                                {'label': ' M',    'value': 'M'},
+                                                {'label': ' B',    'value': 'B'},
+                                                {'label': ' Raw',  'value': 'raw'},
+                                            ],
+                                            value='auto',
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
                                     ],
                                 ),
+                                dcc.Store(id='restatements-period-store'),
                                 dcc.Loading(html.Div(id='restatements-list')),
                                 html.Div(id='restatements-detail', style={'marginTop': '16px'}),
                             ],
@@ -846,8 +860,17 @@ def _period_sort_key(p: str) -> tuple:
     return (year, q)
 
 
+_SCALE_MAP = {
+    'K':   (1e3,  'USD thousands'),
+    'M':   (1e6,  'USD millions'),
+    'B':   (1e9,  'USD billions'),
+    'raw': (1.0,  'USD'),
+}
+_SCALE_WIDTH = {'K': '105px', 'M': '91px', 'B': '75px', 'raw': '130px', 'auto': '91px'}
+
+
 def _restatement_detail_html(
-    ticker: str, stmt_kind: str, period: str, variant: str
+    ticker: str, stmt_kind: str, period: str, variant: str, scale: str = 'auto'
 ) -> html.Div:
     from irp.query.simfin import statement as _sf_stmt
 
@@ -870,8 +893,11 @@ def _restatement_detail_html(
     if filed_col.empty and rest_col.empty:
         return html.Div('No data for this period.', className='no-data')
 
-    scale_df = pd.concat([filed_col.rename('f'), rest_col.rename('r')], axis=1)
-    divisor, scale_label = detect_scale(scale_df)
+    if scale in _SCALE_MAP:
+        divisor, scale_label = _SCALE_MAP[scale]
+    else:
+        scale_df = pd.concat([filed_col.rename('f'), rest_col.rename('r')], axis=1)
+        divisor, scale_label = detect_scale(scale_df)
 
     records = []
     for item in dict.fromkeys(list(filed_col.index) + list(rest_col.index)):
@@ -895,8 +921,9 @@ def _restatement_detail_html(
             '_': '',
         })
 
-    _W = {'width': '93px', 'minWidth': '93px', 'maxWidth': '93px'}
-    _N = {'width': '91px', 'minWidth': '91px', 'maxWidth': '91px'}
+    _W  = {'width': '93px',  'minWidth': '93px',  'maxWidth': '93px'}
+    _nw = _SCALE_WIDTH.get(scale, '91px')
+    _N  = {'width': _nw, 'minWidth': _nw, 'maxWidth': _nw}
     style = dict(TABLE_STYLE)
     style['style_cell_conditional'] = [
         {'if': {'column_id': 'Report Date'},   'textAlign': 'center', **_W},
@@ -905,8 +932,7 @@ def _restatement_detail_html(
          'width': '260px', 'minWidth': '180px', 'maxWidth': '260px'},
         {'if': {'column_id': 'As Filed'},      'textAlign': 'right', **_N},
         {'if': {'column_id': 'Restated'},      'textAlign': 'right', **_N},
-        {'if': {'column_id': 'Diff'},          'textAlign': 'right',
-         'width': '91px', 'minWidth': '91px', 'maxWidth': '91px'},
+        {'if': {'column_id': 'Diff'},          'textAlign': 'right', **_N},
         {'if': {'column_id': 'Diff%'},         'textAlign': 'right',
          'width': '60px', 'minWidth': '60px', 'maxWidth': '60px'},
     ]
@@ -948,35 +974,41 @@ def _restatement_detail_html(
     Input('restatements-stmt', 'value'),
 )
 def load_restatements(ticker: str | None, variant: str, stmt_kind: str) -> Any:
+    from irp.query.simfin import statement as _sf_stmt
+
     if not ticker:
         raise PreventUpdate
 
-    df = _raw_filings(ticker, stmt_kind, variant)
-    if df.empty:
+    filed_df = _sf_stmt(ticker, stmt_kind,                periods=None)   # type: ignore[arg-type]
+    rest_df  = _sf_stmt(ticker, f'{stmt_kind}_restated',  periods=None)   # type: ignore[arg-type]
+
+    if filed_df.empty and rest_df.empty:
         return html.P('No filings available.', className='no-data')
 
-    _THRESHOLD = 180  # days gap between Report Date and Restated Date
+    # Filter to annual (FY) or quarterly (Q1-Q4) based on variant
+    suffix = 'FY' if variant == 'A' else ('Q1', 'Q2', 'Q3', 'Q4')
+    _match = (lambda c: c.endswith(suffix)) if isinstance(suffix, str) else (lambda c: any(c.endswith(s) for s in suffix))
+    filed_cols = [c for c in filed_df.columns if _match(c)] if not filed_df.empty else []
+    rest_cols  = [c for c in rest_df.columns  if _match(c)] if not rest_df.empty  else []
+    common     = [c for c in filed_cols if c in rest_cols]
 
-    periods: list[tuple[str, bool]] = []
-    for period, grp in df.groupby('_period'):
-        row = grp.iloc[0]
-        has_rest = False
-        if not _is_null_date(row.get('Restated Date')) and not _is_null_date(row.get('Report Date')):
-            try:
-                gap = (pd.to_datetime(row['Restated Date']) - pd.to_datetime(row['Report Date'])).days
-                has_rest = gap > _THRESHOLD
-            except Exception:
-                pass
-        periods.append((str(period), has_rest))
+    if not common:
+        return html.P('No restated filings found.', className='no-data')
 
-    periods = [(p, r) for p, r in periods if r]
-    periods.sort(key=lambda x: _period_sort_key(x[0]), reverse=True)
+    restated_periods = []
+    for period in common:
+        filed_col = pd.to_numeric(filed_df[period], errors='coerce').fillna(0)
+        rest_col  = pd.to_numeric(rest_df[period],  errors='coerce').fillna(0)
+        if abs(filed_col.sum() - rest_col.sum()) > 0:
+            restated_periods.append(period)
 
-    if not periods:
+    restated_periods.sort(key=_period_sort_key, reverse=True)
+
+    if not restated_periods:
         return html.P('No restated filings found.', className='no-data')
 
     chips = []
-    for period, has_rest in periods:
+    for period in restated_periods:
         chips.append(html.Button(
             period,
             id={'type': 'rst-chip', 'index': period},
@@ -984,8 +1016,7 @@ def load_restatements(ticker: str | None, variant: str, stmt_kind: str) -> Any:
             style={
                 'fontSize': '11px', 'padding': '3px 9px', 'cursor': 'pointer',
                 'border': '1px solid rgba(255,165,0,0.55)',
-                'borderRadius': '3px',
-                'background': 'rgba(255,165,0,0.08)',
+                'borderRadius': '3px', 'background': 'rgba(255,165,0,0.08)',
                 'color': MUTED,
             },
         ))
@@ -995,26 +1026,41 @@ def load_restatements(ticker: str | None, variant: str, stmt_kind: str) -> Any:
 
 
 @callback(
-    Output('restatements-detail', 'children'),
+    Output('restatements-period-store', 'data'),
     Input({'type': 'rst-chip', 'index': ALL}, 'n_clicks'),
+    prevent_initial_call=True,
+)
+def store_restatement_period(_n: list) -> str | None:
+    import json as _json
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    try:
+        return _json.loads(triggered_id)['index']
+    except (ValueError, KeyError):
+        raise PreventUpdate
+
+
+@callback(
+    Output('restatements-detail', 'children'),
+    Input('restatements-period-store', 'data'),
+    Input('restatements-scale', 'value'),
     State('ticker-store', 'data'),
     State('restatements-variant', 'value'),
     State('restatements-stmt', 'value'),
     prevent_initial_call=True,
 )
 def show_restatement_detail(
-    _n: list,
+    period: str | None,
+    scale: str,
     ticker: str | None,
     variant: str,
     stmt_kind: str,
 ) -> Any:
-    import json as _json
-    ctx = dash.callback_context
-    if not ctx.triggered or not ticker:
+    if not period or not ticker:
         raise PreventUpdate
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    period = _json.loads(triggered_id)['index']
-    return _restatement_detail_html(ticker, stmt_kind, period, variant)
+    return _restatement_detail_html(ticker, stmt_kind, period, variant, scale)
 
 
 @callback(
