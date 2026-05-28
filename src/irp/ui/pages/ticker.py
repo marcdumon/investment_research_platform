@@ -20,7 +20,15 @@ from irp.ui.theme import (
     SPLIT_COLOR,
     TABLE_STYLE,
 )
-from irp.ui.ticker_fmt import date_range_for_preset, fmt_price_table, fmt_statement
+from irp.ui.ticker_fmt import (
+    date_range_for_preset,
+    detect_scale,
+    fmt_cell,
+    fmt_price_table,
+    fmt_statement,
+    is_per_share,
+    is_pct_item,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -841,94 +849,93 @@ def _period_sort_key(p: str) -> tuple:
 def _restatement_detail_html(
     ticker: str, stmt_kind: str, period: str, variant: str
 ) -> html.Div:
-    from irp.ui.ticker_fmt import fmt_cell, is_per_share, is_pct_item
+    from irp.query.simfin import statement as _sf_stmt
 
     df = _raw_filings(ticker, stmt_kind, variant)
     if df.empty:
         return html.Div('No data.', className='no-data')
-
     df_p = df[df['_period'] == period]
     if df_p.empty:
         return html.Div('No data for this period.', className='no-data')
+    row = df_p.iloc[0]
+    report_date   = str(row.get('Report Date',   ''))[:10]
+    restated_date = str(row.get('Restated Date', ''))[:10]
 
-    item_cols = [c for c in df_p.columns if c not in _REST_META]
+    filed_df = _sf_stmt(ticker, stmt_kind,                    periods=[period])  # type: ignore[arg-type]
+    rest_df  = _sf_stmt(ticker, f'{stmt_kind}_restated',      periods=[period])  # type: ignore[arg-type]
 
-    orig_rows = df_p[df_p['Restated Date'].apply(_is_null_date)]
-    rest_rows = df_p[~df_p['Restated Date'].apply(_is_null_date)]
-    orig = orig_rows.iloc[0] if not orig_rows.empty else df_p.iloc[0]
-    rest = rest_rows.iloc[0] if not rest_rows.empty else None
-    has_restatement = (not orig_rows.empty) and (rest is not None)
+    filed_col = filed_df[period] if (not filed_df.empty and period in filed_df.columns) else pd.Series(dtype=float)
+    rest_col  = rest_df[period]  if (not rest_df.empty  and period in rest_df.columns)  else pd.Series(dtype=float)
 
-    report_date = str(orig.get('Report Date', ''))[:10]
-    restated_date = str(rest['Restated Date'])[:10] if rest is not None else ''
+    if filed_col.empty and rest_col.empty:
+        return html.Div('No data for this period.', className='no-data')
 
-    monetary = [c for c in item_cols if not is_per_share(c)]
-    mono_vals = pd.to_numeric(
-        pd.Series([orig.get(c) for c in monetary]), errors='coerce'
-    ).dropna()
-    maxabs = float(mono_vals.abs().max()) if not mono_vals.empty else 0.0
-    if maxabs >= 1_000_000_000:
-        divisor, scale_label = 1e6, 'USD millions'
-    elif maxabs >= 1_000_000:
-        divisor, scale_label = 1e3, 'USD thousands'
-    else:
-        divisor, scale_label = 1.0, 'USD'
+    scale_df = pd.concat([filed_col.rename('f'), rest_col.rename('r')], axis=1)
+    divisor, scale_label = detect_scale(scale_df)
 
-    _cell = {'padding': '3px 6px', 'fontSize': '12px', 'color': MUTED,
-             'border': '1px solid rgba(255,255,255,0.08)', 'whiteSpace': 'nowrap'}
-    _hdr = {**_cell, 'fontWeight': '600', 'textAlign': 'right',
-            'backgroundColor': 'rgba(255,255,255,0.04)'}
-    _item_td = {**_cell, 'textAlign': 'right',
-                'maxWidth': '220px', 'overflow': 'hidden', 'textOverflow': 'ellipsis'}
-    _num_td = {**_cell, 'textAlign': 'right',
-               'fontFamily': '"SF Mono","Cascadia Code",monospace'}
+    records = []
+    for item in dict.fromkeys(list(filed_col.index) + list(rest_col.index)):
+        ps  = is_per_share(str(item))
+        pct = is_pct_item(str(item), filed_col)
+        v_f = filed_col.get(item)
+        v_r = rest_col.get(item)
+        filed_fmt = fmt_cell(v_f, per_share=ps, pct=pct, divisor=divisor) if pd.notna(v_f) else '—'
+        rest_fmt  = fmt_cell(v_r, per_share=ps, pct=pct, divisor=divisor) if pd.notna(v_r) else '—'
+        try:
+            diff     = float(v_r) - float(v_f)
+            diff_fmt = '—' if diff == 0 else fmt_cell(diff, per_share=ps, pct=pct, divisor=divisor)
+            diff_pct = diff / abs(float(v_f)) * 100 if float(v_f) != 0 else float('nan')
+            diff_pct_fmt = '—' if diff == 0 or pd.isna(diff_pct) else f'{diff_pct:+.1f}%'
+        except (TypeError, ValueError):
+            diff_fmt = diff_pct_fmt = '—'
+        records.append({
+            'Report Date': report_date, 'Restated Date': restated_date,
+            'Item': str(item), 'As Filed': filed_fmt,
+            'Restated': rest_fmt, 'Diff': diff_fmt, 'Diff%': diff_pct_fmt,
+            '_': '',
+        })
 
-    headers = ['Report Date', 'Restated Date', 'Item', 'As Filed', 'Restated', 'Diff %']
-    hdr_row = html.Tr([html.Th(h, style=_hdr) for h in headers])
+    _W = {'width': '93px', 'minWidth': '93px', 'maxWidth': '93px'}
+    _N = {'width': '91px', 'minWidth': '91px', 'maxWidth': '91px'}
+    style = dict(TABLE_STYLE)
+    style['style_cell_conditional'] = [
+        {'if': {'column_id': 'Report Date'},   'textAlign': 'center', **_W},
+        {'if': {'column_id': 'Restated Date'}, 'textAlign': 'center', **_W},
+        {'if': {'column_id': 'Item'},          'textAlign': 'right', 'fontWeight': '500',
+         'width': '260px', 'minWidth': '180px', 'maxWidth': '260px'},
+        {'if': {'column_id': 'As Filed'},      'textAlign': 'right', **_N},
+        {'if': {'column_id': 'Restated'},      'textAlign': 'right', **_N},
+        {'if': {'column_id': 'Diff'},          'textAlign': 'right',
+         'width': '91px', 'minWidth': '91px', 'maxWidth': '91px'},
+        {'if': {'column_id': 'Diff%'},         'textAlign': 'right',
+         'width': '60px', 'minWidth': '60px', 'maxWidth': '60px'},
+    ]
+    table = _dt.DataTable(
+        data=records,
+        columns=[
+            {'name': 'Report Date',   'id': 'Report Date'},
+            {'name': 'Restated Date', 'id': 'Restated Date'},
+            {'name': 'Item',          'id': 'Item'},
+            {'name': 'As Filed',      'id': 'As Filed'},
+            {'name': 'Restated',      'id': 'Restated'},
+            {'name': 'Diff',          'id': 'Diff'},
+            {'name': 'Diff%',         'id': 'Diff%'},
+            {'name': '',              'id': '_'},
+        ],
+        page_size=80,
+        **{k: v for k, v in style.items()},
+    )
 
-    rows_html = []
-    for item in item_cols:
-        ps = is_per_share(item)
-        ar_val = orig.get(item)
-        pct = is_pct_item(item, pd.Series([ar_val])) if not ps else False
-        ar_str = fmt_cell(ar_val, per_share=ps, pct=pct, divisor=divisor)
-
-        r_val = rest[item] if rest is not None else None
-        r_str = fmt_cell(r_val, per_share=ps, pct=pct, divisor=divisor) if has_restatement else '—'
-        diff_str = '—'
-        row_style = {}
-        if has_restatement and r_val is not None:
-            try:
-                ar_f, r_f = float(ar_val), float(r_val)
-                if not (pd.isna(ar_f) or pd.isna(r_f)) and ar_f != 0 and ar_f != r_f:
-                    diff = (r_f - ar_f) / abs(ar_f) * 100
-                    diff_str = f'{diff:+.2f}%'
-                    if abs(diff) > 0.5:
-                        row_style = {'backgroundColor': 'rgba(231,76,60,0.08)'}
-            except (TypeError, ValueError):
-                pass
-
-        rows_html.append(html.Tr([
-            html.Td(report_date, style=_cell),
-            html.Td(restated_date or '—', style=_cell),
-            html.Td(item, style=_item_td),
-            html.Td(ar_str, style=_num_td),
-            html.Td(r_str, style=_num_td),
-            html.Td(diff_str, style=_num_td),
-        ], style=row_style))
-
-    scale_note = f'  ({scale_label})' if scale_label else ''
-    title = f'{period} — {stmt_kind.title()} Statement{scale_note}'
-    if has_restatement:
-        title += f' — Restated {restated_date}'
-
+    note = (f'Amounts in {scale_label} except per-share data.'
+            if divisor != 1.0 else f'Amounts in {scale_label}.')
     return html.Div([
-        html.Div(title, style={'fontSize': '12px', 'fontWeight': '600', 'color': MUTED,
-                               'marginBottom': '8px', 'marginTop': '4px'}),
-        html.Div(style={'overflowX': 'auto'}, children=html.Table(
-            style={'borderCollapse': 'collapse'},
-            children=[html.Thead(hdr_row), html.Tbody(rows_html)],
-        )),
+        html.Div(
+            f'{period} — {stmt_kind.title()} Statement',
+            style={'fontSize': '13px', 'fontWeight': '600', 'color': MUTED,
+                   'marginBottom': '4px', 'marginTop': '8px'},
+        ),
+        html.P(note, className='stmt-note'),
+        table,
     ])
 
 
@@ -948,14 +955,25 @@ def load_restatements(ticker: str | None, variant: str, stmt_kind: str) -> Any:
     if df.empty:
         return html.P('No filings available.', className='no-data')
 
+    _THRESHOLD = 180  # days gap between Report Date and Restated Date
+
     periods: list[tuple[str, bool]] = []
     for period, grp in df.groupby('_period'):
-        orig_rows = grp[grp['Restated Date'].apply(_is_null_date)]
-        rest_rows = grp[~grp['Restated Date'].apply(_is_null_date)]
-        has_rest = (not orig_rows.empty) and (not rest_rows.empty)
+        row = grp.iloc[0]
+        has_rest = False
+        if not _is_null_date(row.get('Restated Date')) and not _is_null_date(row.get('Report Date')):
+            try:
+                gap = (pd.to_datetime(row['Restated Date']) - pd.to_datetime(row['Report Date'])).days
+                has_rest = gap > _THRESHOLD
+            except Exception:
+                pass
         periods.append((str(period), has_rest))
 
+    periods = [(p, r) for p, r in periods if r]
     periods.sort(key=lambda x: _period_sort_key(x[0]), reverse=True)
+
+    if not periods:
+        return html.P('No restated filings found.', className='no-data')
 
     chips = []
     for period, has_rest in periods:
@@ -965,10 +983,9 @@ def load_restatements(ticker: str | None, variant: str, stmt_kind: str) -> Any:
             n_clicks=0,
             style={
                 'fontSize': '11px', 'padding': '3px 9px', 'cursor': 'pointer',
-                'border': '1px solid rgba(255,165,0,0.55)' if has_rest
-                          else '1px solid rgba(255,255,255,0.15)',
+                'border': '1px solid rgba(255,165,0,0.55)',
                 'borderRadius': '3px',
-                'background': 'rgba(255,165,0,0.08)' if has_rest else 'transparent',
+                'background': 'rgba(255,165,0,0.08)',
                 'color': MUTED,
             },
         ))
