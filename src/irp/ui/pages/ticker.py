@@ -5,7 +5,7 @@ from typing import Any
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, callback, dcc, html
+from dash import ALL, Input, Output, State, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 from plotly.basedatatypes import BaseTraceType
@@ -201,6 +201,44 @@ layout = html.Div(
                             selected_className='ticker-tab--active',
                             children=[
                                 dcc.Loading(html.Div(id='div-split-content')),
+                            ],
+                        ),
+                        dcc.Tab(
+                            label='Restatements',
+                            value='restatements',
+                            className='ticker-tab',
+                            selected_className='ticker-tab--active',
+                            children=[
+                                html.Div(
+                                    className='stmt-controls',
+                                    style={'display': 'flex', 'gap': '16px',
+                                           'alignItems': 'center', 'flexWrap': 'wrap'},
+                                    children=[
+                                        dcc.RadioItems(
+                                            id='restatements-variant',
+                                            options=[
+                                                {'label': ' Annual', 'value': 'A'},
+                                                {'label': ' Quarterly', 'value': 'Q'},
+                                            ],
+                                            value='A',
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
+                                        dcc.RadioItems(
+                                            id='restatements-stmt',
+                                            options=[
+                                                {'label': ' Income', 'value': 'income'},
+                                                {'label': ' Balance', 'value': 'balance'},
+                                                {'label': ' Cash Flow', 'value': 'cashflow'},
+                                            ],
+                                            value='income',
+                                            inline=True,
+                                            labelClassName='check-item',
+                                        ),
+                                    ],
+                                ),
+                                dcc.Loading(html.Div(id='restatements-list')),
+                                html.Div(id='restatements-detail', style={'marginTop': '16px'}),
                             ],
                         ),
                     ],
@@ -601,13 +639,24 @@ def update_price_table(price_data: list | None, relayout_data: dict | None) -> A
         return html.P('No data in selected range.', className='no-data')
 
     cols = [c for c in rows[0] if c != 'Ticker']
-    ###################################################################################
+    table_cols = [{'name': c, 'id': c} for c in cols] + [{'name': '', 'id': '_spacer'}]
+    rows_sp = [{**r, '_spacer': ''} for r in rows]
+    _nw = {'whiteSpace': 'nowrap', 'overflow': 'hidden', 'textOverflow': 'ellipsis'}
+    style = dict(TABLE_STYLE)
+    style['style_cell_conditional'] = [
+        {'if': {'column_id': 'Date'},   'textAlign': 'left', 'width': '100px', **_nw},
+        {'if': {'column_id': 'Open'},   'width': '90px',  **_nw},
+        {'if': {'column_id': 'High'},   'width': '90px',  **_nw},
+        {'if': {'column_id': 'Low'},    'width': '90px',  **_nw},
+        {'if': {'column_id': 'Close'},  'width': '90px',  **_nw},
+        {'if': {'column_id': 'Volume'}, 'width': '120px', **_nw},
+    ]
     return _dt.DataTable(
-        data=rows,
-        columns=[{'name': c, 'id': c} for c in cols],
+        data=rows_sp,
+        columns=table_cols,
         page_size=50,
         sort_action='native',
-        **TABLE_STYLE,
+        **{k: v for k, v in style.items()},
     )
 
 
@@ -745,6 +794,210 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
 
     edgar_strip = _edgar_period_strip(ticker, name, period_cols)
     return html.Div([edgar_strip, table]), note
+
+
+# ── restatements helpers ──────────────────────────────────────────────────────
+
+def _is_null_date(v: object) -> bool:
+    if v is None:
+        return True
+    try:
+        if pd.isna(v):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(v).strip() in ('', 'None', 'nan', 'NaT', 'NaN')
+
+
+_REST_META = {
+    'Ticker', 'SrcId', 'Src', 'Currency', 'Fiscal Year', 'Fiscal Period',
+    'Report Date', 'Publish Date', 'Restated Date', 'Market', 'Period', '_period',
+}
+
+
+def _raw_filings(ticker: str, stmt_kind: str, variant: str) -> pd.DataFrame:
+    from irp.query.simfin import fundamentals as _fund
+    df = _fund(ticker, stmt_kind, variant)
+    if df.empty:
+        return df
+    df = df.copy()
+    df.loc[df['Period'] == 'A', 'Fiscal Period'] = 'FY'
+    df['_period'] = [
+        f'{int(fy)}FY' if p == 'A' else f'{int(fy)}{fp}'
+        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+    ]
+    return df
+
+
+def _period_sort_key(p: str) -> tuple:
+    try:
+        year = int(p[:4])
+        q = int(p[5]) if len(p) > 5 and p[4] == 'Q' else 0
+    except (ValueError, IndexError):
+        return (0, 0)
+    return (year, q)
+
+
+def _restatement_detail_html(
+    ticker: str, stmt_kind: str, period: str, variant: str
+) -> html.Div:
+    from irp.ui.ticker_fmt import fmt_cell, is_per_share, is_pct_item
+
+    df = _raw_filings(ticker, stmt_kind, variant)
+    if df.empty:
+        return html.Div('No data.', className='no-data')
+
+    df_p = df[df['_period'] == period]
+    if df_p.empty:
+        return html.Div('No data for this period.', className='no-data')
+
+    item_cols = [c for c in df_p.columns if c not in _REST_META]
+
+    orig_rows = df_p[df_p['Restated Date'].apply(_is_null_date)]
+    rest_rows = df_p[~df_p['Restated Date'].apply(_is_null_date)]
+    orig = orig_rows.iloc[0] if not orig_rows.empty else df_p.iloc[0]
+    rest = rest_rows.iloc[0] if not rest_rows.empty else None
+    has_restatement = (not orig_rows.empty) and (rest is not None)
+
+    report_date = str(orig.get('Report Date', ''))[:10]
+    restated_date = str(rest['Restated Date'])[:10] if rest is not None else ''
+
+    monetary = [c for c in item_cols if not is_per_share(c)]
+    mono_vals = pd.to_numeric(
+        pd.Series([orig.get(c) for c in monetary]), errors='coerce'
+    ).dropna()
+    maxabs = float(mono_vals.abs().max()) if not mono_vals.empty else 0.0
+    if maxabs >= 1_000_000_000:
+        divisor, scale_label = 1e6, 'USD millions'
+    elif maxabs >= 1_000_000:
+        divisor, scale_label = 1e3, 'USD thousands'
+    else:
+        divisor, scale_label = 1.0, 'USD'
+
+    _cell = {'padding': '3px 6px', 'fontSize': '12px', 'color': MUTED,
+             'border': '1px solid rgba(255,255,255,0.08)', 'whiteSpace': 'nowrap'}
+    _hdr = {**_cell, 'fontWeight': '600', 'textAlign': 'right',
+            'backgroundColor': 'rgba(255,255,255,0.04)'}
+    _item_td = {**_cell, 'textAlign': 'right',
+                'maxWidth': '220px', 'overflow': 'hidden', 'textOverflow': 'ellipsis'}
+    _num_td = {**_cell, 'textAlign': 'right',
+               'fontFamily': '"SF Mono","Cascadia Code",monospace'}
+
+    headers = ['Report Date', 'Restated Date', 'Item', 'As Filed', 'Restated', 'Diff %']
+    hdr_row = html.Tr([html.Th(h, style=_hdr) for h in headers])
+
+    rows_html = []
+    for item in item_cols:
+        ps = is_per_share(item)
+        ar_val = orig.get(item)
+        pct = is_pct_item(item, pd.Series([ar_val])) if not ps else False
+        ar_str = fmt_cell(ar_val, per_share=ps, pct=pct, divisor=divisor)
+
+        r_val = rest[item] if rest is not None else None
+        r_str = fmt_cell(r_val, per_share=ps, pct=pct, divisor=divisor) if has_restatement else '—'
+        diff_str = '—'
+        row_style = {}
+        if has_restatement and r_val is not None:
+            try:
+                ar_f, r_f = float(ar_val), float(r_val)
+                if not (pd.isna(ar_f) or pd.isna(r_f)) and ar_f != 0 and ar_f != r_f:
+                    diff = (r_f - ar_f) / abs(ar_f) * 100
+                    diff_str = f'{diff:+.2f}%'
+                    if abs(diff) > 0.5:
+                        row_style = {'backgroundColor': 'rgba(231,76,60,0.08)'}
+            except (TypeError, ValueError):
+                pass
+
+        rows_html.append(html.Tr([
+            html.Td(report_date, style=_cell),
+            html.Td(restated_date or '—', style=_cell),
+            html.Td(item, style=_item_td),
+            html.Td(ar_str, style=_num_td),
+            html.Td(r_str, style=_num_td),
+            html.Td(diff_str, style=_num_td),
+        ], style=row_style))
+
+    scale_note = f'  ({scale_label})' if scale_label else ''
+    title = f'{period} — {stmt_kind.title()} Statement{scale_note}'
+    if has_restatement:
+        title += f' — Restated {restated_date}'
+
+    return html.Div([
+        html.Div(title, style={'fontSize': '12px', 'fontWeight': '600', 'color': MUTED,
+                               'marginBottom': '8px', 'marginTop': '4px'}),
+        html.Div(style={'overflowX': 'auto'}, children=html.Table(
+            style={'borderCollapse': 'collapse'},
+            children=[html.Thead(hdr_row), html.Tbody(rows_html)],
+        )),
+    ])
+
+
+# ── restatements callbacks ────────────────────────────────────────────────────
+
+@callback(
+    Output('restatements-list', 'children'),
+    Input('ticker-store', 'data'),
+    Input('restatements-variant', 'value'),
+    Input('restatements-stmt', 'value'),
+)
+def load_restatements(ticker: str | None, variant: str, stmt_kind: str) -> Any:
+    if not ticker:
+        raise PreventUpdate
+
+    df = _raw_filings(ticker, stmt_kind, variant)
+    if df.empty:
+        return html.P('No filings available.', className='no-data')
+
+    periods: list[tuple[str, bool]] = []
+    for period, grp in df.groupby('_period'):
+        orig_rows = grp[grp['Restated Date'].apply(_is_null_date)]
+        rest_rows = grp[~grp['Restated Date'].apply(_is_null_date)]
+        has_rest = (not orig_rows.empty) and (not rest_rows.empty)
+        periods.append((str(period), has_rest))
+
+    periods.sort(key=lambda x: _period_sort_key(x[0]), reverse=True)
+
+    chips = []
+    for period, has_rest in periods:
+        chips.append(html.Button(
+            period,
+            id={'type': 'rst-chip', 'index': period},
+            n_clicks=0,
+            style={
+                'fontSize': '11px', 'padding': '3px 9px', 'cursor': 'pointer',
+                'border': '1px solid rgba(255,165,0,0.55)' if has_rest
+                          else '1px solid rgba(255,255,255,0.15)',
+                'borderRadius': '3px',
+                'background': 'rgba(255,165,0,0.08)' if has_rest else 'transparent',
+                'color': MUTED,
+            },
+        ))
+
+    return html.Div(chips, style={'display': 'flex', 'flexWrap': 'wrap',
+                                  'gap': '5px', 'marginTop': '8px'})
+
+
+@callback(
+    Output('restatements-detail', 'children'),
+    Input({'type': 'rst-chip', 'index': ALL}, 'n_clicks'),
+    State('ticker-store', 'data'),
+    State('restatements-variant', 'value'),
+    State('restatements-stmt', 'value'),
+    prevent_initial_call=True,
+)
+def show_restatement_detail(
+    _n: list,
+    ticker: str | None,
+    variant: str,
+    stmt_kind: str,
+) -> Any:
+    import json as _json
+    ctx = dash.callback_context
+    if not ctx.triggered or not ticker:
+        raise PreventUpdate
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    period = _json.loads(triggered_id)['index']
+    return _restatement_detail_html(ticker, stmt_kind, period, variant)
 
 
 @callback(
