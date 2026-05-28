@@ -49,7 +49,8 @@ def fmt_cell(val: object, *, per_share: bool, pct: bool, divisor: float) -> str:
         return f'{v:,.2f}'
     if pct:
         return f'{v * 100:.2f}%' if abs(v) <= 1 else f'{v:.2f}%'
-    return f'{v / divisor:,.1f}'
+    s = f'{v / divisor:,.1f}'
+    return s[:-2] if s.endswith('.0') else s
 
 
 def fmt_statement(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
