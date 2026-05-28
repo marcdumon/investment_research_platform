@@ -125,15 +125,17 @@ def _net_income_split(data):
 # ─── Cashflow statement ───────────────────────────────────────────────
 
 @register('cash_chain', 'cashflow',
-          'Net Change in Cash', 'CFO + CFI + CFF',
+          'Net Change in Cash', 'CFO + CFI + CFF + FX Effect',
           columns=('Net Cash from Operating Activities', 'Net Cash from Investing Activities',
-                   'Net Cash from Financing Activities', 'Net Change in Cash'))
+                   'Net Cash from Financing Activities', 'Effect of Foreign Exchange Rates',
+                   'Net Change in Cash'))
 def _cash_chain(data):
     df = data['cashflow'].copy()
     df['_rhs'] = (
         df['Net Cash from Operating Activities']
         + df['Net Cash from Investing Activities']
         + df['Net Cash from Financing Activities']
+        + df['Effect of Foreign Exchange Rates'].fillna(0)
     )
     return violations(df, 'Net Change in Cash', '_rhs')
 

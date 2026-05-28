@@ -216,15 +216,47 @@ _fund_tab = html.Div(children=[
                     ],
                     value='income', inline=True, labelClassName='check-item',
                 ),
-                html.Button('Save annotations', id='dq-sf-annotation-save',
-                            className='run-btn', n_clicks=0),
-                html.Span(id='dq-sf-annotation-msg',
-                          style={'color': ACCENT, 'fontSize': '12px'}),
+                dcc.RadioItems(
+                    id='dq-sf-unit-radio',
+                    options=[
+                        {'label': 'Auto', 'value': 'auto'},
+                        {'label': 'B',    'value': 'B'},
+                        {'label': 'M',    'value': 'M'},
+                        {'label': 'K',    'value': 'K'},
+                        {'label': 'Raw',  'value': 'raw'},
+                    ],
+                    value='auto', inline=True, labelClassName='check-item',
+                ),
             ]),
             dcc.Loading(type='circle', color=ACCENT,
                         children=html.Div(id='dq-sf-statement-wrap')),
+            # Review + save row (combined)
+            html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '12px',
+                            'marginTop': '10px', 'flexWrap': 'wrap'}, children=[
+                dcc.RadioItems(
+                    id='dq-sf-status',
+                    options=_STATUS_OPTIONS,
+                    value='to_check',
+                    labelClassName='check-item',
+                    style={'display': 'flex', 'gap': '12px'},
+                ),
+                dcc.Textarea(
+                    id='dq-sf-note',
+                    placeholder='Note (optional)',
+                    style={'flex': '1', 'minWidth': '200px', 'minHeight': '36px',
+                           'fontSize': '12px', 'backgroundColor': 'rgba(255,255,255,0.04)',
+                           'color': MUTED, 'border': '1px solid rgba(255,255,255,0.12)',
+                           'borderRadius': '4px', 'padding': '4px 6px'},
+                ),
+                html.Button('Save', id='dq-sf-annotation-save',
+                            className='run-btn', n_clicks=0),
+                html.Button('Show hidden', id='dq-sf-annotation-show-all',
+                            className='run-btn', n_clicks=0,
+                            style={'fontSize': '11px', 'opacity': '0.7'}),
+                html.Span(id='dq-sf-annotation-msg',
+                          style={'color': ACCENT, 'fontSize': '12px'}),
+            ]),
         ]),
-        _review_form('dq-sf'),
     ]),
 
     # Manual flag
@@ -368,7 +400,7 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
             }
         filings[key]['_rules'].append(r['Rule'])
         filings[key]['_max_diff'] = max(
-            filings[key]['_max_diff'], abs(r.get('rel_diff_pct') or 0)
+            filings[key]['_max_diff'], abs(r.get('diff_M') or 0)
         )
 
     rows = []
@@ -380,19 +412,19 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
             'Period_str': f['Period_str'],
             'n_rules': len(f['_rules']),
             'rules_str': ', '.join(f['_rules']),
-            'max_diff_pct': round(f['_max_diff'], 2),
+            'max_diff_M': round(f['_max_diff'], 1),
             'CIK': f['CIK'],
             'Report Date': f['Report Date'],
             'Period': f['Period'],
         })
 
     cols = [
-        {'name': 'Ticker',   'id': 'Ticker'},
-        {'name': 'Period',   'id': 'Period_str'},
-        {'name': 'Max Δ%',   'id': 'max_diff_pct', 'type': 'numeric',
-         'format': Fmt.Format(precision=2, scheme=Fmt.Scheme.fixed)},
-        {'name': 'Rules',    'id': 'rules_str'},
-        {'name': '',         'id': '_sf_spacer'},
+        {'name': 'Ticker',    'id': 'Ticker'},
+        {'name': 'Period',    'id': 'Period_str'},
+        {'name': 'Max Δ (M)', 'id': 'max_diff_M', 'type': 'numeric',
+         'format': Fmt.Format(precision=1, scheme=Fmt.Scheme.fixed)},
+        {'name': 'Rules',     'id': 'rules_str'},
+        {'name': '',          'id': '_sf_spacer'},
     ]
     for r in rows:
         r['_sf_spacer'] = ''
@@ -409,10 +441,10 @@ def _make_simfin_table(records: list[dict]) -> dash.dash_table.DataTable:
         filter_action='native',
         style_table={'overflowX': 'auto', 'width': '100%'},
         style_cell_conditional=[
-            {'if': {'column_id': 'Ticker'},       'width': '70px',  **_nw},
-            {'if': {'column_id': 'Period_str'},   'width': '80px',  **_nw},
-            {'if': {'column_id': 'max_diff_pct'}, 'width': '70px',  **_nw},
-            {'if': {'column_id': 'rules_str'},    'width': '300px', **_nw},
+            {'if': {'column_id': 'Ticker'},      'width': '70px',  **_nw},
+            {'if': {'column_id': 'Period_str'},  'width': '80px',  **_nw},
+            {'if': {'column_id': 'max_diff_M'},  'width': '80px',  **_nw},
+            {'if': {'column_id': 'rules_str'},   'width': '300px', **_nw},
         ],
         **_TABLE_STYLE,
     )
@@ -497,6 +529,30 @@ def _fmt_num(x) -> str:
         return str(x) if x is not None else '—'
 
 
+def _unit_for_values(vals: list[float]) -> tuple[float, str]:
+    """Pick a consistent scale (billions/millions/thousands/units) from a list of values."""
+    if not vals:
+        return 1.0, ''
+    # Use median of values > 1000 to avoid EPS/per-share items skewing scale
+    large = sorted(abs(v) for v in vals if v is not None and abs(v) > 1000)
+    if not large:
+        return 1.0, ''
+    med = large[len(large) // 2]
+    if med >= 1e9:
+        return 1e9, 'in billions'
+    if med >= 1e6:
+        return 1e6, 'in millions'
+    if med >= 1e3:
+        return 1e3, 'in thousands'
+    return 1.0, ''
+
+
+def _fmt_scaled(v: float, unit: float) -> str:
+    """Format v / unit as a plain integer with commas. No decimals."""
+    scaled = int(round(v / unit))
+    return f'{scaled:,}'
+
+
 def _fmt_violation_line(label: str, value) -> str:
     """'Net Income (income)' → '- Income: Net Income: -37,000,000'"""
     m = re.match(r'^(.*?)\s*\((\w+)\)\s*$', label)
@@ -533,14 +589,19 @@ def _render_statement(ticker: str, period_str: str, kind: str) -> html.Div:
     return _inspect_html(sub)
 
 
+_UNIT_MAP = {'B': 1e9, 'M': 1e6, 'K': 1e3, 'raw': 1.0}
+
+
 def _render_annotation_table(
     ticker: str,
     period_str: str,
     kind: str,
     existing: dict[str, float],
     input_type: str = 'edgar-input',
+    existing_notes: dict[str, str] | None = None,
+    unit_choice: str = 'auto',
 ) -> tuple[html.Div, dict]:
-    """Comparison table: Line Item | SimFin value | EDGAR input | flag.
+    """Comparison table: Line Item | SimFin value | EDGAR input | Note | flag.
 
     Returns (html.Div, store_payload) where store_payload holds row order + simfin values.
     input_type distinguishes violation-panel inputs ('edgar-input') from manual ones ('edgar-input-manual').
@@ -573,27 +634,53 @@ def _render_annotation_table(
         if parsed is not None:
             store_payload['_items'].append(item)
 
-    _TH_A = {**_TH, 'width': '260px', 'textAlign': 'right'}
-    _TH_V = {**_TH, 'width': '120px', 'textAlign': 'right'}
-    _TH_I = {**_TH, 'width': '140px'}
-    _TH_F = {**_TH, 'width': '32px', 'textAlign': 'center'}
+    note_type = input_type.replace('edgar-input', 'edgar-note')
+    hide_type = input_type.replace('edgar-input', 'hide-row-btn')
+    row_type  = input_type.replace('edgar-input', 'annotation-row')
+    existing_notes = existing_notes or {}
+
+    # Determine consistent scale
+    sf_vals = [v for v in store_payload.values() if isinstance(v, float)]
+    if unit_choice in _UNIT_MAP:
+        unit = _UNIT_MAP[unit_choice]
+        _labels = {'B': 'in billions', 'M': 'in millions', 'K': 'in thousands', 'raw': ''}
+        unit_label = _labels[unit_choice]
+    else:
+        unit, unit_label = _unit_for_values(sf_vals)
+    store_payload['_unit'] = unit
+
+    _TH_A  = {**_TH, 'width': '240px', 'textAlign': 'right'}
+    _TH_V  = {**_TH, 'width': '110px', 'textAlign': 'right'}
+    _TH_I  = {**_TH, 'width': '120px'}
+    _TH_N  = {**_TH, 'width': '200px'}
+    _TH_F  = {**_TH, 'width': '32px', 'textAlign': 'center'}
+    _TH_H  = {**_TH, 'width': '28px', 'textAlign': 'center'}
     _TH_SP = {**_TH, 'border': 'none', 'backgroundColor': 'transparent'}
 
     header = html.Tr([
         html.Th('Line Item', style=_TH_A),
-        html.Th('SimFin', style=_TH_V),
-        html.Th('EDGAR', style=_TH_I),
-        html.Th('', style=_TH_F),
-        html.Th('', style=_TH_SP),
+        html.Th('SimFin',    style=_TH_V),
+        html.Th('EDGAR',     style=_TH_I),
+        html.Th('Note',      style=_TH_N),
+        html.Th('',          style=_TH_F),
+        html.Th('',          style=_TH_H),
+        html.Th('',          style=_TH_SP),
     ])
     rows = []
+    _btn_style = {
+        'background': 'none', 'border': '1px solid rgba(255,255,255,0.15)',
+        'color': 'rgba(100,200,100,0.7)', 'cursor': 'pointer',
+        'borderRadius': '3px', 'fontSize': '11px', 'padding': '1px 5px',
+        'lineHeight': '1.2',
+    }
     for i, item in enumerate(items):
         sf_raw = store_payload.get(item)
         if sf_raw is None:
             continue
-        sf_fmt = _fmt_num(sf_raw)
+        sf_fmt = _fmt_scaled(sf_raw, unit)
         edgar_val = existing.get(item)
-        prefilled = str(int(edgar_val)) if edgar_val is not None else ''
+        prefilled = _fmt_scaled(edgar_val, unit) if edgar_val is not None else ''
+        note_val = existing_notes.get(item, '')
         try:
             differs = edgar_val is not None and (
                 sf_raw is None or abs(float(edgar_val) - float(sf_raw)) > 0.5
@@ -601,7 +688,13 @@ def _render_annotation_table(
         except (TypeError, ValueError):
             differs = False
         row_style = {'backgroundColor': 'rgba(88,166,255,0.08)'} if differs else {}
-        rows.append(html.Tr(style=row_style, children=[
+        _inp_style = {
+            'width': '100%', 'fontSize': '12px',
+            'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
+            'border': '1px solid rgba(255,255,255,0.12)',
+            'borderRadius': '3px', 'padding': '2px 6px',
+        }
+        rows.append(html.Tr(id={'type': row_type, 'index': i}, style=row_style, children=[
             html.Td(item, style={**_TD, 'whiteSpace': 'nowrap', 'textAlign': 'right'}),
             html.Td(sf_fmt, style={**_TD, 'textAlign': 'right', 'fontFamily': 'monospace'}),
             html.Td(dcc.Input(
@@ -610,20 +703,33 @@ def _render_annotation_table(
                 placeholder='EDGAR value',
                 debounce=False,
                 type='text',
-                style={
-                    'width': '100%', 'fontSize': '12px',
-                    'backgroundColor': 'rgba(255,255,255,0.04)', 'color': MUTED,
-                    'border': '1px solid rgba(255,255,255,0.12)',
-                    'borderRadius': '3px', 'padding': '2px 6px',
-                },
+                style=_inp_style,
+            ), style={**_TD, 'padding': '2px 6px'}),
+            html.Td(dcc.Input(
+                id={'type': note_type, 'index': i},
+                value=note_val,
+                placeholder='note',
+                debounce=False,
+                type='text',
+                style=_inp_style,
             ), style={**_TD, 'padding': '2px 6px'}),
             html.Td('●' if differs else '',
                     style={**_TD, 'textAlign': 'center',
                            'color': ACCENT if differs else 'transparent'}),
+            html.Td(html.Button('✓', id={'type': hide_type, 'index': i},
+                                n_clicks=0, style=_btn_style,
+                                title='Mark as verified and hide'),
+                    style={**_TD, 'padding': '2px 4px', 'textAlign': 'center'}),
             html.Td('', style={'border': 'none'}),
         ]))
 
+    unit_note = html.Div(
+        f'({unit_label})' if unit_label else '',
+        style={'fontSize': '11px', 'color': MUTED, 'textAlign': 'right',
+               'marginBottom': '4px', 'fontStyle': 'italic'},
+    )
     table_div = html.Div(style={'overflowX': 'auto'}, children=[
+        unit_note,
         html.Table([html.Thead(header), html.Tbody(rows)],
                    style={'borderCollapse': 'collapse', 'width': '100%'}),
     ])
@@ -685,18 +791,18 @@ def _violations_summary(violations: list[dict]) -> html.Div:
         html.Th(c, style={'padding': '4px 10px', 'fontSize': '11px', 'color': MUTED,
                           'border': '1px solid rgba(255,255,255,0.08)',
                           'backgroundColor': 'rgba(255,255,255,0.05)'})
-        for c in ('Rule', 'Δ%', 'LHS', 'RHS')
+        for c in ('Rule', 'Δ (M)', 'LHS', 'RHS')
     ])
     rows = []
     for v in violations:
-        diff = v.get('rel_diff_pct') or 0
+        diff = v.get('diff_M') or 0
         rows.append(html.Tr([
             html.Td(v['Rule'],
                     title=_SF_RULE_INFO.get(v['Rule'], ''),
                     style={'padding': '3px 10px', 'fontSize': '12px', 'color': MUTED,
                            'border': '1px solid rgba(255,255,255,0.08)',
                            'cursor': 'help', 'fontFamily': 'monospace'}),
-            html.Td(f'{diff:+.2f}%',
+            html.Td(f'{diff:+.1f}M',
                     style={'padding': '3px 10px', 'fontSize': '12px',
                            'color': 'rgba(231,76,60,0.9)' if abs(diff) >= 1 else MUTED,
                            'border': '1px solid rgba(255,255,255,0.08)'}),
@@ -721,7 +827,6 @@ def _violations_summary(violations: list[dict]) -> html.Div:
     Output('dq-sf-rule-select', 'options'),
     Output('dq-sf-rule-select', 'value'),
     Output('dq-sf-sel', 'data'),
-    Output('dq-sf-note', 'value', allow_duplicate=True),
     Input('dq-sf-table', 'active_cell'),
     Input('dq-sf-close', 'n_clicks'),
     State('dq-sf-table', 'data'),
@@ -732,7 +837,7 @@ def show_simfin_detail(cell, close_n, table_data, results):
     from dash import ctx
     _hide = {'display': 'none'}
     _show = {'display': 'block'}
-    _empty = (_hide, '', '', html.Div(), [], None, None, '')
+    _empty = (_hide, '', '', html.Div(), [], None, None)
 
     if ctx.triggered_id == 'dq-sf-close' or not cell or not table_data:
         return _empty
@@ -747,7 +852,7 @@ def show_simfin_detail(cell, close_n, table_data, results):
     title = f'{ticker} — {period_str} — {len(violations)} rule{"s" if len(violations) != 1 else ""}'
     summary = _violations_summary(violations)
     rule_opts = [
-        {'label': f'{v["Rule"]}  Δ{v.get("rel_diff_pct", 0):+.1f}%', 'value': v['Rule']}
+        {'label': f'{v["Rule"]}  Δ{v.get("diff_M", 0):+.1f}M', 'value': v['Rule']}
         for v in violations
     ]
     sel = {
@@ -757,16 +862,7 @@ def show_simfin_detail(cell, close_n, table_data, results):
         'Report Date': filing.get('Report Date', ''),
         'Period': filing.get('Period', ''),
     }
-    note_lines = []
-    for v in violations:
-        lhs_label, rhs_label = _SF_RULE_LABELS.get(v['Rule'], ('LHS', 'RHS'))
-        note_lines.append(
-            f'{v["Rule"]}:\n'
-            + _fmt_violation_line(lhs_label, v.get('LHS_value')) + '\n'
-            + _fmt_violation_line(rhs_label, v.get('RHS_value'))
-        )
-    note_template = '\n'.join(note_lines) + '\n\nEDGAR: '
-    return _show, title, '', summary, rule_opts, violations[0]['Rule'], sel, note_template
+    return _show, title, '', summary, rule_opts, violations[0]['Rule'], sel
 
 
 @callback(
@@ -805,16 +901,21 @@ def update_simfin_inspect(rule, sel, results):
     Output('dq-sf-corrections', 'data'),
     Input('dq-sf-sel', 'data'),
     Input('dq-sf-stmt-kind', 'value'),
+    Input('dq-sf-unit-radio', 'value'),
     prevent_initial_call=True,
 )
-def update_sf_annotation_table(sel, kind):
+def update_sf_annotation_table(sel, kind, unit_choice):
     if not sel:
         raise PreventUpdate
     ticker = sel['Ticker']
     period = sel['Period_str']
     stmt_kind = kind or 'income'
     existing = dq.load_edgar_corrections(ticker, period, stmt_kind)
-    table_div, store_payload = _render_annotation_table(ticker, period, stmt_kind, existing)
+    existing_notes = dq.load_edgar_correction_notes(ticker, period, stmt_kind)
+    table_div, store_payload = _render_annotation_table(
+        ticker, period, stmt_kind, existing, existing_notes=existing_notes,
+        unit_choice=unit_choice or 'auto',
+    )
     return table_div, store_payload
 
 
@@ -823,40 +924,50 @@ def update_sf_annotation_table(sel, kind):
     Input('dq-sf-annotation-save', 'n_clicks'),
     State('dq-sf-sel', 'data'),
     State('dq-sf-stmt-kind', 'value'),
+    State('dq-sf-rule-select', 'value'),
+    State('dq-sf-status', 'value'),
+    State('dq-sf-note', 'value'),
     State('dq-sf-corrections', 'data'),
     State({'type': 'edgar-input', 'index': ALL}, 'value'),
+    State({'type': 'edgar-note',  'index': ALL}, 'value'),
     prevent_initial_call=True,
 )
-def save_edgar_annotations(n, sel, kind, corrections_store, input_values):
-    if not sel or not corrections_store:
+def save_edgar_annotations(n, sel, kind, rule, status, review_note,
+                           corrections_store, input_values, note_values):
+    if not sel:
         raise PreventUpdate
-    items = corrections_store.get('_items', [])
-    if not items or not input_values:
-        raise PreventUpdate
-    ticker, period, stmt_kind = sel['Ticker'], sel['Period_str'], kind or 'income'
+    ticker, period = sel['Ticker'], sel['Period_str']
+    stmt_kind = kind or 'income'
+    rule = rule or ''
+    status = status or 'to_check'
+    unit = float((corrections_store or {}).get('_unit') or 1)
+    items = (corrections_store or {}).get('_items', [])
     edgar_values: dict[str, float] = {}
     simfin_values: dict[str, float] = {}
-    for item, raw in zip(items, input_values):
+    line_notes: dict[str, str] = {}
+    for item, raw, note_raw in zip(items, input_values or [], note_values or []):
         if raw and str(raw).strip():
             try:
-                edgar_values[item] = float(str(raw).replace(',', '').strip())
+                edgar_values[item] = float(str(raw).replace(',', '').strip()) * unit
             except ValueError:
                 continue
-        sf = corrections_store.get(item)
+        sf = (corrections_store or {}).get(item)
         if sf is not None:
             try:
                 simfin_values[item] = float(sf)
             except (TypeError, ValueError):
                 pass
-    if not edgar_values:
-        return 'Nothing to save (enter at least one EDGAR value).'
+        if note_raw and str(note_raw).strip():
+            line_notes[item] = str(note_raw).strip()
     try:
-        dq.save_edgar_corrections(ticker, period, stmt_kind, edgar_values,
-                                   simfin_values or None)
+        dq.save_statement(ticker, period, stmt_kind, rule, status,
+                          review_note or '', edgar_values,
+                          simfin_values or None, line_notes or None)
     except Exception as exc:
         logger.warning(f'annotation save error: {exc}')
         return f'Error: {exc}'
-    return f'Saved {len(edgar_values)} correction(s).'
+    n_corr = len(edgar_values)
+    return f'Saved ({status}{", " + str(n_corr) + " correction(s)" if n_corr else ""}).'
 
 
 @callback(
@@ -891,31 +1002,47 @@ dash.clientside_callback(
     prevent_initial_call=True,
 )
 
+_HIDE_ROW_JS = """
+function(hideClicks, showAllClicks, currentStyles) {
+    var ctx = window.dash_clientside.callback_context;
+    if (!ctx.triggered || ctx.triggered.length === 0)
+        return window.dash_clientside.no_update;
+    var prop_id = ctx.triggered[0].prop_id;
+    if (!currentStyles || currentStyles.length === 0)
+        return window.dash_clientside.no_update;
+    if (prop_id.includes('show-all')) {
+        return currentStyles.map(function() { return {}; });
+    }
+    var match = prop_id.match(/"index":(\\d+)/);
+    if (!match) return window.dash_clientside.no_update;
+    var idx = parseInt(match[1]);
+    var pos = ctx.inputs_list[0].findIndex(function(inp) { return inp.id.index === idx; });
+    if (pos < 0) return window.dash_clientside.no_update;
+    return currentStyles.map(function(s, i) {
+        return i === pos ? {display: 'none'} : (s || {});
+    });
+}
+"""
 
-@callback(
-    Output('dq-sf-results', 'data', allow_duplicate=True),
-    Output('dq-sf-note', 'value'),
-    Output('dq-sf-msg', 'children'),
-    Input('dq-sf-submit', 'n_clicks'),
-    State('dq-sf-sel', 'data'),
-    State('dq-sf-rule-select', 'value'),
-    State('dq-sf-status', 'value'),
-    State('dq-sf-note', 'value'),
-    State('dq-sf-results', 'data'),
+dash.clientside_callback(
+    _HIDE_ROW_JS,
+    Output({'type': 'annotation-row', 'index': ALL}, 'style'),
+    Input({'type': 'hide-row-btn', 'index': ALL}, 'n_clicks'),
+    Input('dq-sf-annotation-show-all', 'n_clicks'),
+    State({'type': 'annotation-row', 'index': ALL}, 'style'),
     prevent_initial_call=True,
 )
-def submit_simfin_review(n, sel, rule, status, note, results):
-    if not sel or not rule or not status:
-        raise PreventUpdate
-    try:
-        dq.add_simfin_review(sel['Ticker'], sel['Period_str'], rule, status, note or '')
-    except Exception as exc:
-        return results, note, f'Error: {exc}'
-    updated = [r for r in (results or [])
-               if not (r['Ticker'] == sel['Ticker']
-                       and r['Period_str'] == sel['Period_str']
-                       and r['Rule'] == rule)]
-    return updated, '', f'{rule} → {status}'
+
+dash.clientside_callback(
+    _HIDE_ROW_JS,
+    Output({'type': 'annotation-row-manual', 'index': ALL}, 'style'),
+    Input({'type': 'hide-row-btn-manual', 'index': ALL}, 'n_clicks'),
+    Input('dq-manual-annotation-show-all', 'n_clicks'),
+    State({'type': 'annotation-row-manual', 'index': ALL}, 'style'),
+    prevent_initial_call=True,
+)
+
+
 
 
 @callback(
@@ -1190,8 +1317,22 @@ def _manual_annotation_section(ticker_options: list[dict] | None = None) -> html
                 # Save row
                 html.Div(style={'display': 'flex', 'gap': '10px', 'marginTop': '10px',
                                 'alignItems': 'center'}, children=[
+                    dcc.RadioItems(
+                        id='dq-manual-unit-radio',
+                        options=[
+                            {'label': 'Auto', 'value': 'auto'},
+                            {'label': 'B',    'value': 'B'},
+                            {'label': 'M',    'value': 'M'},
+                            {'label': 'K',    'value': 'K'},
+                            {'label': 'Raw',  'value': 'raw'},
+                        ],
+                        value='auto', inline=True, labelClassName='check-item',
+                    ),
                     html.Button('Save annotations', id='dq-manual-save',
                                 className='run-btn', n_clicks=0),
+                    html.Button('Show hidden', id='dq-manual-annotation-show-all',
+                                className='run-btn', n_clicks=0,
+                                style={'fontSize': '11px', 'opacity': '0.7'}),
                     html.Span(id='dq-manual-msg',
                               style={'color': ACCENT, 'fontSize': '12px'}),
                 ]),
@@ -1313,17 +1454,21 @@ def reset_manual_sel(ticker, variant):
     Output('dq-manual-corrections', 'data'),
     Input('dq-manual-sel', 'data'),
     Input('dq-manual-stmt-kind', 'value'),
+    Input('dq-manual-unit-radio', 'value'),
     prevent_initial_call=True,
 )
-def load_manual_annotation_table(sel, kind):
+def load_manual_annotation_table(sel, kind, unit_choice):
     if not sel:
         raise PreventUpdate
     ticker = sel['ticker']
     kind = kind or sel.get('kind', 'income')
     period = sel['period']
     existing = dq.load_edgar_corrections(ticker, period, kind)
+    existing_notes = dq.load_edgar_correction_notes(ticker, period, kind)
     table_div, store_payload = _render_annotation_table(
-        ticker, period, kind, existing, input_type='edgar-input-manual'
+        ticker, period, kind, existing, input_type='edgar-input-manual',
+        existing_notes=existing_notes,
+        unit_choice=unit_choice or 'auto',
     )
     return table_div, store_payload
 
@@ -1379,9 +1524,10 @@ def fetch_manual_edgar(sel, kind):
     State('dq-manual-stmt-kind', 'value'),
     State('dq-manual-corrections', 'data'),
     State({'type': 'edgar-input-manual', 'index': ALL}, 'value'),
+    State({'type': 'edgar-note-manual',  'index': ALL}, 'value'),
     prevent_initial_call=True,
 )
-def save_manual_annotations(n, sel, kind, corrections_store, input_values):
+def save_manual_annotations(n, sel, kind, corrections_store, input_values, note_values):
     if not sel or not corrections_store:
         raise PreventUpdate
     items = corrections_store.get('_items', [])
@@ -1389,12 +1535,14 @@ def save_manual_annotations(n, sel, kind, corrections_store, input_values):
         raise PreventUpdate
     ticker, period = sel['ticker'], sel['period']
     kind = kind or sel.get('kind', 'income')
+    unit = float(corrections_store.get('_unit') or 1)
     edgar_values: dict[str, float] = {}
     simfin_values: dict[str, float] = {}
-    for item, raw in zip(items, input_values):
+    notes: dict[str, str] = {}
+    for item, raw, note_raw in zip(items, input_values, note_values or []):
         if raw and str(raw).strip():
             try:
-                edgar_values[item] = float(str(raw).replace(',', '').strip())
+                edgar_values[item] = float(str(raw).replace(',', '').strip()) * unit
             except ValueError:
                 continue
         sf = corrections_store.get(item)
@@ -1403,11 +1551,13 @@ def save_manual_annotations(n, sel, kind, corrections_store, input_values):
                 simfin_values[item] = float(sf)
             except (TypeError, ValueError):
                 pass
+        if note_raw and str(note_raw).strip():
+            notes[item] = str(note_raw).strip()
     if not edgar_values:
         return 'Nothing to save (enter at least one EDGAR value).'
     try:
         dq.save_edgar_corrections(ticker, period, kind, edgar_values,
-                                   simfin_values or None)
+                                   simfin_values or None, notes or None)
     except Exception as exc:
         logger.warning(f'manual annotation save error: {exc}')
         return f'Error: {exc}'
@@ -1465,11 +1615,14 @@ def update_edgar_corrections_tab(tab):
         {'name': 'SimFin',    'id': 'simfin_value', 'type': 'numeric'},
         {'name': 'EDGAR',     'id': 'edgar_value',  'type': 'numeric'},
         {'name': 'Diff %',    'id': 'diff_pct',     'type': 'numeric'},
+        {'name': 'Note',      'id': 'note'},
         {'name': 'Date',      'id': 'annotated_at'},
         {'name': '',          'id': '_spacer'},
     ]
+    note_col = df['note'] if 'note' in df.columns else ''
     records = df[['ticker', 'period', 'stmt_kind', 'line_item',
                   'simfin_value', 'edgar_value', 'diff_pct', 'annotated_at']].copy()
+    records['note'] = note_col
     records['_spacer'] = ''
     _nw = {'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap'}
     report_table = dash.dash_table.DataTable(
@@ -1487,6 +1640,7 @@ def update_edgar_corrections_tab(tab):
             {'if': {'column_id': 'simfin_value'}, 'width': '110px', 'textAlign': 'right', **_nw},
             {'if': {'column_id': 'edgar_value'},  'width': '110px', 'textAlign': 'right', **_nw},
             {'if': {'column_id': 'diff_pct'},     'width': '70px',  'textAlign': 'right', **_nw},
+            {'if': {'column_id': 'note'},         'width': '200px', **_nw},
             {'if': {'column_id': 'annotated_at'}, 'width': '90px',  **_nw},
         ],
         style_data_conditional=[
