@@ -1,7 +1,7 @@
 """Thin wrappers over irp.checks.* for the data quality UI page."""
 import pandas as pd
 
-from irp.checks import simfin_reviews as _sfr
+from irp.checks import simfin_annotations as _sfr
 from irp.checks import stooq_reviews as _str
 from irp.checks import simfin_runner as _sf_run
 from irp.checks import stooq_runner as _stq_run
@@ -19,6 +19,7 @@ def run_simfin(skip_reviewed: bool = True, variant: str = 'A') -> pd.DataFrame:
     df['Company Name'] = df['Company Name'].fillna('')
     df['Market'] = df['Market'].fillna('')
     df['rel_diff_pct'] = (df['rel_diff'] * 100).round(2)
+    df['diff_M'] = (df['diff'] / 1e6).round(2)
     if 'Report Date' in df.columns:
         df['Report Date'] = df['Report Date'].astype(str).str[:10]
     if 'CIK' in df.columns:
@@ -58,8 +59,9 @@ def yahoo_url(ticker: str, period_str: str | None = None) -> str:
     return _stq_inspect.yahoo_url(ticker, period_str)
 
 
-def add_simfin_review(ticker: str, period: str, rule: str, status: str, note: str) -> None:
-    _sfr.add_review(ticker, period, rule, status, note)
+def add_simfin_review(ticker: str, period: str, rule: str, stmt_kind: str,
+                      status: str, note: str) -> None:
+    _sfr.add_review(ticker, period, rule, stmt_kind, status, note)
 
 
 def add_stooq_review(ticker: str, period: str, rule: str, status: str, note: str) -> None:
@@ -82,22 +84,28 @@ def auto_suggest_status(rel_diff: float) -> str:
     return 'ok' if abs(rel_diff) < 0.01 else 'to_check'
 
 
-from irp.checks import simfin_corrections as _sc  # noqa: E402
-
-
-def save_edgar_corrections(
+def save_statement(
     ticker: str,
     period: str,
     stmt_kind: str,
+    rule: str,
+    status: str,
+    note: str,
     edgar_values: dict[str, float],
     simfin_values: dict[str, float] | None = None,
+    line_notes: dict[str, str] | None = None,
 ) -> None:
-    _sc.save_corrections(ticker, period, stmt_kind, edgar_values, simfin_values)
+    _sfr.save_statement(ticker, period, stmt_kind, rule, status, note,
+                        edgar_values, simfin_values, line_notes)
 
 
 def load_edgar_corrections(ticker: str, period: str, stmt_kind: str) -> dict[str, float]:
-    return _sc.load_corrections(ticker, period, stmt_kind)
+    return _sfr.load_corrections(ticker, period, stmt_kind)
+
+
+def load_edgar_correction_notes(ticker: str, period: str, stmt_kind: str) -> dict[str, str]:
+    return _sfr.load_correction_notes(ticker, period, stmt_kind)
 
 
 def get_all_edgar_corrections() -> pd.DataFrame:
-    return _sc.get_all_corrections()
+    return _sfr.get_all_corrections()
