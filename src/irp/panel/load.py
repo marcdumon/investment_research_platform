@@ -108,8 +108,24 @@ def load_fundamentals_restated(
     return df
 
 
+@lru_cache(maxsize=1)
+def load_ta_panel() -> pl.DataFrame:
+    """Long-format TA panel: (Ticker, Date, indicator...). Sorted by Date for PIT lookup.
+
+    Returns an empty DataFrame if ta_panel.parquet does not exist (build_ta_panel() not yet run).
+    """
+    src = panel_root() / 'ta_panel.parquet'
+    if not src.exists():
+        logger.warning('ta_panel.parquet not found — run build_panels() to precompute TA')
+        return pl.DataFrame()
+    df = pl.read_parquet(src).sort('Date')  # sort once; group_by.last() relies on this order
+    logger.debug(f'loaded ta_panel: {len(df):,} rows, {df["Ticker"].n_unique():,} tickers')
+    return df
+
+
 def clear_cache() -> None:
     """Drop in-memory panel caches (call after rebuild)."""
     load_prices_wide.cache_clear()
     load_fundamentals.cache_clear()
     load_fundamentals_restated.cache_clear()
+    load_ta_panel.cache_clear()

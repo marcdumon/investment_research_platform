@@ -20,7 +20,7 @@ import pandas as pd
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from irp.panel.load import load_prices_wide, load_fundamentals
+from irp.panel.load import load_prices_wide, load_fundamentals, load_ta_panel
 from irp.panel.pit import pit_latest, pit_ttm, pit_price_row, pit_price_at_offset
 
 logger = logging.getLogger(__name__)
@@ -196,14 +196,70 @@ def _window_stats(
     return dict(zip(panel.tickers, vol)), dict(zip(panel.tickers, ma200))
 
 
+def _ta_snapshots(as_of: datetime.date) -> dict[str, dict[str, float]]:
+    """TA indicator values for every ticker at as_of.
+
+    Primary path: panel lookup from ta_panel.parquet (precomputed by build_ta_panel()).
+    Fallback: per-ticker TA-Lib loop when panel file is missing.
+    Returns {factor_name: {ticker: value}}.
+    """
+    from irp.factors.technical import _TA_SPECS  # lazy — avoids circular import
+    if not _TA_SPECS:
+        return {}
+    ta_names = [s.name for s in _TA_SPECS]
+    result: dict[str, dict[str, float]] = {n: {} for n in ta_names}
+
+    ta_df = load_ta_panel()
+
+    if not ta_df.is_empty():
+        # Panel lookup: last value per ticker with Date <= as_of (sort already done at load)
+        snap = (
+            ta_df
+            .filter(pl.col('Date') <= as_of)
+            .group_by('Ticker')
+            .agg([pl.col(n).sort_by('Date').last() for n in ta_names])
+        )
+        snap_pd = snap.to_pandas().set_index('Ticker')
+        for name in ta_names:
+            if name in snap_pd.columns:
+                col = snap_pd[name].dropna()
+                finite_mask = np.isfinite(col.to_numpy(dtype='float64', na_value=np.nan))
+                result[name] = col[finite_mask].to_dict()
+        return result
+
+    # Fallback: per-ticker TA-Lib loop (slow — run build_panels() to avoid this)
+    logger.warning('ta_panel missing — falling back to per-ticker TA compute (slow)')
+    panel = load_prices_wide('Close')
+    idx = int(np.searchsorted(panel.dates, np.datetime64(as_of, 'D'), side='right'))
+    if idx == 0:
+        return result
+    LOOKBACK = 300
+    start = max(0, idx - LOOKBACK)
+    window = panel.values[start:idx, :].astype('float64')
+    for t_idx, ticker in enumerate(panel.tickers):
+        col = pd.Series(window[:, t_idx])
+        col = col[col.notna()].reset_index(drop=True)
+        if len(col) < 2:
+            continue
+        for s in _TA_SPECS:
+            try:
+                val = s.fn(col).iloc[-1]
+                if pd.notna(val):
+                    result[s.name][ticker] = float(val)
+            except Exception:
+                pass
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Stage 3 — assemble combined working frame
 # ---------------------------------------------------------------------------
 
 def _assemble(
     curr: PitFundamentals, prev: PitFundamentals, snaps: PriceSnapshots,
+    ta_snaps: dict[str, dict[str, float]] | None = None,
 ) -> pd.DataFrame:
-    """Inner-join required statements + prices on Ticker; left-join prior/momentum."""
+    """Inner-join required statements + prices on Ticker; left-join prior/momentum/TA."""
     p0 = pd.Series(snaps.p0, name='p0', dtype='float64')
     if p0.empty:
         return pd.DataFrame()
@@ -260,6 +316,10 @@ def _assemble(
     df['cl_p']     = prev.balance['Total Current Liabilities'].reindex(df.index).astype('float64')
     df['shares_p'] = prev.balance['Shares (Diluted)'].reindex(df.index).astype('float64')
     df['cfo_p']    = prev.cashflow['Net Cash from Operating Activities'].reindex(df.index).astype('float64')
+
+    # TA snapshots (LEFT join — NaN when price history is insufficient)
+    for name, snap in (ta_snaps or {}).items():
+        df[name] = pd.Series(snap).reindex(df.index).astype('float64')
 
     return df
 
@@ -333,7 +393,13 @@ def _apply_formulas(df: pd.DataFrame) -> pd.DataFrame:
     from irp.factors.piotroski import compute_piotroski_panel
     out['piotroski_fscore'] = compute_piotroski_panel(df)
 
-    return out[_FACTOR_COLS_ORDER]
+    # TA factors — pass through from assembled frame (appended after static cols)
+    from irp.factors.technical import _TA_SPECS  # lazy — avoids circular import
+    for s in _TA_SPECS:
+        out[s.name] = df.get(s.name, pd.Series(np.nan, index=df.index, dtype='float64'))
+    ta_names = [s.name for s in _TA_SPECS]
+
+    return out[_FACTOR_COLS_ORDER + ta_names]
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +419,8 @@ def cross_section_panel(
     logger.debug(f'cross_section_panel: {as_of_date} {variant}')
     curr, prev = _pit_align(as_of_date, variant)
     snaps = _price_snapshots(as_of_date)
-    combined = _assemble(curr, prev, snaps)
+    ta_snaps = _ta_snapshots(as_of_date)
+    combined = _assemble(curr, prev, snaps, ta_snaps)
     if combined.empty:
         logger.debug(f'cross_section_panel: {as_of_date} {variant} — empty (no inner-join matches)')
         return combined

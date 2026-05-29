@@ -19,6 +19,8 @@ import logging
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
+import pandas as pd
 import polars as pl
 
 from irp.core.config import config
@@ -170,6 +172,71 @@ def build_fundamentals_panel_restated(
     return out
 
 
+def build_ta_panel() -> Path:
+    """Write `ta_panel.parquet` — long format, sorted (Ticker, Date).
+
+    Schema: Ticker (str), Date (date), <indicator> (f32) per TaSpec in _TA_SPECS.
+    Rows where all indicators are NaN (lookback period) are dropped.
+    Re-run this whenever _TA_SPECS changes (add/remove a factor).
+    """
+    from irp.factors.technical import _TA_SPECS  # lazy — avoids circular import at module level
+
+    ta_names = [s.name for s in _TA_SPECS]
+    if not ta_names:
+        logger.info('no TA specs registered — skipping ta_panel build')
+        return _panel_dir() / 'ta_panel.parquet'
+
+    src = _panel_dir() / 'prices.parquet'
+    logger.info(f'building ta_panel ({len(ta_names)} indicators) from {src}')
+
+    prices = pl.read_parquet(src, columns=['Ticker', 'Date', 'Close']).sort(['Ticker', 'Date'])
+    groups = prices.partition_by('Ticker', maintain_order=True)
+
+    chunks: list[pl.DataFrame] = []
+    n_total = len(groups)
+    for i, group in enumerate(groups):
+        ticker: str = group['Ticker'][0]
+        dates_np: np.ndarray = group['Date'].to_numpy()      # datetime64[D]
+        closes = group['Close'].cast(pl.Float64).to_numpy()  # float64
+        n = len(closes)
+        if n < 2:
+            continue
+
+        close_series = pd.Series(closes)
+        ta_arrays: dict[str, np.ndarray] = {}
+        for s in _TA_SPECS:
+            try:
+                ta_arrays[s.name] = s.fn(close_series).to_numpy(dtype='float32')
+            except Exception:
+                ta_arrays[s.name] = np.full(n, np.nan, dtype='float32')
+
+        any_finite = np.zeros(n, dtype=bool)
+        for arr in ta_arrays.values():
+            any_finite |= np.isfinite(arr)
+        if not any_finite.any():
+            continue
+
+        chunk = pl.DataFrame({
+            'Date': dates_np[any_finite],
+            **{name: arr[any_finite] for name, arr in ta_arrays.items()},
+        }).with_columns(pl.lit(ticker).alias('Ticker'))
+        chunks.append(chunk)
+
+        if (i + 1) % 2000 == 0:
+            logger.info(f'ta_panel: {i + 1}/{n_total} tickers processed')
+
+    if chunks:
+        ta_df = pl.concat(chunks).sort(['Ticker', 'Date'])
+    else:
+        schema = {'Ticker': pl.Utf8, 'Date': pl.Date, **{n: pl.Float32 for n in ta_names}}
+        ta_df = pl.DataFrame(schema=schema)
+
+    out = _panel_dir() / 'ta_panel.parquet'
+    ta_df.write_parquet(out, compression='zstd', statistics=True)
+    logger.info(f'ta_panel: {len(ta_df):,} rows, {ta_df["Ticker"].n_unique():,} tickers → {out}')
+    return out
+
+
 def build_panels() -> list[Path]:
     """Materialize all panels. Idempotent — overwrites existing files."""
     outs = [build_prices_panel()]
@@ -177,6 +244,7 @@ def build_panels() -> list[Path]:
         for variant in ('A', 'Q'):
             outs.append(build_fundamentals_panel(stmt, variant))
             outs.append(build_fundamentals_panel_restated(stmt, variant))
+    outs.append(build_ta_panel())
     logger.info(f'panel build complete: {len(outs)} files')
     return outs
 
