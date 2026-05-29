@@ -20,7 +20,7 @@ import pandas as pd
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from irp.panel.load import load_prices_wide, load_fundamentals, load_fundamentals_restated
+from irp.panel.load import load_prices_wide, load_fundamentals
 from irp.panel.pit import pit_latest, pit_ttm, pit_price_row, pit_price_at_offset
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,6 @@ _FACTOR_COLS_ORDER = [
     'mom_12_1', 'mom_6_1', 'vol_21d', 'ma200_ratio',
     'rev_growth_1y', 'earn_growth_1y',
     'piotroski_fscore',
-    'revision_ni', 'revision_rev',
 ]
 
 
@@ -121,54 +120,6 @@ def _pit_align(
     return curr, prev
 
 
-def _pit_align_restated(
-    as_of: datetime.date, variant: Literal['A', 'Q'],
-    inc_lf: pl.DataFrame,
-) -> pd.DataFrame:
-    """Compute revision signals: for each ticker's most recently restated filing,
-    compare to the original as-reported values for the same Report Date.
-
-    PIT constraint: restated value used only if Restated Date ≤ as_of.
-    Returns DataFrame[ni_r, rev_r, ni_ar, rev_ar] indexed by Ticker.
-    """
-    try:
-        df_r = load_fundamentals_restated('income', variant)
-    except FileNotFoundError:
-        return pd.DataFrame(columns=['ni_r', 'rev_r', 'ni_ar', 'rev_ar'])
-
-    # Restated rows available as-of date
-    df_r_avail = df_r.filter(pl.col('eff_date') <= as_of)
-    if df_r_avail.is_empty():
-        return pd.DataFrame(columns=['ni_r', 'rev_r', 'ni_ar', 'rev_ar'])
-
-    # Most recently restated filing per ticker (latest Restated Date ≤ as_of)
-    restated_latest = pit_latest(df_r_avail, as_of).select(
-        ['Ticker', 'Report Date', 'Net Income', 'Revenue']
-    )
-
-    # All as-reported rows available ≤ as_of — used for the lookup by Report Date
-    asrep_all = (
-        inc_lf.filter(pl.col('eff_date') <= as_of)
-        .select(['Ticker', 'Report Date', 'Net Income', 'Revenue'])
-    )
-
-    # Join on (Ticker, Report Date): same filing, different version
-    joined = restated_latest.join(
-        asrep_all,
-        on=['Ticker', 'Report Date'],
-        how='left',
-        suffix='_ar',
-    )
-    return (
-        joined.select(['Ticker', 'Net Income', 'Revenue', 'Net Income_ar', 'Revenue_ar'])
-        .to_pandas()
-        .set_index('Ticker')
-        .rename(columns={
-            'Net Income': 'ni_r', 'Revenue': 'rev_r',
-            'Net Income_ar': 'ni_ar', 'Revenue_ar': 'rev_ar',
-        })
-        .astype('float64')
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +202,6 @@ def _window_stats(
 
 def _assemble(
     curr: PitFundamentals, prev: PitFundamentals, snaps: PriceSnapshots,
-    restated: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Inner-join required statements + prices on Ticker; left-join prior/momentum."""
     p0 = pd.Series(snaps.p0, name='p0', dtype='float64')
@@ -310,18 +260,6 @@ def _assemble(
     df['cl_p']     = prev.balance['Total Current Liabilities'].reindex(df.index).astype('float64')
     df['shares_p'] = prev.balance['Shares (Diluted)'].reindex(df.index).astype('float64')
     df['cfo_p']    = prev.cashflow['Net Cash from Operating Activities'].reindex(df.index).astype('float64')
-
-    # Revision signals (LEFT join — NaN when no restatement known yet as-of date)
-    if restated is not None and not restated.empty:
-        df['ni_r']   = restated['ni_r'].reindex(df.index).astype('float64')
-        df['rev_r']  = restated['rev_r'].reindex(df.index).astype('float64')
-        df['ni_ar']  = restated['ni_ar'].reindex(df.index).astype('float64')
-        df['rev_ar'] = restated['rev_ar'].reindex(df.index).astype('float64')
-    else:
-        df['ni_r']   = np.nan
-        df['rev_r']  = np.nan
-        df['ni_ar']  = np.nan
-        df['rev_ar'] = np.nan
 
     return df
 
@@ -395,11 +333,6 @@ def _apply_formulas(df: pd.DataFrame) -> pd.DataFrame:
     from irp.factors.piotroski import compute_piotroski_panel
     out['piotroski_fscore'] = compute_piotroski_panel(df)
 
-    # Revision: (restated - as_reported) / abs(as_reported)
-    # Uses most recently restated filing; NaN when no restatement known as-of date
-    out['revision_ni']  = _div(df['ni_r']  - df['ni_ar'],  df['ni_ar'].abs())
-    out['revision_rev'] = _div(df['rev_r'] - df['rev_ar'], df['rev_ar'].abs())
-
     return out[_FACTOR_COLS_ORDER]
 
 
@@ -419,10 +352,8 @@ def cross_section_panel(
     """
     logger.debug(f'cross_section_panel: {as_of_date} {variant}')
     curr, prev = _pit_align(as_of_date, variant)
-    inc_lf = load_fundamentals('income', variant)
-    restated = _pit_align_restated(as_of_date, variant, inc_lf)
     snaps = _price_snapshots(as_of_date)
-    combined = _assemble(curr, prev, snaps, restated)
+    combined = _assemble(curr, prev, snaps)
     if combined.empty:
         logger.debug(f'cross_section_panel: {as_of_date} {variant} — empty (no inner-join matches)')
         return combined
