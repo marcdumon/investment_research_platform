@@ -1,14 +1,17 @@
 import logging
+from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Callable
 
 import dash
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 from plotly.basedatatypes import BaseTraceType
+from plotly.subplots import make_subplots
 
 from irp.ui.services import price_service, universe_service
 from irp.ui.theme import (
@@ -37,9 +40,112 @@ dash.register_page(__name__, path='/ticker', name='Ticker')
 _HIDE = {'display': 'none'}
 _SHOW = {'display': 'block'}
 _RANGE_PRESETS = ['1M', '6M', '1Y', '3Y', '5Y', 'Max']
+_COMPARE_COLOR = '#f4a261'
 
 _today = date.today().isoformat()
 _1y_ago = (date.today() - timedelta(days=365)).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# UI technical indicator specs
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class UiTaSpec:
+    """One entry = one selectable indicator on the price chart.
+    Adding a new indicator = add one UiTaSpec to _UI_TA_SPECS. No other changes.
+
+    fn(close, dates) → list of Plotly traces to add to the target row.
+    """
+    name: str
+    label: str
+    is_overlay: bool                            # True = price row; False = own subplot
+    fn: Callable[[pd.Series, list], list]
+    row_height: float = 0.15                    # subplot height (ignored if overlay)
+    y_range: tuple | None = None
+    h_lines: list[dict] | None = None
+
+
+def _ma_fn(window: int, color: str, dash: str) -> Callable:
+    def _fn(c: pd.Series, d: list) -> list:
+        ma = c.rolling(window).mean()
+        return [go.Scatter(
+            x=d, y=ma, name=f'MA{window}',
+            line=dict(color=color, width=1, dash=dash),
+            hovertemplate=f'MA{window}: %{{y:,.2f}}<extra></extra>',
+        )]
+    return _fn
+
+
+def _bb_fn(c: pd.Series, d: list) -> list:
+    sma = c.rolling(20).mean()
+    std = c.rolling(20).std()
+    upper = sma + 2 * std
+    lower = sma - 2 * std
+    return [
+        go.Scatter(x=d, y=upper, name='BB Upper',
+            line=dict(color='rgba(120,120,220,0.6)', width=1),
+            showlegend=False,
+            hovertemplate='BB Upper: %{y:,.2f}<extra></extra>'),
+        go.Scatter(x=d, y=lower, name='BB Lower',
+            line=dict(color='rgba(120,120,220,0.6)', width=1),
+            fill='tonexty', fillcolor='rgba(120,120,220,0.07)',
+            showlegend=False,
+            hovertemplate='BB Lower: %{y:,.2f}<extra></extra>'),
+        go.Scatter(x=d, y=sma, name='BB Mid',
+            line=dict(color='rgba(120,120,220,0.4)', width=1, dash='dot'),
+            showlegend=False,
+            hovertemplate='BB Mid: %{y:,.2f}<extra></extra>'),
+    ]
+
+
+def _rsi_fn(c: pd.Series, d: list) -> list:
+    delta = c.diff()
+    gain = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rsi = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+    return [go.Scatter(
+        x=d, y=rsi, name='RSI(14)',
+        line=dict(color='#a8dadc', width=1.2),
+        hovertemplate='RSI: %{y:.1f}<extra></extra>',
+    )]
+
+
+def _macd_fn(c: pd.Series, d: list) -> list:
+    ema12 = c.ewm(span=12, adjust=False).mean()
+    ema26 = c.ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    signal = macd_line.ewm(span=9, adjust=False).mean()
+    hist = macd_line - signal
+    hist_colors = ['#4ec94e' if (v is not None and not np.isnan(v) and v >= 0) else '#e05252'
+                   for v in hist.fillna(0)]
+    return [
+        go.Bar(x=d, y=hist, name='MACD Hist', marker_color=hist_colors,
+               showlegend=False, hovertemplate='Hist: %{y:.4f}<extra></extra>'),
+        go.Scatter(x=d, y=macd_line, name='MACD',
+            line=dict(color='#58a6ff', width=1),
+            hovertemplate='MACD: %{y:.4f}<extra></extra>'),
+        go.Scatter(x=d, y=signal, name='Signal',
+            line=dict(color=_COMPARE_COLOR, width=1),
+            hovertemplate='Signal: %{y:.4f}<extra></extra>'),
+    ]
+
+
+_UI_TA_SPECS: list[UiTaSpec] = [
+    UiTaSpec('MA50',  'MA 50',     is_overlay=True,
+             fn=_ma_fn(50,  '#f4a261', 'dot')),
+    UiTaSpec('MA200', 'MA 200',    is_overlay=True,
+             fn=_ma_fn(200, '#e76f51', 'dash')),
+    UiTaSpec('BB',    'Bollinger', is_overlay=True,
+             fn=_bb_fn),
+    UiTaSpec('RSI',   'RSI',       is_overlay=False, row_height=0.15,
+             fn=_rsi_fn, y_range=(0, 100),
+             h_lines=[{'y': 70, 'color': 'rgba(220,80,80,0.45)'},
+                      {'y': 30, 'color': 'rgba(80,200,80,0.45)'}]),
+    UiTaSpec('MACD',  'MACD',      is_overlay=False, row_height=0.20,
+             fn=_macd_fn),
+]
 
 
 def _period_radio(prefix: str) -> html.Div:
@@ -117,34 +223,65 @@ layout = html.Div(
                                     className='price-controls',
                                     children=[
                                         html.Div(
-                                            className='price-presets',
+                                            style={'display': 'flex', 'flexWrap': 'wrap',
+                                                   'gap': '8px', 'alignItems': 'center'},
                                             children=[
-                                                html.Button(
-                                                    p,
-                                                    id=f'preset-{p}',
-                                                    n_clicks=0,
-                                                    className='btn price-preset-btn',
-                                                )
-                                                for p in _RANGE_PRESETS
+                                                html.Div(
+                                                    className='price-presets',
+                                                    children=[
+                                                        html.Button(
+                                                            p,
+                                                            id=f'preset-{p}',
+                                                            n_clicks=0,
+                                                            className='btn price-preset-btn',
+                                                        )
+                                                        for p in _RANGE_PRESETS
+                                                    ],
+                                                ),
+                                                dcc.DatePickerRange(
+                                                    id='price-dates',
+                                                    display_format='YYYY-MM-DD',
+                                                    start_date=_1y_ago,
+                                                    end_date=_today,
+                                                    className='price-date-picker',
+                                                ),
+                                                dcc.RadioItems(
+                                                    id='price-source',
+                                                    options=[
+                                                        {'label': ' Yahoo', 'value': 'yahoo'},
+                                                        {'label': ' Stooq', 'value': 'stooq'},
+                                                    ],
+                                                    value='yahoo',
+                                                    inline=True,
+                                                    className='price-source-radio',
+                                                    labelClassName='check-item',
+                                                ),
                                             ],
                                         ),
-                                        dcc.DatePickerRange(
-                                            id='price-dates',
-                                            display_format='YYYY-MM-DD',
-                                            start_date=_1y_ago,
-                                            end_date=_today,
-                                            className='price-date-picker',
-                                        ),
-                                        dcc.RadioItems(
-                                            id='price-source',
-                                            options=[
-                                                {'label': ' Yahoo', 'value': 'yahoo'},
-                                                {'label': ' Stooq', 'value': 'stooq'},
+                                        html.Div(
+                                            style={'display': 'flex', 'flexWrap': 'wrap',
+                                                   'gap': '12px', 'alignItems': 'center',
+                                                   'marginTop': '8px'},
+                                            children=[
+                                                dcc.Dropdown(
+                                                    id='price-compare',
+                                                    placeholder='Compare ticker...',
+                                                    searchable=True,
+                                                    clearable=True,
+                                                    style={'minWidth': '200px',
+                                                           'maxWidth': '280px'},
+                                                ),
+                                                dcc.Checklist(
+                                                    id='price-indicators',
+                                                    options=[
+                                                        {'label': f' {s.label}', 'value': s.name}
+                                                        for s in _UI_TA_SPECS
+                                                    ],
+                                                    value=[],
+                                                    inline=True,
+                                                    labelClassName='check-item',
+                                                ),
                                             ],
-                                            value='yahoo',
-                                            inline=True,
-                                            className='price-source-radio',
-                                            labelClassName='check-item',
                                         ),
                                     ],
                                 ),
@@ -371,6 +508,32 @@ def filter_tickers(
 
 
 @callback(
+    Output('price-compare', 'options'),
+    Input('all-tickers-store', 'data'),
+    Input('price-compare', 'search_value'),
+)
+def filter_compare_tickers(
+    all_data: list[dict] | None,
+    search: str | None,
+) -> list[dict]:
+    if not all_data:
+        return []
+    options = []
+    for row in all_data:
+        ticker = row.get('Ticker', '')
+        if not isinstance(ticker, str):
+            continue
+        name = row.get('Company Name')
+        label = f'{ticker}  {name}' if name and pd.notna(name) else ticker
+        options.append({'label': label, 'value': ticker})
+    if search:
+        q = search.upper()
+        options = [o for o in options if q in o['value'].upper() or q in o['label'].upper()]
+        options.sort(key=lambda o: _ticker_sort_key(o, q))
+    return options[:150]
+
+
+@callback(
     Output('ticker-store', 'data'),
     Output('ticker-content', 'style'),
     Input('ticker-select', 'value'),
@@ -477,144 +640,206 @@ def handle_preset(*args: int) -> tuple[str, str]:
     Input('price-dates', 'start_date'),
     Input('price-dates', 'end_date'),
     Input('price-source', 'value'),
+    Input('price-compare', 'value'),
+    Input('price-indicators', 'value'),
 )
 def render_prices(
     ticker: str | None,
     start: str | None,
     end: str | None,
     source: str,
+    compare_ticker: str | None,
+    indicators: list[str] | None,
 ) -> tuple[Any, Any]:
-    empty_fig = go.Figure(
-        layout=go.Layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
+    def _empty_fig() -> go.Figure:
+        return go.Figure(layout=go.Layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(l=0, r=0, t=8, b=0),
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-        )
-    )
-    no_data: list = []
+            xaxis=dict(visible=False), yaxis=dict(visible=False),
+        ))
 
     if not ticker:
         raise PreventUpdate
 
+    close_col = 'C' if source == 'stooq' else 'Close'
+    vol_col   = 'V' if source == 'stooq' else 'Volume'
+
     try:
         df = price_service.get_prices(ticker, source=source, start=start, end=end)
-        close_col = 'C' if source == 'stooq' else 'Close'
     except Exception as exc:
         logger.warning(f'Price query failed for {ticker}: {exc}')
-        return empty_fig, no_data
+        return _empty_fig(), []
 
     if df.empty or close_col not in df.columns:
-        return empty_fig, no_data  # type: ignore[return-value]
+        return _empty_fig(), []
 
     df = df.sort_values('Date').copy()
     df['_date_str'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+    dates = df['_date_str'].tolist()
+    close = df[close_col].reset_index(drop=True).astype(float)
 
-    # Dividend + split markers
-    div_traces: list[BaseTraceType] = []
-    shapes: list[dict] = []
+    # ---- comparison ticker ----
+    compare_df: pd.DataFrame | None = None
+    if compare_ticker and compare_ticker != ticker:
+        try:
+            cdf = price_service.get_prices(compare_ticker, source=source, start=start, end=end)
+            if not cdf.empty and close_col in cdf.columns:
+                cdf = cdf.sort_values('Date').copy()
+                cdf['_date_str'] = pd.to_datetime(cdf['Date']).dt.strftime('%Y-%m-%d')
+                compare_df = cdf
+        except Exception:
+            pass
 
+    # ---- dividends + splits ----
+    div_traces: list = []
+    split_dates: list[str] = []
     try:
         divs = price_service.get_dividends(ticker)
         spls = price_service.get_splits(ticker)
-
-        # Restrict actions to chart date range so x-axis doesn't span full history.
-        df_min = df['_date_str'].min()
-        df_max = df['_date_str'].max()
+        df_min, df_max = df['_date_str'].min(), df['_date_str'].max()
         if not divs.empty:
-            div_dates_all = pd.to_datetime(divs['Date'])
-            divs = divs.loc[(div_dates_all >= df_min) & (div_dates_all <= df_max)]
+            d_dates = pd.to_datetime(divs['Date'])
+            divs = divs.loc[(d_dates >= df_min) & (d_dates <= df_max)]
         if not spls.empty:
-            spl_dates_all = pd.to_datetime(spls['Date'])
-            spls = spls.loc[(spl_dates_all >= df_min) & (spl_dates_all <= df_max)]
+            s_dates = pd.to_datetime(spls['Date'])
+            spls = spls.loc[(s_dates >= df_min) & (s_dates <= df_max)]
 
         if not divs.empty:
-            div_dates = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
-            price_at_div = (
-                df.set_index('_date_str')[close_col].reindex(div_dates).values
-            )
-            div_traces.append(
-                go.Scatter(
-                    x=div_dates,
-                    y=price_at_div,
-                    mode='markers',
-                    marker=dict(symbol='triangle-up', size=10, color=DIV_COLOR),
-                    name='Dividend',
-                    hovertemplate='<b>%{x}</b><br>Div: $%{customdata:.4f}<extra></extra>',
-                    customdata=divs['Amount'],
-                    hoverlabel=dict(**HOVER_LABEL, bordercolor=DIV_COLOR),
-                )
-            )
+            div_date_strs = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
+            price_at_div = df.set_index('_date_str')[close_col].reindex(div_date_strs).values
+            div_traces.append(go.Scatter(
+                x=div_date_strs, y=price_at_div, mode='markers',
+                marker=dict(symbol='triangle-up', size=10, color=DIV_COLOR),
+                name='Dividend',
+                hovertemplate='<b>%{x}</b><br>Div: $%{customdata:.4f}<extra></extra>',
+                customdata=divs['Amount'],
+                hoverlabel=dict(**HOVER_LABEL, bordercolor=DIV_COLOR),
+            ))
         if not spls.empty:
-            for _, row in spls.iterrows():
-                d = pd.to_datetime(row['Date']).strftime('%Y-%m-%d')
-                shapes.append(
-                    dict(
-                        type='line',
-                        x0=d,
-                        x1=d,
-                        y0=0,
-                        y1=1,
-                        yref='paper',
-                        line=dict(color=SPLIT_COLOR, width=1, dash='dash'),
-                    )
-                )
+            split_dates = [pd.to_datetime(r['Date']).strftime('%Y-%m-%d')
+                           for _, r in spls.iterrows()]
     except Exception:
         pass
 
-    fig = go.Figure(
-        data=[
-            go.Scatter(
-                x=df['_date_str'],
-                y=df[close_col],
-                name='Close',
-                line=dict(color=ACCENT, width=1.5),
-                hovertemplate='<b>%{x}</b><br>Close: %{y:,.2f}<extra></extra>',
-                hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
-            ),
-            *div_traces,
-        ],
-        layout=go.Layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(128,128,128,0.05)',
-            margin=dict(l=0, r=0, t=8, b=0),
-            hovermode='x unified',
+    # ---- subplot layout ----
+    ind = set(indicators or [])
+    selected_subplots = [s for s in _UI_TA_SPECS if not s.is_overlay and s.name in ind]
+
+    PRICE_H  = 0.55
+    VOLUME_H = 0.12
+    sub_heights = [s.row_height for s in selected_subplots]
+    total_h = PRICE_H + sum(sub_heights) + VOLUME_H
+    n_rows = 2 + len(selected_subplots)  # price + subplots + volume
+    row_heights = [PRICE_H / total_h] + [h / total_h for h in sub_heights] + [VOLUME_H / total_h]
+
+    price_row = 1
+    vol_row   = n_rows
+    subplot_row = {s.name: i + 2 for i, s in enumerate(selected_subplots)}
+
+    fig = make_subplots(
+        rows=n_rows, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+        row_heights=row_heights,
+    )
+
+    # ---- price row traces ----
+    if compare_df is not None:
+        # Rebase both to 100 at first common date
+        primary_s = df.set_index('_date_str')[close_col].astype(float)
+        compare_s = compare_df.set_index('_date_str')[close_col].astype(float)
+        common_start = max(primary_s.index[0], compare_s.index[0])
+        pb = primary_s.loc[primary_s.index >= common_start].iloc[0]
+        cb = compare_s.loc[compare_s.index >= common_start].iloc[0]
+        primary_rb = primary_s / pb * 100
+        compare_rb = compare_s / cb * 100
+
+        fig.add_trace(go.Scatter(
+            x=primary_rb.index.tolist(), y=primary_rb.values,
+            name=ticker, line=dict(color=ACCENT, width=1.5),
+            hovertemplate='<b>%{x}</b><br>' + ticker + ': %{y:.2f}<extra></extra>',
+            hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
+        ), row=price_row, col=1)
+        fig.add_trace(go.Scatter(
+            x=compare_rb.index.tolist(), y=compare_rb.values,
+            name=compare_ticker, line=dict(color=_COMPARE_COLOR, width=1.5),
+            hovertemplate='<b>%{x}</b><br>' + compare_ticker + ': %{y:.2f}<extra></extra>',
+            hoverlabel=dict(**HOVER_LABEL, bordercolor=_COMPARE_COLOR),
+        ), row=price_row, col=1)
+
+        # In compare mode, pass rebased primary to overlay indicators so MAs align
+        close_for_ta = primary_rb.reindex(dates).reset_index(drop=True)
+    else:
+        fig.add_trace(go.Scatter(
+            x=dates, y=close,
+            name='Close', line=dict(color=ACCENT, width=1.5),
+            hovertemplate='<b>%{x}</b><br>Close: %{y:,.2f}<extra></extra>',
+            hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
+        ), row=price_row, col=1)
+        close_for_ta = close
+
+    # Overlay indicators (MA50, MA200, Bollinger)
+    for spec in _UI_TA_SPECS:
+        if spec.is_overlay and spec.name in ind:
+            for trace in spec.fn(close_for_ta, dates):
+                fig.add_trace(trace, row=price_row, col=1)
+
+    # Dividend markers
+    for trace in div_traces:
+        fig.add_trace(trace, row=price_row, col=1)
+
+    # Split lines (spans full chart height)
+    for sd in split_dates:
+        fig.add_vline(x=sd, line=dict(color=SPLIT_COLOR, width=1, dash='dash'))
+
+    # ---- subplot indicator rows ----
+    for spec in selected_subplots:
+        row = subplot_row[spec.name]
+        for trace in spec.fn(close, dates):   # always computed on raw close
+            fig.add_trace(trace, row=row, col=1)
+        if spec.y_range:
+            fig.update_yaxes(range=list(spec.y_range), row=row, col=1)
+        for hline in (spec.h_lines or []):
+            fig.add_hline(
+                y=hline['y'],
+                line=dict(color=hline['color'], width=1, dash='dash'),
+                row=row, col=1,
+            )
+
+    # ---- volume row ----
+    if vol_col in df.columns:
+        prev_close = df[close_col].shift(1)
+        up = df[close_col] >= prev_close
+        bar_colors = ['#4ec94e' if u else '#e05252' for u in up]
+        fig.add_trace(go.Bar(
+            x=dates, y=df[vol_col], name='Volume',
+            marker_color=bar_colors, showlegend=False,
+            hovertemplate='<b>%{x}</b><br>Vol: %{y:,.0f}<extra></extra>',
+        ), row=vol_row, col=1)
+
+    # ---- shared axis styling ----
+    _ax = dict(
+        gridcolor=GRID, linecolor=GRID,
+        tickfont=dict(color=MUTED, size=11),
+        tickcolor=GRID, zeroline=False, showline=True,
+    )
+    fig.update_xaxes(**_ax, showspikes=True, spikecolor=GRID,
+                     spikethickness=1, spikedash='dot', spikemode='across',
+                     rangeslider_visible=False)
+    fig.update_yaxes(**_ax, showspikes=False)
+    fig.update_yaxes(zeroline=True, row=price_row, col=1)
+
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(128,128,128,0.05)',
+        margin=dict(l=0, r=0, t=8, b=0),
+        hovermode='x unified',
+        font=dict(color=MUTED, size=11),
+        barmode='overlay',
+        legend=dict(
+            orientation='h', y=1.02, x=1, xanchor='right', yanchor='bottom',
             font=dict(color=MUTED, size=11),
-            legend=dict(
-                orientation='h',
-                y=1.02,
-                x=1,
-                xanchor='right',
-                yanchor='bottom',
-                font=dict(color=MUTED, size=11),
-                bgcolor='rgba(0,0,0,0)',
-                bordercolor='rgba(0,0,0,0)',
-            ),
-            xaxis=dict(
-                rangeslider_visible=False,
-                gridcolor=GRID,
-                linecolor=GRID,
-                tickfont=dict(color=MUTED, size=11),
-                tickcolor=GRID,
-                zeroline=False,
-                showline=True,
-                showspikes=True,
-                spikecolor=GRID,
-                spikethickness=1,
-                spikedash='dot',
-                spikemode='across',
-            ),
-            yaxis=dict(
-                gridcolor=GRID,
-                linecolor=GRID,
-                tickfont=dict(color=MUTED, size=11),
-                tickcolor=GRID,
-                zeroline=True,
-                showline=False,
-                showspikes=False,
-            ),
-            shapes=shapes,
+            bgcolor='rgba(0,0,0,0)', bordercolor='rgba(0,0,0,0)',
         ),
     )
 
