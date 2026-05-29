@@ -21,6 +21,7 @@ from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE
 from irp.factors._pit import pit_latest, pit_price, pit_ttm
 from irp.factors.momentum import compute_momentum
+from irp.factors.technical import compute_technical
 from irp.factors.orchestrate import (
     run_backtest,
     run_composite_backtest,
@@ -101,6 +102,8 @@ def ticker_factor_history(
             compute_profitability(inc, bal, cf), how='outer',
         ).join(
             compute_momentum(raw_prices, as_of), how='outer',
+        ).join(
+            compute_technical(raw_prices, as_of), how='outer',
         ).reset_index()
         row[REPORT_DATE] = pd.Timestamp(rd)
         rows.append(row)

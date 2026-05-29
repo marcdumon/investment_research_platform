@@ -44,6 +44,7 @@ def _populate() -> None:
     import irp.factors.momentum  # noqa: F401
     import irp.factors.piotroski  # noqa: F401
     import irp.factors.profitability  # noqa: F401
+    import irp.factors.technical  # noqa: F401
     import irp.factors.valuation  # noqa: F401
 
     _populated = True
