@@ -2,13 +2,13 @@
 from irp.checks.simfin_annotations import (  # noqa: F401
     VALID_STATUS,
     MANUAL_RULE,
-    load_reviews,
-    load_reviews_df,
-    load_flags_df,
-    add_review,
-    add_flag,
+    _load_reviews as load_reviews,
+    _load_reviews_df as load_reviews_df,
+    _load_flags_df as load_flags_df,
+    _add_review as add_review,
+    _add_flag as add_flag,
 )
 
 
-def period_str(fy: int, fp: str, period: str) -> str:
+def _period_str(fy: int, fp: str, period: str) -> str:
     return f'{fy}FY' if period == 'A' else f'{fy}{fp}'

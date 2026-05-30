@@ -56,7 +56,7 @@ def _write_all(stmts: list[dict]) -> None:
         '# review fields are flat at statement level; corrections are sub-array.\n',
     ]
     for s in stmts:
-        lines.append(f'\n[[statements]]\n')
+        lines.append('\n[[statements]]\n')
         lines.append(f'ticker      = "{_esc(s["ticker"])}"\n')
         lines.append(f'period      = "{_esc(s["period"])}"\n')
         lines.append(f'stmt_kind   = "{_esc(s["stmt_kind"])}"\n')
@@ -79,7 +79,7 @@ def _write_all(stmts: list[dict]) -> None:
 
 # ── reviews API ───────────────────────────────────────────────────────────────
 
-def load_reviews() -> set[tuple[str, str, str]]:
+def _load_reviews() -> set[tuple[str, str, str]]:
     """Set of (ticker, period, rule) used to suppress rule-detected findings."""
     return {
         (s['ticker'], s['period'], s['rule'])
@@ -88,7 +88,7 @@ def load_reviews() -> set[tuple[str, str, str]]:
     }
 
 
-def load_reviews_df() -> pd.DataFrame:
+def _load_reviews_df() -> pd.DataFrame:
     cols = ['ticker', 'period', 'stmt_kind', 'rule', 'status', 'note', 'reviewed_at']
     rows = [
         {c: s.get(c, '') for c in cols}
@@ -98,15 +98,15 @@ def load_reviews_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
 
 
-def load_flags_df() -> pd.DataFrame:
-    df = load_reviews_df()
+def _load_flags_df() -> pd.DataFrame:
+    df = _load_reviews_df()
     if df.empty:
         return df
     return df[df['rule'] == MANUAL_RULE].reset_index(drop=True)
 
 
-def add_review(ticker: str, period: str, rule: str, stmt_kind: str,
-               status: str, note: str) -> None:
+def _add_review(ticker: str, period: str, rule: str, stmt_kind: str,
+                status: str, note: str) -> None:
     if status not in VALID_STATUS:
         raise ValueError(f'status must be one of {VALID_STATUS}')
     stmts = _load_raw()
@@ -121,7 +121,7 @@ def add_review(ticker: str, period: str, rule: str, stmt_kind: str,
     _write_all(stmts)
 
 
-def add_flag(ticker: str, period: str, subject: str, status: str, note: str) -> None:
+def _add_flag(ticker: str, period: str, subject: str, status: str, note: str) -> None:
     stmts = _load_raw()
     stmts = [s for s in stmts
              if not (s['ticker'] == ticker and s['period'] == period
@@ -136,7 +136,7 @@ def add_flag(ticker: str, period: str, subject: str, status: str, note: str) -> 
 
 # ── corrections API ───────────────────────────────────────────────────────────
 
-def load_corrections(ticker: str, period: str, stmt_kind: str) -> dict[str, float]:
+def _load_corrections(ticker: str, period: str, stmt_kind: str) -> dict[str, float]:
     for s in _load_raw():
         if s['ticker'] == ticker and s['period'] == period and s['stmt_kind'] == stmt_kind:
             return {c['line_item']: float(c['edgar_value'])
@@ -145,7 +145,7 @@ def load_corrections(ticker: str, period: str, stmt_kind: str) -> dict[str, floa
     return {}
 
 
-def load_correction_notes(ticker: str, period: str, stmt_kind: str) -> dict[str, str]:
+def _load_correction_notes(ticker: str, period: str, stmt_kind: str) -> dict[str, str]:
     for s in _load_raw():
         if s['ticker'] == ticker and s['period'] == period and s['stmt_kind'] == stmt_kind:
             return {c['line_item']: str(c['note'])
@@ -154,7 +154,7 @@ def load_correction_notes(ticker: str, period: str, stmt_kind: str) -> dict[str,
     return {}
 
 
-def save_statement(
+def _save_statement(
     ticker: str,
     period: str,
     stmt_kind: str,
@@ -191,7 +191,7 @@ def save_statement(
 
 
 # kept for backward compat — routes to save_statement with no corrections
-def save_corrections(
+def _save_corrections(
     ticker: str,
     period: str,
     stmt_kind: str,
@@ -218,7 +218,7 @@ def save_corrections(
     _write_all(stmts)
 
 
-def get_all_corrections() -> pd.DataFrame:
+def _get_all_corrections() -> pd.DataFrame:
     cols = ['ticker', 'period', 'stmt_kind', 'line_item',
             'simfin_value', 'edgar_value', 'note', 'annotated_at']
     rows = []

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def is_fresh(marker: Path, *inputs: Path) -> bool:
+def _is_fresh(marker: Path, *inputs: Path) -> bool:
     """True if marker exists and is newer than all inputs."""
     if not marker.exists():
         return False

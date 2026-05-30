@@ -12,12 +12,12 @@ from dash import Input, Output, State, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
-from irp.ui.charts import base_chart_layout as _base_chart_layout
-from irp.ui.charts import empty_figure as _empty_figure
+from irp.ui.charts import _base_chart_layout
+from irp.ui.charts import _empty_figure
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import factors_service, universe_service, watchlist_service
-from irp.ui.tables import column_format as _col_fmt
-from irp.ui.tables import format_factor_value as _fmt
+from irp.ui.tables import _column_format as _col_fmt
+from irp.ui.tables import _format_factor_value as _fmt
 from irp.ui.theme import ACCENT, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')
@@ -225,7 +225,7 @@ layout = html.Div(
 def load_options(_: Any, _wl: Any) -> tuple[Any, list, list, list, list]:
     """Populate filter dropdowns from SimFin companies table on page load."""
     try:
-        df = universe_service.get_companies()
+        df = universe_service._get_companies()
     except Exception:
         logger.exception('load_options: get_companies() failed')
         return None, [], [], [], []
@@ -309,7 +309,7 @@ def compute_xsection(
         except KeyError:
             logger.warning(f'compute_xsection: watchlist "{watchlist}" not found')
 
-    df = factors_service.load_cross_section(
+    df = factors_service._load_cross_section(
         as_of, variant, watchlist=None, enrich_company_columns=False
     )
     if tickers is not None:
@@ -475,7 +475,7 @@ def compute_history(
     """Compute per-ticker factor history on Run click."""
     if not ticker:
         raise PreventUpdate
-    df = factors_service.load_ticker_history(ticker, variant)  # type: ignore[arg-type]
+    df = factors_service._load_ticker_history(ticker, variant)  # type: ignore[arg-type]
     if df.empty:
         return {}
     df = df.copy()

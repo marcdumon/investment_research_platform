@@ -9,9 +9,9 @@ import datetime
 import pandas as pd
 
 from irp.factors._cols import NET_INCOME, REVENUE, TICKER
-from irp.factors._pit import pit_latest, pit_ttm
+from irp.factors._pit import pit_latest, _pit_ttm
 from irp.factors._utils import _safe_div
-from irp.factors.registry import register
+from irp.factors.registry import _register as register
 
 register('rev_growth_1y',  'Rev Growth 1Y',  pct=True, group='growth')
 register('earn_growth_1y', 'Earn Growth 1Y', pct=True, group='growth')
@@ -41,7 +41,7 @@ def compute_growth(
     Only tickers with both current and prior-year data are returned.
     """
     prior_date = (pd.Timestamp(as_of_date) - pd.DateOffset(years=1)).date()
-    _pit = pit_ttm if variant == 'Q' else pit_latest
+    _pit = _pit_ttm if variant == 'Q' else pit_latest
 
     curr_inc  = _pit(raw_income, as_of_date)
     prior_inc = _pit(raw_income, prior_date)

@@ -56,7 +56,7 @@ def precompute_all(
     Skips dates already cached unless force=True.
     Returns number of new snapshots written.
     """
-    from irp.factors.data_loaders import compute_and_cache
+    from irp.factors.data_loaders import _compute_and_cache as compute_and_cache
 
     if variants is None:
         variants = ['A', 'Q']

@@ -2,7 +2,7 @@ import questionary
 from questionary import Choice, Style
 
 from irp.core.config import config
-from irp.core.logging import configure_logging
+from irp.core.logging import _configure_logging as configure_logging
 from irp.runner import DataProvider
 
 STYLE = Style([
@@ -101,19 +101,19 @@ def main() -> None:
             src.cleanup()
 
     if 'seed-universe' in steps:
-        from irp.query.universe import seed as _seed_universe
+        from irp.query.universe import _seed as _seed_universe
         print('── seed-universe ──')
         n = _seed_universe()
         print(f'  {n:,} tickers written to universe.csv')
 
     if 'universe' in steps:
-        from irp.query.universe import refresh as _refresh_universe
+        from irp.query.universe import _refresh as _refresh_universe
         print('── universe ──')
         n = _refresh_universe()
         print(f'  {n:,} tickers')
 
     if 'catalog' in steps:
-        from irp.query.catalog import refresh as _refresh_catalog
+        from irp.query.catalog import _refresh as _refresh_catalog
         print('── catalog ──')
         n = _refresh_catalog()
         print(f'  {n:,} tickers')

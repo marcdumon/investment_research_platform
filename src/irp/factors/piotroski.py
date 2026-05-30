@@ -30,9 +30,9 @@ from irp.factors._cols import (
     TOTAL_CURRENT_ASSETS,
     TOTAL_CURRENT_LIABILITIES,
 )
-from irp.factors._pit import pit_latest, pit_ttm
+from irp.factors._pit import pit_latest, _pit_ttm
 from irp.factors._utils import _safe_div
-from irp.factors.registry import register
+from irp.factors.registry import _register as register
 
 register('piotroski_fscore', 'Piotroski F', group='quality')
 
@@ -72,7 +72,7 @@ def compute_piotroski(
     DataFrame indexed by Ticker with column `piotroski_fscore` (float 0–9 or NaN).
     """
     prior_date = (pd.Timestamp(as_of_date) - pd.DateOffset(years=1)).date()
-    _pit_flow = pit_ttm if variant == 'Q' else pit_latest
+    _pit_flow = _pit_ttm if variant == 'Q' else pit_latest
 
     curr_inc = _pit_flow(raw_income,   as_of_date)
     curr_cf  = _pit_flow(raw_cashflow, as_of_date)
@@ -148,7 +148,7 @@ def compute_piotroski(
     return out
 
 
-def compute_piotroski_panel(df: pd.DataFrame) -> pd.Series:
+def _compute_piotroski_panel(df: pd.DataFrame) -> pd.Series:
     """Piotroski F-Score from a combined cross-section DataFrame.
 
     Takes the assembled per-ticker frame used by `cross_section_panel`

@@ -19,7 +19,7 @@ import pandas as pd
 import talib
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
-from irp.factors.registry import register
+from irp.factors.registry import _register as register
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ for _s in _TA_SPECS:
 # Compute functions
 # ---------------------------------------------------------------------------
 
-def compute_ta_snapshot(close: pd.Series) -> dict[str, float]:
+def _compute_ta_snapshot(close: pd.Series) -> dict[str, float]:
     """All registered TA indicators on one Close Series; returns last-bar values."""
     result: dict[str, float] = {}
     for s in _TA_SPECS:
@@ -83,7 +83,7 @@ def compute_ta_snapshot(close: pd.Series) -> dict[str, float]:
     return result
 
 
-def compute_technical(
+def _compute_technical(
     prices: pd.DataFrame,
     as_of_date: datetime.date,
 ) -> pd.DataFrame:
@@ -107,6 +107,6 @@ def compute_technical(
         return pd.DataFrame(columns=[s.name for s in _TA_SPECS])
 
     close = eligible[PRICE_CLOSE].reset_index(drop=True).astype(float)
-    vals = compute_ta_snapshot(close)
+    vals = _compute_ta_snapshot(close)
     ticker = prices[PRICE_TICKER].iloc[0] if PRICE_TICKER in prices.columns else 'unknown'
     return pd.DataFrame([vals], index=pd.Index([ticker], name=PRICE_TICKER))

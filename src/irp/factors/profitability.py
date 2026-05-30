@@ -18,7 +18,7 @@ from irp.factors._cols import (
     CFO,
 )
 from irp.factors._utils import _safe_div
-from irp.factors.registry import register
+from irp.factors.registry import _register as register
 
 register('gross_margin',   'Gross Margin',   pct=True, group='profitability')
 register('op_margin',      'Op. Margin',     pct=True, group='profitability')

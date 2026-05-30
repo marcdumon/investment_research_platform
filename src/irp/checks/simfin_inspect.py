@@ -8,7 +8,7 @@ from irp.checks.simfin_rules import REGISTRY
 _BASE = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period', 'Report Date']
 
 
-def inspect(rule_name: str, ticker: str, fy: int, fp: str, period: Literal['A','Q']) -> pd.DataFrame:
+def _inspect(rule_name: str, ticker: str, fy: int, fp: str, period: Literal['A','Q']) -> pd.DataFrame:
     """Return rule-relevant SimFin columns for a (ticker, fy, fp, period).
 
     For cross-statement rules, returns rows from each statement with a _stmt label.

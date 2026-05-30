@@ -48,7 +48,7 @@ class Source(StrEnum):
     YAHOO = 'yahoo'
 
 
-def dropdown_options(enum_cls: type[StrEnum]) -> list[dict[str, str]]:
+def _dropdown_options(enum_cls: type[StrEnum]) -> list[dict[str, str]]:
     """Build a Dash dropdown options list from a StrEnum.
 
     Labels are humanised member names (`SOMETHING_FOO` → `Something foo`).

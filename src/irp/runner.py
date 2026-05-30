@@ -16,7 +16,7 @@ class DataProvider(Protocol):
     def cleanup(self) -> None: ...
 
 
-def load_data(provider: DataProvider, feed: Feed) -> None:
+def _load_data(provider: DataProvider, feed: Feed) -> None:
     name = provider.__class__.__name__
     if feed not in provider.SUPPORTED_FEEDS:
         logger.info(f'{name}: feed {feed!r} not supported, skipping')

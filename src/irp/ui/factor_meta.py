@@ -3,7 +3,7 @@
 Derived from the central factor registry. Import this module anywhere that
 needs factor labels or dropdown options; do NOT hardcode factor lists elsewhere.
 """
-from irp.factors.registry import FactorDef, all_factors
+from irp.factors.registry import FactorDef, _all_factors as all_factors
 
 
 def _label_with_unit(f: FactorDef) -> str:

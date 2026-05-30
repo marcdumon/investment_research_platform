@@ -25,14 +25,14 @@ class Rule:
 REGISTRY: list[Rule] = []
 
 
-def register(name: str, description: str):
+def _register(name: str, description: str):
     def deco(fn: Callable[[duckdb.DuckDBPyConnection], pd.DataFrame]):
         REGISTRY.append(Rule(name, description, fn))
         return fn
     return deco
 
 
-@register(
+@_register(
     'ohlc_inconsistent',
     'OHLC bars where High < Low, Close > High, or Close < Low.',
 )
@@ -50,7 +50,7 @@ def _ohlc_inconsistent(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """).df()
 
 
-@register(
+@_register(
     'negative_price_non_bond',
     'Negative prices for instruments where negative is not expected '
     '(excludes bonds and money-market entries, where yields can be negative).',
@@ -71,7 +71,7 @@ def _negative_price_non_bond(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """).df()
 
 
-@register(
+@_register(
     'zero_volume_trading_day',
     'Zero volume on a weekday for stocks and ETFs '
     '(trading was open but no shares traded — usually a data feed issue).',

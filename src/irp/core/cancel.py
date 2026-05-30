@@ -3,13 +3,13 @@ import threading
 _event: threading.Event = threading.Event()
 
 
-def is_cancelled() -> bool:
+def _is_cancelled() -> bool:
     return _event.is_set()
 
 
-def request_cancel() -> None:
+def _request_cancel() -> None:
     _event.set()
 
 
-def clear() -> None:
+def _clear() -> None:
     _event.clear()

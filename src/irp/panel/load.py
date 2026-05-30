@@ -97,7 +97,7 @@ def load_fundamentals(
 
 
 @lru_cache(maxsize=12)
-def load_fundamentals_restated(
+def _load_fundamentals_restated(
     stmt: Literal['income', 'balance', 'cashflow'],
     variant: Literal['A', 'Q'],
 ) -> pl.DataFrame:
@@ -109,7 +109,7 @@ def load_fundamentals_restated(
 
 
 @lru_cache(maxsize=1)
-def load_ta_panel() -> pl.DataFrame:
+def _load_ta_panel() -> pl.DataFrame:
     """Long-format TA panel: (Ticker, Date, indicator...). Sorted by Date for PIT lookup.
 
     Returns an empty DataFrame if ta_panel.parquet does not exist (build_ta_panel() not yet run).
@@ -127,5 +127,5 @@ def clear_cache() -> None:
     """Drop in-memory panel caches (call after rebuild)."""
     load_prices_wide.cache_clear()
     load_fundamentals.cache_clear()
-    load_fundamentals_restated.cache_clear()
-    load_ta_panel.cache_clear()
+    _load_fundamentals_restated.cache_clear()
+    _load_ta_panel.cache_clear()

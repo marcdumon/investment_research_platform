@@ -13,8 +13,8 @@ from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
 from irp.features.composite import PRESETS
-from irp.ui.charts import base_chart_layout as _chart_layout
-from irp.ui.charts import empty_figure as _empty_figure
+from irp.ui.charts import _base_chart_layout as _chart_layout
+from irp.ui.charts import _empty_figure
 from irp.ui.factor_meta import FACTOR_OPTIONS
 from irp.ui.services import backtest_service, universe_service, watchlist_service
 from irp.ui.theme import ACCENT, MUTED
@@ -74,7 +74,7 @@ def _stat_chip(label: str, value: str, value_color: str | None = None) -> html.D
 
 def _filtered_tickers(market: str, sector: str | None) -> list[str] | None:
     """Backwards-compatible shim — delegates to universe_service.filter_tickers."""
-    return universe_service.filter_tickers(market=market or None, sector=sector)
+    return universe_service._filter_tickers(market=market or None, sector=sector)
 
 
 # ── Layout ────────────────────────────────────────────────────────────
@@ -437,7 +437,7 @@ layout = html.Div(
     Input('backtest-wl-trigger', 'data'),
 )
 def load_sector_options(_: Any, _wl: Any) -> tuple[list, list]:
-    sectors = universe_service.get_sectors()
+    sectors = universe_service._get_sectors()
     sector_opts = [{'label': s, 'value': s} for s in sectors]
     wl_df = watchlist_service.list_watchlists()
     wl_opts = (
@@ -531,7 +531,7 @@ def run_bt(
 
         if mode == 'composite':
             weights = PRESETS.get(preset or 'composite', PRESETS['composite'])
-            result = backtest_service.run_composite(
+            result = backtest_service._run_composite(
                 weights=weights,
                 horizon_days=int(horizon),
                 start_date=datetime.date(start_yr, 1, 1),
@@ -549,7 +549,7 @@ def run_bt(
         else:
             if not factor:
                 raise PreventUpdate
-            result = backtest_service.run_factor(
+            result = backtest_service._run_factor(
                 factor=factor,
                 horizon_days=int(horizon),
                 start_date=datetime.date(start_yr, 1, 1),
@@ -597,7 +597,7 @@ def run_bt(
             )
 
         ic = result['ic_series']
-        filtered = universe_service.filter_tickers(
+        filtered = universe_service._filter_tickers(
             market=market or None,
             sector=sector,
             watchlist=watchlist,
@@ -1029,7 +1029,7 @@ def run_decay_analysis(
                 watchlist_service.load_watchlist(watchlist)
             except KeyError:
                 return {'error': f'Watchlist "{watchlist}" not found.'}
-        df = backtest_service.run_decay(
+        df = backtest_service._run_decay(
             factor=factor,
             horizons=sorted(horizons),
             start_date=datetime.date(start_yr, 1, 1),

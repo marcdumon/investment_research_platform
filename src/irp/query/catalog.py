@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 _raw_dir = Path(config.data.root_dir) / config.providers.yahoo.raw_dir
 
 
-def catalog(tickers: str | list[str] | None = None) -> pd.DataFrame:
+def _catalog(tickers: str | list[str] | None = None) -> pd.DataFrame:
     """Per-ticker coverage snapshot across all data sources."""
     clause, params = ticker_filter(tickers)
     where = f'WHERE {clause}' if clause else ''
@@ -57,7 +57,7 @@ def _empty_cte(cols: str) -> str:
     return f'SELECT {cols} WHERE FALSE'
 
 
-def refresh() -> int:
+def _refresh() -> int:
     """Rebuild the `catalog` table from current DB state + Yahoo JSON files.
 
     Reads queried_prices.json, queried_actions.json, and error_tickers.json
@@ -79,7 +79,7 @@ def refresh() -> int:
         f'ya_queried={len(ya_queried)}'
     )
 
-    from irp.core.db import write_session
+    from irp.core.db import _write_session as write_session
     with write_session() as con:
         for view, items, col in [
             ('_yp_q', yp_queried, 'yp_q'),
@@ -204,15 +204,15 @@ def refresh() -> int:
     return count
 
 
-def main() -> None:
+def _main() -> None:
     import time
-    from irp.core.logging import configure_logging
+    from irp.core.logging import _configure_logging as configure_logging
     configure_logging()
     print('Refreshing data catalog...')
     t0 = time.perf_counter()
-    n = refresh()
+    n = _refresh()
     print(f'Done — {n:,} tickers in {time.perf_counter() - t0:.1f}s')
 
 
 if __name__ == '__main__':
-    main()
+    _main()

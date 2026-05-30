@@ -22,7 +22,7 @@ from irp.factors._cols import (
     TOTAL_EQUITY,
 )
 from irp.factors._utils import _safe_div
-from irp.factors.registry import register
+from irp.factors.registry import _register as register
 
 register('mktcap',          'Mkt Cap ($B)',         group='size')
 register('revenue',         'Revenue ($B)',         group='fundamentals')
