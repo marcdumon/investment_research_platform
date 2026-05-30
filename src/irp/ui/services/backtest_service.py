@@ -21,7 +21,7 @@ from irp.factors.models import BacktestResult
 from irp.ui.services import universe_service
 
 
-def run_factor(
+def _run_factor(
     factor: str,
     horizon_days: int,
     start_date: datetime.date,
@@ -33,14 +33,14 @@ def run_factor(
     sector: str | None = None,
     watchlist: str | None = None,
 ) -> BacktestResult:
-    tickers = universe_service.filter_tickers(market=market, sector=sector, watchlist=watchlist)
+    tickers = universe_service._filter_tickers(market=market, sector=sector, watchlist=watchlist)
     return _run_backtest(
         factor, horizon_days, start_date, end_date,
         variant=variant, freq=freq, cost_bps=cost_bps, tickers=tickers,
     )
 
 
-def run_composite(
+def _run_composite(
     weights: dict[str, float],
     horizon_days: int,
     start_date: datetime.date,
@@ -54,7 +54,7 @@ def run_composite(
     sector: str | None = None,
     watchlist: str | None = None,
 ) -> BacktestResult:
-    tickers = universe_service.filter_tickers(market=market, sector=sector, watchlist=watchlist)
+    tickers = universe_service._filter_tickers(market=market, sector=sector, watchlist=watchlist)
     return _run_composite_backtest(
         weights, horizon_days, start_date, end_date,
         variant=variant, freq=freq, normalize=normalize,
@@ -62,7 +62,7 @@ def run_composite(
     )
 
 
-def run_decay(
+def _run_decay(
     factor: str,
     horizons: list[int],
     start_date: datetime.date,
@@ -73,7 +73,7 @@ def run_decay(
     sector: str | None = None,
     watchlist: str | None = None,
 ) -> pd.DataFrame:
-    tickers = universe_service.filter_tickers(market=market, sector=sector, watchlist=watchlist)
+    tickers = universe_service._filter_tickers(market=market, sector=sector, watchlist=watchlist)
     return _run_factor_decay(
         factor, horizons, start_date, end_date,
         variant=variant, freq=freq, tickers=tickers,

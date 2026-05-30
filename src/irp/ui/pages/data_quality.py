@@ -10,7 +10,7 @@ from dash.exceptions import PreventUpdate
 
 import irp.checks.simfin_rules as _simfin_rules
 import irp.checks.stooq_rules as _stooq_rules
-from irp.ui.charts import base_chart_layout as _chart_layout, empty_figure as _empty_figure
+from irp.ui.charts import _base_chart_layout as _chart_layout, _empty_figure
 from irp.ui.services import data_quality_service as dq
 from irp.ui.services import universe_service as _uv
 from irp.ui.theme import ACCENT, MUTED
@@ -40,8 +40,8 @@ _STQ_RULE_INFO: dict[str, str] = {
 def _market_opts(markets: list[str]) -> list[dict]:
     return [{'label': 'All', 'value': ''}] + [{'label': m, 'value': m} for m in sorted(markets)]
 
-_companies = _uv.get_companies()
-_universe = _uv.get_universe()
+_companies = _uv._get_companies()
+_universe = _uv._get_universe()
 _SF_MARKET_OPTS = _market_opts(_companies['Market'].dropna().unique().tolist())
 _STQ_MARKET_OPTS = _market_opts(_universe['Market'].dropna().unique().tolist())
 _STOCK_MARKETS = {'nasdaq stocks', 'nyse stocks', 'nysemkt stocks', 'stooq stocks indices'}
@@ -564,7 +564,7 @@ def _fmt_violation_line(label: str, value) -> str:
 def _render_statement(ticker: str, period_str: str, kind: str) -> html.Div:
     """SimFin statement table focused on the selected period + 3 older."""
     try:
-        df = _uv.get_statement(ticker, kind)
+        df = _uv._get_statement(ticker, kind)
     except Exception as exc:
         logger.debug(f'statement load error: {exc}')
         return html.Div('No data.', style={'color': MUTED, 'fontSize': '12px'})
@@ -607,7 +607,7 @@ def _render_annotation_table(
     input_type distinguishes violation-panel inputs ('edgar-input') from manual ones ('edgar-input-manual').
     """
     try:
-        df = _uv.get_statement(ticker, kind)
+        df = _uv._get_statement(ticker, kind)
     except Exception as exc:
         logger.debug(f'annotation table load error: {exc}')
         return html.Div('No data.', style={'color': MUTED, 'fontSize': '12px'}), {}
@@ -763,7 +763,7 @@ def _apply_filters(records: list[dict], tickers: list | None, market: str | None
 def run_simfin(n: int, variant: str, inc_reviewed: list):
     skip = 'yes' not in (inc_reviewed or [])
     try:
-        df = dq.run_simfin(skip_reviewed=skip, variant=variant or 'A')
+        df = dq._run_simfin(skip_reviewed=skip, variant=variant or 'A')
     except Exception as exc:
         logger.exception('simfin run error')
         return None
@@ -886,14 +886,14 @@ def update_simfin_inspect(rule, sel, results):
         return html.Div(), 'to_check'
     inspect_div = html.Div()
     try:
-        inspect_df = dq.inspect_simfin(
+        inspect_df = dq._inspect_simfin(
             rule, sel['Ticker'],
             int(violation['Fiscal Year']), str(violation['Fiscal Period']), str(violation['Period']),
         )
         inspect_div = _inspect_html(inspect_df)
     except Exception as exc:
         logger.debug(f'inspect error: {exc}')
-    return inspect_div, dq.auto_suggest_status(violation.get('rel_diff', 0.0))
+    return inspect_div, dq._auto_suggest_status(violation.get('rel_diff', 0.0))
 
 
 @callback(
@@ -910,8 +910,8 @@ def update_sf_annotation_table(sel, kind, unit_choice):
     ticker = sel['Ticker']
     period = sel['Period_str']
     stmt_kind = kind or 'income'
-    existing = dq.load_edgar_corrections(ticker, period, stmt_kind)
-    existing_notes = dq.load_edgar_correction_notes(ticker, period, stmt_kind)
+    existing = dq._load_edgar_corrections(ticker, period, stmt_kind)
+    existing_notes = dq._load_edgar_correction_notes(ticker, period, stmt_kind)
     table_div, store_payload = _render_annotation_table(
         ticker, period, stmt_kind, existing, existing_notes=existing_notes,
         unit_choice=unit_choice or 'auto',
@@ -960,7 +960,7 @@ def save_edgar_annotations(n, sel, kind, rule, status, review_note,
         if note_raw and str(note_raw).strip():
             line_notes[item] = str(note_raw).strip()
     try:
-        dq.save_statement(ticker, period, stmt_kind, rule, status,
+        dq._save_statement(ticker, period, stmt_kind, rule, status,
                           review_note or '', edgar_values,
                           simfin_values or None, line_notes or None)
     except Exception as exc:
@@ -986,7 +986,7 @@ def fetch_edgar(n, sel):
     try:
         rd = sel.get('Report Date')
         rd_str = str(rd)[:10] if rd else None
-        url = dq.fetch_edgar_url(int(cik), rd_str, str(sel.get('Period', '')))
+        url = dq._fetch_edgar_url(int(cik), rd_str, str(sel.get('Period', '')))
     except Exception as exc:
         logger.warning(f'EDGAR fetch error: {exc}')
         return None, f'Error: {exc}'
@@ -1063,7 +1063,7 @@ def add_flag(n, ticker, period, subject, status, note):
     if not ticker or not period:
         return 'Ticker and period are required.', ticker, period, subject, note
     try:
-        dq.add_manual_flag(ticker.strip().upper(), period.strip(), subject or '', status or 'to_check', note or '')
+        dq._add_manual_flag(ticker.strip().upper(), period.strip(), subject or '', status or 'to_check', note or '')
     except Exception as exc:
         return f'Error: {exc}', ticker, period, subject, note
     return 'Flag saved.', '', '', '', ''
@@ -1080,7 +1080,7 @@ def add_flag(n, ticker, period, subject, status, note):
 def run_stooq(n: int, inc_reviewed: list):
     skip = 'yes' not in (inc_reviewed or [])
     try:
-        df = dq.run_stooq(skip_reviewed=skip)
+        df = dq._run_stooq(skip_reviewed=skip)
     except Exception as exc:
         logger.exception('stooq run error')
         return None
@@ -1126,12 +1126,12 @@ def show_stooq_detail(cell, close_n, results):
 
     row = results[cell['row']]
     title = f'{row["Ticker"]} — {row["Period_str"]} — {row["Rule"]}'
-    yahoo = dq.yahoo_url(row['Ticker'], row.get('Period_str'))
+    yahoo = dq._yahoo_url(row['Ticker'], row.get('Period_str'))
 
     sample_dates = row.get('sample_dates') or []
     fig = _empty_figure('No price data')
     try:
-        raw_fig = dq.stooq_figure(row['Rule'], row['Ticker'], row['Period_str'], sample_dates)
+        raw_fig = dq._stooq_figure(row['Rule'], row['Ticker'], row['Period_str'], sample_dates)
         if raw_fig is not None:
             fig = raw_fig
     except Exception as exc:
@@ -1139,7 +1139,7 @@ def show_stooq_detail(cell, close_n, results):
 
     bars_div = html.Div()
     try:
-        bars = dq.flagged_bars(row['Ticker'], sample_dates)
+        bars = dq._flagged_bars(row['Ticker'], sample_dates)
         if not bars.empty:
             bars_div = _inspect_html(bars)
     except Exception as exc:
@@ -1164,7 +1164,7 @@ def submit_stooq_review(n, sel, status, note, results):
     if not sel or not status:
         raise PreventUpdate
     try:
-        dq.add_stooq_review(sel['Ticker'], sel['Period_str'], sel['Rule'], status, note or '')
+        dq._add_stooq_review(sel['Ticker'], sel['Period_str'], sel['Rule'], status, note or '')
     except Exception as exc:
         return results, note, f'Error: {exc}', dash.no_update
     updated = [r for r in (results or [])
@@ -1228,8 +1228,8 @@ def update_dashboard(tab, sf_results, stq_results):
         ])
 
     return html.Div([
-        _section('Fundamentals (SimFin)', sf_results, dq.get_all_simfin_reviews),
-        _section('Prices (Stooq)', stq_results, dq.get_all_stooq_reviews),
+        _section('Fundamentals (SimFin)', sf_results, dq._get_all_simfin_reviews),
+        _section('Prices (Stooq)', stq_results, dq._get_all_stooq_reviews),
     ])
 
 
@@ -1364,7 +1364,7 @@ def update_manual_period_strip(ticker, kind, variant, sel):
         return [], {}
     ticker = ticker.strip().upper() if isinstance(ticker, str) else ticker
     try:
-        report_dates = _uv.get_period_report_dates(ticker, kind)
+        report_dates = _uv._get_period_report_dates(ticker, kind)
     except Exception:
         return [html.Span('No data for this ticker/statement.',
                           style={'color': MUTED, 'fontSize': '12px'})], {}
@@ -1463,8 +1463,8 @@ def load_manual_annotation_table(sel, kind, unit_choice):
     ticker = sel['ticker']
     kind = kind or sel.get('kind', 'income')
     period = sel['period']
-    existing = dq.load_edgar_corrections(ticker, period, kind)
-    existing_notes = dq.load_edgar_correction_notes(ticker, period, kind)
+    existing = dq._load_edgar_corrections(ticker, period, kind)
+    existing_notes = dq._load_edgar_correction_notes(ticker, period, kind)
     table_div, store_payload = _render_annotation_table(
         ticker, period, kind, existing, input_type='edgar-input-manual',
         existing_notes=existing_notes,
@@ -1496,14 +1496,14 @@ def fetch_manual_edgar(sel, kind):
                   'cashflow': 'Cash Flow'}.get(kind, kind.capitalize())
     context = html.Span(f'{ticker}  ·  {period}  ·  {kind_label}',
                         style={'fontSize': '13px', 'fontWeight': '600', 'color': MUTED})
-    cik = _uv.get_ticker_cik(ticker)
+    cik = _uv._get_ticker_cik(ticker)
     if not cik or not report_date:
         edgar_el = html.Span('No EDGAR link', style={'fontSize': '12px', 'color': MUTED,
                                                       'opacity': '0.5'})
     else:
         period_code = 'A' if (period.endswith('FY') or period.endswith('Q4')) else 'Q'
         try:
-            url = dq.fetch_edgar_url(cik, report_date, period_code)
+            url = dq._fetch_edgar_url(cik, report_date, period_code)
         except Exception:
             url = None
         if url:
@@ -1574,7 +1574,7 @@ def update_edgar_corrections_tab(tab):
         raise PreventUpdate
 
     try:
-        cos = _uv.get_companies()[['Ticker', 'Company Name']]
+        cos = _uv._get_companies()[['Ticker', 'Company Name']]
         ticker_options = [
             {'label': f"{row['Ticker']} — {row['Company Name']}" if row.get('Company Name') else row['Ticker'],
              'value': row['Ticker']}
@@ -1585,7 +1585,7 @@ def update_edgar_corrections_tab(tab):
     manual_section = _manual_annotation_section(ticker_options)
 
     try:
-        df = dq.get_all_edgar_corrections()
+        df = dq._get_all_edgar_corrections()
     except Exception as exc:
         logger.warning(f'corrections load error: {exc}')
         return html.Div([manual_section])

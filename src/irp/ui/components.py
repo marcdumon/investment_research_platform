@@ -1,7 +1,7 @@
 from dash import dcc, html
 
 
-def navbar() -> html.Nav:
+def _navbar() -> html.Nav:
     return html.Nav(className='nav', children=[
         dcc.Link('IRP', href='/', className='nav-logo'),
         html.Div(className='nav-links', children=[

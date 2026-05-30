@@ -18,7 +18,7 @@ _DOLLAR_B_COLS = frozenset({
 })
 
 
-def column_format(col: str) -> dict:
+def _column_format(col: str) -> dict:
     """Dash DataTable column-format dict for a known factor column.
 
     Dollar-B columns get `$` prefix; percentage factors use the `percentage`
@@ -43,7 +43,7 @@ def column_format(col: str) -> dict:
     return {}
 
 
-def format_factor_value(val: object, factor: str) -> str:
+def _format_factor_value(val: object, factor: str) -> str:
     """String form of a factor value for hover labels + plain-text cells."""
     try:
         v = float(val)  # type: ignore[arg-type]
@@ -58,7 +58,7 @@ def format_factor_value(val: object, factor: str) -> str:
     return f'{v:.1f}x'
 
 
-def render_statement_table(
+def _render_statement_table(
     df: pd.DataFrame,
     columns: Sequence[tuple[str, str]],
     class_name: str = 'stmt-table',

@@ -27,12 +27,12 @@ _YAHOO_ERRORS = JsonSet(config.data.root_dir / 'data_quality' / 'stooq_yahoo_err
 _STALENESS_FILE = config.data.root_dir / 'data_quality' / 'stooq_staleness.csv'
 
 
-def load_yahoo_errors() -> set[str]:
+def _load_yahoo_errors() -> set[str]:
     """Load tickers Yahoo Finance couldn't resolve (persistent error list)."""
     return _YAHOO_ERRORS.load()
 
 
-def save_yahoo_errors(errors: set[str]) -> None:
+def _save_yahoo_errors(errors: set[str]) -> None:
     """Persist unresolvable Yahoo tickers."""
     _YAHOO_ERRORS.save(errors)
 
@@ -40,7 +40,7 @@ def save_yahoo_errors(errors: set[str]) -> None:
 _STALENESS_COLS = ['Ticker', 'Date', 'Years_back', 'Stooq_C', 'Yahoo_C', 'Ratio']
 
 
-def load_staleness_results(
+def _load_staleness_results(
     results_file: Path = _STALENESS_FILE,
     threshold: float | None = None,
 ) -> pd.DataFrame:
@@ -53,7 +53,7 @@ def load_staleness_results(
     return df.sort_values('Ratio', ascending=False).reset_index(drop=True)
 
 
-def staleness_scan(
+def _staleness_scan(
     market_patterns: list[str] | None = None,
     years_back: list[int] | None = None,
     threshold: float = 1.02,
@@ -105,7 +105,7 @@ def staleness_scan(
         years_back = [1, 3, 5]
 
     lower_pats = [p.lower() for p in market_patterns]
-    known_errors = load_yahoo_errors() if skip_yahoo_errors else set()
+    known_errors = _load_yahoo_errors() if skip_yahoo_errors else set()
     new_errors: set[str] = set()
     checked, file_has_header = _load_checked_pairs(results_file, skip_scanned)
     today = pd.Timestamp.today().normalize()
@@ -134,7 +134,7 @@ def staleness_scan(
                 continue
             if raw.empty:
                 new_errors.update(batch)
-                save_yahoo_errors(known_errors | new_errors)
+                _save_yahoo_errors(known_errors | new_errors)
                 continue
             close = _close_on_date(raw, date_str, batch)
             if close is None:
@@ -143,15 +143,15 @@ def staleness_scan(
             unknown = {t for t in batch if t not in found}
             if unknown:
                 new_errors.update(unknown)
-                save_yahoo_errors(known_errors | new_errors)
+                _save_yahoo_errors(known_errors | new_errors)
             if batch_rows:
                 _append_results(results_file, batch_rows, file_has_header)
                 file_has_header = True
 
     if new_errors:
-        save_yahoo_errors(known_errors | new_errors)
+        _save_yahoo_errors(known_errors | new_errors)
 
-    return load_staleness_results(results_file, threshold=threshold)
+    return _load_staleness_results(results_file, threshold=threshold)
 
 
 def _load_checked_pairs(results_file: Path, skip_scanned: bool) -> tuple[set[tuple[str, int]], bool]:
@@ -274,7 +274,7 @@ def _query_range(ticker: str, start: int, end: int) -> pd.DataFrame:
     ).df()
 
 
-def flagged_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:
+def _flagged_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:
     """OHLCV rows for each flagged date (Date as YYYY-MM-DD string)."""
     if not sample_dates:
         return pd.DataFrame()
@@ -285,7 +285,7 @@ def flagged_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:
     return df[['Date', 'O', 'H', 'L', 'C', 'V']].reset_index(drop=True)
 
 
-def yahoo_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:
+def _yahoo_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:
     """OHLCV from Yahoo Finance for each flagged date. Returns empty DataFrame
     if yfinance can't resolve the ticker or has no data. Same column shape
     as `flagged_bars` so the two tables can be displayed side-by-side.
@@ -324,7 +324,7 @@ def yahoo_bars(ticker: str, sample_dates: list[int]) -> pd.DataFrame:
     return df.loc[df['Date'].isin(targets), cols].reset_index(drop=True)
 
 
-def yahoo_url(ticker: str, period_str: str | None = None) -> str:
+def _yahoo_url(ticker: str, period_str: str | None = None) -> str:
     """Yahoo Finance history page URL for a ticker, optionally scoped to a
     +/- 6 month window around `period_str` (calendar year as string).
     Ticker symbols mostly match across feeds but not always — indices, ADRs,
@@ -348,7 +348,7 @@ def _date_str(df: pd.DataFrame) -> pd.Series:
     )
 
 
-def inspect(
+def _inspect(
     rule_name: str,
     ticker: str,
     period_str: str,
@@ -392,7 +392,7 @@ def inspect(
     return fig
 
 
-def inspect_long(
+def _inspect_long(
     ticker: str,
     period_str: str,
     sample_dates: list[int] | None = None,

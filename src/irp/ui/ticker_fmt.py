@@ -15,7 +15,7 @@ _PRESET_DAYS: dict[str, int] = {
 }
 
 
-def detect_scale(df: pd.DataFrame) -> tuple[float, str]:
+def _detect_scale(df: pd.DataFrame) -> tuple[float, str]:
     vals = pd.to_numeric(df.values.flatten(), errors='coerce')
     maxabs = float(pd.Series(vals).abs().max())
     if pd.isna(maxabs) or maxabs == 0:
@@ -27,18 +27,18 @@ def detect_scale(df: pd.DataFrame) -> tuple[float, str]:
     return 1.0, 'USD'
 
 
-def is_per_share(item: str) -> bool:
+def _is_per_share(item: str) -> bool:
     return bool(_PER_SHARE.search(item))
 
 
-def is_pct_item(item: str, values: pd.Series) -> bool:
+def _is_pct_item(item: str, values: pd.Series) -> bool:
     if not _PCT_ITEM.search(item):
         return False
     non_null = pd.to_numeric(values, errors='coerce').dropna().abs()
     return bool(len(non_null) > 0 and (non_null < 10).all())
 
 
-def fmt_cell(val: object, *, per_share: bool, pct: bool, divisor: float) -> str:
+def _fmt_cell(val: object, *, per_share: bool, pct: bool, divisor: float) -> str:
     try:
         v = float(val)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -53,23 +53,23 @@ def fmt_cell(val: object, *, per_share: bool, pct: bool, divisor: float) -> str:
     return s[:-2] if s.endswith('.0') else s
 
 
-def fmt_statement(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+def _fmt_statement(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     """Format a statement DataFrame (items as rows, periods as columns).
 
     Returns (formatted_df, scale_note).
     """
     if df.empty:
         return df, ''
-    monetary_rows = [i for i in df.index if not is_per_share(str(i))]
+    monetary_rows = [i for i in df.index if not _is_per_share(str(i))]
     monetary_df = df.loc[monetary_rows] if monetary_rows else df
-    divisor, scale_label = detect_scale(monetary_df)
+    divisor, scale_label = _detect_scale(monetary_df)
     result = df.copy().astype(object)
     for item in df.index:
         row = df.loc[item]
-        ps = is_per_share(str(item))
-        pct = is_pct_item(str(item), row) if not ps else False
+        ps = _is_per_share(str(item))
+        pct = _is_pct_item(str(item), row) if not ps else False
         for col in df.columns:
-            result.loc[item, col] = fmt_cell(df.loc[item, col], per_share=ps, pct=pct, divisor=divisor)
+            result.loc[item, col] = _fmt_cell(df.loc[item, col], per_share=ps, pct=pct, divisor=divisor)
     note = (
         f'Amounts in {scale_label} except per-share data.'
         if divisor != 1.0
@@ -78,7 +78,7 @@ def fmt_statement(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     return result, note
 
 
-def fmt_price_table(df: pd.DataFrame) -> pd.DataFrame:
+def _fmt_price_table(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     out = df.copy()
@@ -108,7 +108,7 @@ def fmt_price_table(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def date_range_for_preset(preset: str) -> tuple[str, str]:
+def _date_range_for_preset(preset: str) -> tuple[str, str]:
     today = date.today()
     if preset in _PRESET_DAYS:
         start = today - timedelta(days=_PRESET_DAYS[preset])

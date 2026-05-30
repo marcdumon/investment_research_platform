@@ -24,13 +24,13 @@ from irp.ui.theme import (
     TABLE_STYLE,
 )
 from irp.ui.ticker_fmt import (
-    date_range_for_preset,
-    detect_scale,
-    fmt_cell,
-    fmt_price_table,
-    fmt_statement,
-    is_per_share,
-    is_pct_item,
+    _date_range_for_preset as date_range_for_preset,
+    _detect_scale as detect_scale,
+    _fmt_cell as fmt_cell,
+    _fmt_price_table as fmt_price_table,
+    _fmt_statement as fmt_statement,
+    _is_per_share as is_per_share,
+    _is_pct_item as is_pct_item,
 )
 
 logger = logging.getLogger(__name__)
@@ -424,12 +424,12 @@ layout = html.Div(
 def load_ticker_data(_: Any) -> tuple[Any, ...]:
 
     try:
-        uni = universe_service.get_universe()
+        uni = universe_service._get_universe()
     except Exception:
         return [], [], [], []
 
     try:
-        comp = universe_service.get_companies()[
+        comp = universe_service._get_companies()[
             ['Ticker', 'Company Name', 'Sector', 'Industry']
         ]
     except Exception:
@@ -562,12 +562,12 @@ def render_header(ticker: str | None) -> list:
         raise PreventUpdate
 
     try:
-        uni_row = universe_service.get_universe(ticker)
+        uni_row = universe_service._get_universe(ticker)
     except Exception:
         uni_row = pd.DataFrame()
 
     try:
-        comp_row = universe_service.get_companies(ticker)
+        comp_row = universe_service._get_companies(ticker)
     except Exception:
         comp_row = pd.DataFrame()
 
@@ -674,7 +674,7 @@ def render_prices(
     vol_col   = 'V' if source == 'stooq' else 'Volume'
 
     try:
-        df = price_service.get_prices(ticker, source=source, start=start, end=end)
+        df = price_service._get_prices(ticker, source=source, start=start, end=end)
     except Exception as exc:
         logger.warning(f'Price query failed for {ticker}: {exc}')
         return _empty_fig(), []
@@ -691,7 +691,7 @@ def render_prices(
     compare_df: pd.DataFrame | None = None
     if compare_ticker and compare_ticker != ticker:
         try:
-            cdf = price_service.get_prices(compare_ticker, source=source, start=start, end=end)
+            cdf = price_service._get_prices(compare_ticker, source=source, start=start, end=end)
             if not cdf.empty and close_col in cdf.columns:
                 cdf = cdf.sort_values('Date').copy()
                 cdf['_date_str'] = pd.to_datetime(cdf['Date']).dt.strftime('%Y-%m-%d')
@@ -703,8 +703,8 @@ def render_prices(
     div_traces: list = []
     split_dates: list[str] = []
     try:
-        divs = price_service.get_dividends(ticker)
-        spls = price_service.get_splits(ticker)
+        divs = price_service._get_dividends(ticker)
+        spls = price_service._get_splits(ticker)
         df_min, df_max = df['_date_str'].min(), df['_date_str'].max()
         if not divs.empty:
             d_dates = pd.to_datetime(divs['Date'])
@@ -951,8 +951,8 @@ def _edgar_period_strip(ticker: str, name: str, period_cols: list) -> html.Div:
     """Row of EDGAR filing links, one per displayed period column."""
     from irp.checks.edgar import filing_url
     try:
-        cik = universe_service.get_ticker_cik(ticker)
-        report_dates = universe_service.get_period_report_dates(ticker, name)  # type: ignore[arg-type]
+        cik = universe_service._get_ticker_cik(ticker)
+        report_dates = universe_service._get_period_report_dates(ticker, name)  # type: ignore[arg-type]
     except Exception:
         return html.Div()
 
@@ -989,7 +989,7 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
     if not ticker:
         raise PreventUpdate
     try:
-        df = universe_service.get_statement(ticker, name)  # type: ignore[arg-type]
+        df = universe_service._get_statement(ticker, name)  # type: ignore[arg-type]
     except Exception as exc:
         logger.warning(f'Statement query failed {ticker}/{name}: {exc}')
         return html.P('Failed to load data.', className='no-data'), ''
@@ -1307,8 +1307,8 @@ def render_actions(ticker: str | None) -> Any:
         raise PreventUpdate
 
     try:
-        divs = price_service.get_dividends(ticker)
-        spls = price_service.get_splits(ticker)
+        divs = price_service._get_dividends(ticker)
+        spls = price_service._get_splits(ticker)
     except Exception as exc:
         logger.warning(f'Actions query failed {ticker}: {exc}')
         return html.P('Failed to load data.', className='no-data')

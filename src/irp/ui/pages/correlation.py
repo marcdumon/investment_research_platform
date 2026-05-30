@@ -11,9 +11,9 @@ from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
-from irp.factors.registry import all_factors
-from irp.ui.charts import corr_heatmap_figure as _heatmap_figure
-from irp.ui.charts import empty_figure as _empty_figure
+from irp.factors.registry import _all_factors as all_factors
+from irp.ui.charts import _corr_heatmap_figure as _heatmap_figure
+from irp.ui.charts import _empty_figure
 from irp.ui.services import factors_service, universe_service, watchlist_service
 from irp.ui.theme import ACCENT
 
@@ -55,7 +55,7 @@ def _factor_corr(
     Returns (corr_df, labels, error_msg). corr_df has raw factor names as index/cols;
     labels has the display labels in matching order.
     """
-    xs = factors_service.load_cross_section(
+    xs = factors_service._load_cross_section(
         date,
         variant,
         market,
@@ -89,7 +89,7 @@ def _return_corr(
     watchlist: str | None,
 ) -> tuple[pd.DataFrame, list[str], str | None]:
     """Compute ticker × ticker return correlation from the price panel."""
-    tickers = universe_service.filter_tickers(
+    tickers = universe_service._filter_tickers(
         market=market, sector=sector, watchlist=watchlist
     )
     if tickers is None:
@@ -113,7 +113,7 @@ def _return_corr(
                 f'to narrow to ≤{_MAX_RETURN_TICKERS}'
             ),
         )
-    return factors_service.compute_return_corr(tickers, window_days, as_of_date)
+    return factors_service._compute_return_corr(tickers, window_days, as_of_date)
 
 
 # ── Layout ────────────────────────────────────────────────────────────
@@ -232,7 +232,7 @@ def _toggle_window(mode: str) -> dict:
 )
 def _load_sectors(_: int) -> list[dict]:
     try:
-        sectors = universe_service.get_sectors()
+        sectors = universe_service._get_sectors()
         return [{'label': s, 'value': s} for s in sectors]
     except Exception:
         return []

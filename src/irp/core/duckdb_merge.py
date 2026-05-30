@@ -13,7 +13,7 @@ def _reader_sql(src: Path) -> str:
     return f"read_parquet('{src}')" if src.suffix == '.parquet' else f"read_csv_auto('{src}')"
 
 
-def merge_csv(
+def _merge_csv(
     con: duckdb.DuckDBPyConnection,
     table: str,
     src: Path,

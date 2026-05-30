@@ -2,11 +2,11 @@
 import pandas as pd
 
 from irp.core.db import db
-from irp.checks.stooq_reviews import load_reviews
+from irp.checks.stooq_reviews import _load_reviews as load_reviews
 from irp.checks.stooq_rules import REGISTRY
 
 
-def run(skip_reviewed: bool = True) -> pd.DataFrame:
+def _run(skip_reviewed: bool = True) -> pd.DataFrame:
     """Run all registered stooq rules. Returns aggregated findings sorted
     by `count` descending. When `skip_reviewed=True`, drops entries already
     recorded in `data/data_quality/stooq_anomaly_reviews.toml`.

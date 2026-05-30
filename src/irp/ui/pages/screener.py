@@ -18,11 +18,11 @@ from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
-from irp.factors.registry import all_factors
-from irp.ui.charts import base_chart_layout as _chart_layout
-from irp.ui.charts import corr_heatmap_figure as _corr_heatmap
-from irp.ui.charts import empty_figure as _empty_figure
-from irp.ui.charts import scatter_chart_layout as _base_layout
+from irp.factors.registry import _all_factors as all_factors
+from irp.ui.charts import _base_chart_layout as _chart_layout
+from irp.ui.charts import _corr_heatmap_figure as _corr_heatmap
+from irp.ui.charts import _empty_figure
+from irp.ui.charts import _scatter_chart_layout as _base_layout
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import (
     factors_service,
@@ -30,8 +30,8 @@ from irp.ui.services import (
     universe_service,
     watchlist_service,
 )
-from irp.ui.tables import column_format as _col_fmt
-from irp.ui.ticker_fmt import date_range_for_preset, fmt_statement
+from irp.ui.tables import _column_format as _col_fmt
+from irp.ui.ticker_fmt import _date_range_for_preset as date_range_for_preset, _fmt_statement as fmt_statement
 from irp.ui.theme import (
     ACCENT,
     DIV_COLOR,
@@ -786,7 +786,7 @@ layout = html.Div(
 )
 def load_options(_: Any) -> tuple[list, list]:
     try:
-        df = universe_service.get_companies()
+        df = universe_service._get_companies()
     except Exception:
         return [], []
     if df.empty:
@@ -823,14 +823,14 @@ def run_screener(
     if not n_clicks or not date_str:
         raise PreventUpdate
     as_of = datetime.date.fromisoformat(date_str[:10])
-    df = factors_service.load_cross_section(
+    df = factors_service._load_cross_section(
         as_of, variant, enrich_company_columns=False
     )
     if df.empty:
         return {}, []
     df = df.reset_index()
     try:
-        comp = universe_service.get_companies()[
+        comp = universe_service._get_companies()[
             ['Ticker', 'Company Name', 'Sector', 'Market']
         ].fillna('')
         df = df.merge(comp, on='Ticker', how='left')
@@ -1510,7 +1510,7 @@ def run_correlation(
 
     window = window or 252
     try:
-        corr, labels, warning = factors_service.compute_return_corr(
+        corr, labels, warning = factors_service._compute_return_corr(
             tickers, window, datetime.date.today()
         )
     except Exception as exc:
@@ -1610,13 +1610,13 @@ def render_detail_prices(
     start, end = date_range_for_preset(preset)
 
     try:
-        df = price_service.get_prices(ticker, source='yahoo', start=start, end=end)
+        df = price_service._get_prices(ticker, source='yahoo', start=start, end=end)
     except Exception:
         df = pd.DataFrame()
 
     if df.empty or 'Close' not in df.columns:
         try:
-            df = price_service.get_prices(ticker, source='stooq', start=start, end=end)
+            df = price_service._get_prices(ticker, source='stooq', start=start, end=end)
             close_col = 'C' if 'C' in df.columns else 'Close'
         except Exception:
             return _empty_figure(f'No price data for {ticker}')
@@ -1670,7 +1670,7 @@ def render_detail_prices(
 
     # Dividend markers
     try:
-        divs = price_service.get_dividends(ticker)
+        divs = price_service._get_dividends(ticker)
         if not divs.empty:
             div_dates = pd.to_datetime(divs['Date']).dt.strftime('%Y-%m-%d')
             mask = (div_dates >= df['_date_str'].min()) & (
@@ -1705,7 +1705,7 @@ def render_detail_prices(
     # Split lines
     shapes = []
     try:
-        spls = price_service.get_splits(ticker)
+        spls = price_service._get_splits(ticker)
         if not spls.empty:
             for _, row in spls.iterrows():
                 d = pd.to_datetime(row['Date']).strftime('%Y-%m-%d')
@@ -1782,7 +1782,7 @@ def _render_detail_statement(
     if not ticker:
         return html.P('Click a row to load', className='no-data'), ''
     try:
-        df = universe_service.get_statement(ticker, kind)  # type: ignore[arg-type]
+        df = universe_service._get_statement(ticker, kind)  # type: ignore[arg-type]
     except Exception as exc:
         return html.P(f'Failed: {exc}', className='no-data'), ''
     if df.empty:
@@ -1875,7 +1875,7 @@ def render_detail_factors(ticker: str | None, variant: Literal['A', 'Q']) -> Any
         return html.P('Click a row to load factor history', className='no-data')
 
     try:
-        hist = factors_service.load_ticker_history(ticker, variant)
+        hist = factors_service._load_ticker_history(ticker, variant)
     except Exception as exc:
         return html.P(f'Failed: {exc}', className='no-data')
 

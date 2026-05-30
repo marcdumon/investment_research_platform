@@ -17,7 +17,7 @@ from irp.query.yahoo import splits as _splits
 PRICE_COLS = ('Date', 'Open', 'High', 'Low', 'Close', 'Volume')
 
 
-def get_prices(
+def _get_prices(
     ticker: str,
     source: str = 'stooq',
     start: str | None = None,
@@ -34,7 +34,7 @@ def get_prices(
     return df
 
 
-def get_dividends(ticker: str) -> pd.DataFrame:
+def _get_dividends(ticker: str) -> pd.DataFrame:
     """Dividend events for one ticker. Columns: [Date, Amount].
 
     Normalises the legacy `Dividends` column name from Yahoo to canonical
@@ -48,7 +48,7 @@ def get_dividends(ticker: str) -> pd.DataFrame:
     return df
 
 
-def get_splits(ticker: str) -> pd.DataFrame:
+def _get_splits(ticker: str) -> pd.DataFrame:
     """Split events for one ticker. Columns: [Date, Ratio].
 
     Normalises Yahoo's `Stock Splits` to canonical `Ratio`.

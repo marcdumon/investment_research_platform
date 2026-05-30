@@ -30,12 +30,12 @@ def db() -> duckdb.DuckDBPyConnection:
 
 
 # Kept for backwards compat; no-op now that connections are not cached.
-def db_close() -> None:
+def _db_close() -> None:
     pass
 
 
 @contextmanager
-def write_session() -> Generator[duckdb.DuckDBPyConnection, None, None]:
+def _write_session() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """Exclusive write connection.
 
     Blocks new db() callers, then retries until all in-flight read-only

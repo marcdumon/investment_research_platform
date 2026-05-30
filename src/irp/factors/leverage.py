@@ -15,7 +15,7 @@ from irp.factors._cols import (
     DA,
 )
 from irp.factors._utils import _safe_div
-from irp.factors.registry import register
+from irp.factors.registry import _register as register
 
 register('debt_equity',      'Debt/Equity',      group='leverage')
 register('net_debt_ebitda',  'Net Debt/EBITDA',  group='leverage')

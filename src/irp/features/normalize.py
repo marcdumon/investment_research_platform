@@ -4,7 +4,7 @@ Pure functions; no DB access. All operate per-snapshot (one date at a time).
 """
 import pandas as pd
 
-from irp.factors.registry import all_factors
+from irp.factors.registry import _all_factors as all_factors
 
 FACTOR_COLS: list[str] = [f.name for f in all_factors()]
 

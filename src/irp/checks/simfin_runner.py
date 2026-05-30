@@ -5,7 +5,7 @@ import pandas as pd
 from irp.core.db import db
 from irp.query.simfin import fundamentals
 from irp.checks.edgar import filing_url
-from irp.checks.simfin_reviews import load_reviews, period_str
+from irp.checks.simfin_reviews import load_reviews, _period_str as period_str
 from irp.checks.simfin_rules import REGISTRY
 
 _KEY = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period']
@@ -22,7 +22,7 @@ def _cik_map(tickers: list[str]) -> dict[str, int]:
     return {t: int(c) for t, c in rows}
 
 
-def run(
+def _run(
     tickers: list[str] | None = None,
     variant: Literal['A', 'Q'] = 'A',
     skip_reviewed: bool = True,

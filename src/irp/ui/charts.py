@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 from irp.ui.theme import GRID, MUTED
 
 
-def empty_figure(message: str = 'No data') -> go.Figure:
+def _empty_figure(message: str = 'No data') -> go.Figure:
     """Blank figure displaying a centered muted-text annotation."""
     fig = go.Figure()
     fig.update_layout(
@@ -37,7 +37,7 @@ def empty_figure(message: str = 'No data') -> go.Figure:
     return fig
 
 
-def base_chart_layout(**extra: Any) -> go.Layout:
+def _base_chart_layout(**extra: Any) -> go.Layout:
     """Standard themed Plotly Layout. Extra kwargs override defaults."""
     defaults: dict[str, Any] = dict(
         paper_bgcolor='rgba(0,0,0,0)',
@@ -65,13 +65,13 @@ def base_chart_layout(**extra: Any) -> go.Layout:
     return go.Layout(**defaults)
 
 
-def scatter_chart_layout(**extra: Any) -> go.Layout:
+def _scatter_chart_layout(**extra: Any) -> go.Layout:
     """Like `base_chart_layout` but with `hovermode='closest'` for scatter-style plots."""
     extra.setdefault('hovermode', 'closest')
-    return base_chart_layout(**extra)
+    return _base_chart_layout(**extra)
 
 
-def corr_heatmap_figure(
+def _corr_heatmap_figure(
     corr: pd.DataFrame,
     labels: list[str],
     title: str,

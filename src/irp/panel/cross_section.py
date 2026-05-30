@@ -20,8 +20,8 @@ import pandas as pd
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from irp.panel.load import load_prices_wide, load_fundamentals, load_ta_panel
-from irp.panel.pit import pit_latest, pit_ttm, pit_price_row, pit_price_at_offset
+from irp.panel.load import load_prices_wide, load_fundamentals, _load_ta_panel
+from irp.panel.pit import _pit_latest, _pit_ttm, _pit_price_row, _pit_price_at_offset
 
 logger = logging.getLogger(__name__)
 
@@ -72,18 +72,18 @@ _FACTOR_COLS_ORDER = [
 
 def _income_pit(df: pl.DataFrame, as_of: datetime.date, variant: Literal['A', 'Q']) -> pl.DataFrame:
     if variant == 'A':
-        return pit_latest(df, as_of).select(_INCOME_COLS)
-    return pit_ttm(df, as_of, _INCOME_TTM_COLS, n=4)
+        return _pit_latest(df, as_of).select(_INCOME_COLS)
+    return _pit_ttm(df, as_of, _INCOME_TTM_COLS, n=4)
 
 
 def _cashflow_pit(df: pl.DataFrame, as_of: datetime.date, variant: Literal['A', 'Q']) -> pl.DataFrame:
     if variant == 'A':
-        return pit_latest(df, as_of).select(_CASHFLOW_COLS)
-    return pit_ttm(df, as_of, _CASHFLOW_TTM_COLS, n=4)
+        return _pit_latest(df, as_of).select(_CASHFLOW_COLS)
+    return _pit_ttm(df, as_of, _CASHFLOW_TTM_COLS, n=4)
 
 
 def _balance_pit(df: pl.DataFrame, as_of: datetime.date) -> pl.DataFrame:
-    return pit_latest(df, as_of).select(_BALANCE_COLS)
+    return _pit_latest(df, as_of).select(_BALANCE_COLS)
 
 
 # ---------------------------------------------------------------------------
@@ -141,10 +141,10 @@ def _price_snapshots(as_of: datetime.date) -> PriceSnapshots:
     panel = load_prices_wide('Close')
     vol, ma = _window_stats(panel, as_of)
     return PriceSnapshots(
-        p0      = pit_price_row(panel, as_of),
-        p_1m    = pit_price_at_offset(panel, as_of, 30),
-        p_6m    = pit_price_at_offset(panel, as_of, 182),
-        p_12m   = pit_price_at_offset(panel, as_of, 365),
+        p0      = _pit_price_row(panel, as_of),
+        p_1m    = _pit_price_at_offset(panel, as_of, 30),
+        p_6m    = _pit_price_at_offset(panel, as_of, 182),
+        p_12m   = _pit_price_at_offset(panel, as_of, 365),
         vol_21d = vol,
         ma200   = ma,
     )
@@ -209,7 +209,7 @@ def _ta_snapshots(as_of: datetime.date) -> dict[str, dict[str, float]]:
     ta_names = [s.name for s in _TA_SPECS]
     result: dict[str, dict[str, float]] = {n: {} for n in ta_names}
 
-    ta_df = load_ta_panel()
+    ta_df = _load_ta_panel()
 
     if not ta_df.is_empty():
         # Panel lookup: last value per ticker with Date <= as_of (sort already done at load)
@@ -390,8 +390,8 @@ def _apply_formulas(df: pd.DataFrame) -> pd.DataFrame:
     out['earn_growth_1y'] = _div(df['ni']  - df['ni_p'],  df['ni_p'].abs())
 
     # Piotroski — shared impl with single-ticker path
-    from irp.factors.piotroski import compute_piotroski_panel
-    out['piotroski_fscore'] = compute_piotroski_panel(df)
+    from irp.factors.piotroski import _compute_piotroski_panel
+    out['piotroski_fscore'] = _compute_piotroski_panel(df)
 
     # TA factors — pass through from assembled frame (appended after static cols)
     from irp.factors.technical import _TA_SPECS  # lazy — avoids circular import

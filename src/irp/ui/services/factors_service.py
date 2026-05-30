@@ -16,7 +16,7 @@ from irp.panel.load import load_prices_wide
 from irp.ui.services import universe_service
 
 
-def load_cross_section(
+def _load_cross_section(
     as_of_date: datetime.date,
     variant: Literal['A', 'Q'] = 'A',
     market: str | None = None,
@@ -31,25 +31,25 @@ def load_cross_section(
     companies tables. Tickers absent from the universe/companies merge are
     kept; only enrichment is best-effort.
     """
-    tickers = universe_service.filter_tickers(market=market, sector=sector, watchlist=watchlist)
+    tickers = universe_service._filter_tickers(market=market, sector=sector, watchlist=watchlist)
     xs = _cross_section(as_of_date, variant, tickers)
     if not enrich_company_columns or xs.empty:
         return xs
 
-    u = universe_service.get_universe()[['Ticker', 'Market']]
-    c = universe_service.get_companies()[['Ticker', 'Company Name', 'Sector']]
+    u = universe_service._get_universe()[['Ticker', 'Market']]
+    c = universe_service._get_companies()[['Ticker', 'Company Name', 'Sector']]
     meta = u.merge(c, on='Ticker', how='left').set_index('Ticker')
     return xs.join(meta, how='left')
 
 
-def load_ticker_history(
+def _load_ticker_history(
     ticker: str, variant: Literal['A', 'Q'] = 'A',
 ) -> pd.DataFrame:
     """Factor history per filing date for one ticker."""
     return _ticker_factor_history(ticker, variant)
 
 
-def compute_return_corr(
+def _compute_return_corr(
     tickers: list[str],
     window_days: int,
     as_of_date: datetime.date | None = None,

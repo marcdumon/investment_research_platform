@@ -16,7 +16,7 @@ from irp.query.universe import universe as _universe
 from irp.ui.services.watchlist_service import load_watchlist
 
 
-def get_universe(tickers: str | list[str] | None = None) -> pd.DataFrame:
+def _get_universe(tickers: str | list[str] | None = None) -> pd.DataFrame:
     """Editable universe table (Ticker, Market, stooq_ticker, yahoo_ticker).
 
     Optionally filter to one or more tickers; None = full table.
@@ -24,7 +24,7 @@ def get_universe(tickers: str | list[str] | None = None) -> pd.DataFrame:
     return _universe(tickers) if tickers else _universe()
 
 
-def get_companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
+def _get_companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
     """SimFin companies metadata (Ticker, Sector, ISIN, ...).
 
     Optionally filter to one or more tickers; None = full table.
@@ -32,14 +32,14 @@ def get_companies(tickers: str | list[str] | None = None) -> pd.DataFrame:
     return _companies(tickers) if tickers else _companies()
 
 
-def get_sectors() -> list[str]:
+def _get_sectors() -> list[str]:
     """Sorted unique sectors from the SimFin companies table."""
     return sorted(_sector_map().dropna().unique().tolist())
 
 
-def get_ticker_cik(ticker: str) -> int | None:
+def _get_ticker_cik(ticker: str) -> int | None:
     """CIK for a ticker from the SimFin companies table, or None."""
-    df = get_companies([ticker])
+    df = _get_companies([ticker])
     if df.empty or 'CIK' not in df.columns:
         return None
     val = df.iloc[0].get('CIK')
@@ -49,7 +49,7 @@ def get_ticker_cik(ticker: str) -> int | None:
         return None
 
 
-def get_period_report_dates(ticker: str, kind: Literal['income', 'balance', 'cashflow']) -> dict[str, str]:
+def _get_period_report_dates(ticker: str, kind: Literal['income', 'balance', 'cashflow']) -> dict[str, str]:
     """Return {period_str: 'YYYY-MM-DD'} for all filings of a ticker/statement."""
     from irp.query.simfin import fundamentals
     parts = [fundamentals(ticker, kind, v) for v in ('A', 'Q')]
@@ -70,7 +70,7 @@ def get_period_report_dates(ticker: str, kind: Literal['income', 'balance', 'cas
     }
 
 
-def get_statement(
+def _get_statement(
     ticker: str, kind: Literal['income', 'balance', 'cashflow']
 ) -> pd.DataFrame:
     """Fundamental statement for one ticker (all available periods).
@@ -81,7 +81,7 @@ def get_statement(
     return _statement(ticker, kind)
 
 
-def filter_tickers(
+def _filter_tickers(
     market: str | None = None,
     sector: str | None = None,
     watchlist: str | None = None,
@@ -99,8 +99,8 @@ def filter_tickers(
         wl = load_watchlist(watchlist)
         return list(wl) if wl else []
 
-    u = get_universe()[['Ticker', 'Market']]
-    c = get_companies()[['Ticker', 'Sector']]
+    u = _get_universe()[['Ticker', 'Market']]
+    c = _get_companies()[['Ticker', 'Sector']]
     df = u.merge(c, on='Ticker', how='left')
     if market:
         df = df[df['Market'].str.lower().str.contains(market.lower(), na=False)]

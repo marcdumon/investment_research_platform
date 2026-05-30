@@ -96,7 +96,7 @@ def _quote(c: str) -> str:
     return f'"{c}"'
 
 
-def build_prices_panel() -> Path:
+def _build_prices_panel() -> Path:
     """Write `prices.parquet` — long format, sorted (Ticker, Date).
 
     Schema: Ticker (str), Date (date), Close (f64), Volume (i64).
@@ -116,7 +116,7 @@ def build_prices_panel() -> Path:
     return out
 
 
-def build_fundamentals_panel(
+def _build_fundamentals_panel(
     stmt: Literal['income', 'balance', 'cashflow'],
     variant: Literal['A', 'Q'],
 ) -> Path:
@@ -144,7 +144,7 @@ def build_fundamentals_panel(
     return out
 
 
-def build_fundamentals_panel_restated(
+def _build_fundamentals_panel_restated(
     stmt: Literal['income', 'balance', 'cashflow'],
     variant: Literal['A', 'Q'],
 ) -> Path:
@@ -172,7 +172,7 @@ def build_fundamentals_panel_restated(
     return out
 
 
-def build_ta_panel() -> Path:
+def _build_ta_panel() -> Path:
     """Write `ta_panel.parquet` — long format, sorted (Ticker, Date).
 
     Schema: Ticker (str), Date (date), <indicator> (f32) per TaSpec in _TA_SPECS.
@@ -239,12 +239,12 @@ def build_ta_panel() -> Path:
 
 def build_panels() -> list[Path]:
     """Materialize all panels. Idempotent — overwrites existing files."""
-    outs = [build_prices_panel()]
+    outs = [_build_prices_panel()]
     for stmt in ('income', 'balance', 'cashflow'):
         for variant in ('A', 'Q'):
-            outs.append(build_fundamentals_panel(stmt, variant))
-            outs.append(build_fundamentals_panel_restated(stmt, variant))
-    outs.append(build_ta_panel())
+            outs.append(_build_fundamentals_panel(stmt, variant))
+            outs.append(_build_fundamentals_panel_restated(stmt, variant))
+    outs.append(_build_ta_panel())
     logger.info(f'panel build complete: {len(outs)} files')
     return outs
 

@@ -28,19 +28,19 @@ def _valid(r: dict) -> bool:
     return all(k in r for k in _REQUIRED)
 
 
-def load_reviews() -> set[tuple[str, str, str]]:
+def _load_reviews() -> set[tuple[str, str, str]]:
     """Set of (ticker, period, rule) keys to suppress in future runs."""
     return {(r['ticker'], str(r['period']), r['rule']) for r in _load_raw() if _valid(r)}
 
 
-def load_reviews_df() -> pd.DataFrame:
+def _load_reviews_df() -> pd.DataFrame:
     rows = [r for r in _load_raw() if _valid(r)]
     if not rows:
         return pd.DataFrame(columns=['ticker', 'period', 'rule', 'status', 'note', 'reviewed_at'])
     return pd.DataFrame(rows)
 
 
-def add_review(ticker: str, period: str, rule: str, status: str, note: str) -> None:
+def _add_review(ticker: str, period: str, rule: str, status: str, note: str) -> None:
     """Append a review entry to the stooq anomaly TOML.
     `period` should be the calendar year as a string (e.g. '2024')."""
     if status not in VALID_STATUS:

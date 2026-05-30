@@ -49,7 +49,7 @@ def pit_latest(
     return eligible.loc[idx].reset_index(drop=True)
 
 
-def pit_ttm(
+def _pit_ttm(
     fundamentals: pd.DataFrame,
     as_of_date: datetime.date,
     n: int = 4,

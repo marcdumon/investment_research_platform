@@ -16,7 +16,7 @@ import pandas as pd
 
 from irp.factors import cache as _cache
 from irp.factors.backtest import compute_backtest
-from irp.factors.data_loaders import load_cross_sections
+from irp.factors.data_loaders import _load_cross_sections as load_cross_sections
 from irp.factors.models import BacktestResult
 from irp.panel import forward_returns_panel
 

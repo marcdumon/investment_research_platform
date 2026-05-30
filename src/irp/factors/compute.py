@@ -19,9 +19,9 @@ import pandas as pd
 
 from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE
-from irp.factors._pit import pit_latest, pit_price, pit_ttm
+from irp.factors._pit import pit_latest, pit_price, _pit_ttm
 from irp.factors.momentum import compute_momentum
-from irp.factors.technical import compute_technical
+from irp.factors.technical import _compute_technical as compute_technical
 from irp.factors.orchestrate import (
     run_backtest,
     run_composite_backtest,
@@ -92,9 +92,9 @@ def ticker_factor_history(
     rows = []
     for rd in report_dates:
         as_of = pd.Timestamp(rd).date()
-        inc = pit_ttm(raw_income,   as_of) if variant == 'Q' else pit_latest(raw_income,   as_of)
+        inc = _pit_ttm(raw_income,   as_of) if variant == 'Q' else pit_latest(raw_income,   as_of)
         bal = pit_latest(raw_balance,  as_of)
-        cf  = pit_ttm(raw_cashflow, as_of) if variant == 'Q' else pit_latest(raw_cashflow, as_of)
+        cf  = _pit_ttm(raw_cashflow, as_of) if variant == 'Q' else pit_latest(raw_cashflow, as_of)
         px  = pit_price(raw_prices,    as_of)
         if inc.empty or bal.empty or cf.empty or px.empty:
             continue

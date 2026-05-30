@@ -166,7 +166,7 @@ def start_run(
     lh._log_buffer.clear()
     lh._run_active = True
     lh._run_done = False
-    _cancel.clear()
+    _cancel._clear()
 
     handler = lh.DequeHandler()
     handler.setFormatter(logging.Formatter(fmt=LOG_FMT, datefmt=LOG_DATEFMT))
@@ -207,7 +207,7 @@ def start_run(
 def cancel_run(n_clicks: int) -> tuple[Any, ...]:
     if not n_clicks:
         raise PreventUpdate
-    _cancel.request_cancel()
+    _cancel._request_cancel()
     return True, 'Cancelling...'
 
 
@@ -226,7 +226,7 @@ def poll_log(n_intervals: int) -> tuple[Any, ...]:
     ]
     active = lh._run_active
     done = lh._run_done
-    cancelled = _cancel.is_cancelled()
+    cancelled = _cancel._is_cancelled()
     if active and cancelled:
         status = 'Cancelling...'
     elif active:
@@ -251,7 +251,7 @@ def _run_pipeline(
     from irp.cli import _delete_markers, _make_source
 
     def cancelled() -> bool:
-        return _cancel.is_cancelled()
+        return _cancel._is_cancelled()
 
     if force:
         for name in providers:
@@ -284,19 +284,19 @@ def _run_pipeline(
             src.cleanup()
 
     if 'seed-universe' in steps and not cancelled():
-        from irp.query.universe import seed as _seed_universe
+        from irp.query.universe import _seed as _seed_universe
         logger.info('-- seed-universe --')
         n = _seed_universe()
         logger.info(f'{n:,} tickers written to universe.csv')
 
     if 'universe' in steps and not cancelled():
-        from irp.query.universe import refresh as _refresh_universe
+        from irp.query.universe import _refresh as _refresh_universe
         logger.info('-- universe --')
         n = _refresh_universe()
         logger.info(f'{n:,} tickers')
 
     if 'catalog' in steps and not cancelled():
-        from irp.query.catalog import refresh as _refresh_catalog
+        from irp.query.catalog import _refresh as _refresh_catalog
         logger.info('-- catalog --')
         n = _refresh_catalog()
         logger.info(f'{n:,} tickers')

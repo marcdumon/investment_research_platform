@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from irp.core.config import config
-from irp.core.duckdb_merge import merge_csv
+from irp.core.duckdb_merge import _merge_csv as merge_csv
 from irp.runner import Feed
 
 logger = logging.getLogger(__name__)
@@ -220,7 +220,7 @@ class StooqSource:
             logger.info(f'store({feed}): already up to date, skipping')
             return
         spec = FEED_SPECS[feed]
-        from irp.core.db import write_session
+        from irp.core.db import _write_session as write_session
         with write_session() as con:
             _store_prices(con, spec)
         self.markers.touch(f'stored_{feed}')
