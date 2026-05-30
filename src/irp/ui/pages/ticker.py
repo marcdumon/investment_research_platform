@@ -273,10 +273,11 @@ layout = html.Div(
                                                 ),
                                                 dcc.Checklist(
                                                     id='price-indicators',
-                                                    options=[
-                                                        {'label': f' {s.label}', 'value': s.name}
-                                                        for s in _UI_TA_SPECS
-                                                    ],
+                                                    options=(
+                                                        [{'label': ' Dividends', 'value': 'DIVS'}]
+                                                        + [{'label': f' {s.label}', 'value': s.name}
+                                                           for s in _UI_TA_SPECS]
+                                                    ),
                                                     value=[],
                                                     inline=True,
                                                     labelClassName='check-item',
@@ -792,8 +793,8 @@ def render_prices(
             for trace in spec.fn(close_for_ta, dates):
                 fig.add_trace(trace, row=price_row, col=1)
 
-    # Dividend markers (skip in compare mode — y values are absolute prices, wrong scale)
-    if compare_df is None:
+    # Dividend markers (off by default; skip in compare mode — y values are absolute prices, wrong scale)
+    if 'DIVS' in ind and compare_df is None:
         for trace in div_traces:
             fig.add_trace(trace, row=price_row, col=1)
 

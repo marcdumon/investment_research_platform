@@ -262,18 +262,23 @@ def _run_pipeline(
             break
         src = _make_source(name, yahoo_content=yahoo_content, yahoo_prices_mode=yahoo_prices_mode)
         logger.info(f'-- {name} --')
+        effective_feed = feed
         if feed not in src.SUPPORTED_FEEDS:
-            logger.warning(f'feed {feed!r} not supported by {name}, skipping')
-            continue
+            if 'bulk' in src.SUPPORTED_FEEDS:
+                logger.warning(f'feed {feed!r} not supported by {name}, falling back to bulk')
+                effective_feed = 'bulk'
+            else:
+                logger.warning(f'feed {feed!r} not supported by {name}, skipping')
+                continue
         if 'fetch' in steps and not cancelled():
-            logger.info(f'fetch ({feed})')
-            src.fetch_bulk() if feed == 'bulk' else src.update()
+            logger.info(f'fetch ({effective_feed})')
+            src.fetch_bulk() if effective_feed == 'bulk' else src.update()
         if 'transform' in steps and not cancelled():
-            logger.info(f'transform ({feed})')
-            src.transform(feed)
+            logger.info(f'transform ({effective_feed})')
+            src.transform(effective_feed)
         if 'store' in steps and not cancelled():
-            logger.info(f'store ({feed})')
-            src.store(feed)
+            logger.info(f'store ({effective_feed})')
+            src.store(effective_feed)
         if 'cleanup' in steps and not cancelled():
             logger.info('cleanup')
             src.cleanup()
