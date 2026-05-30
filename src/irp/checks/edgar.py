@@ -35,7 +35,6 @@ def _fetch_chunk(filename: str) -> dict:
     """
     cache = CACHE_DIR / filename
     if cache.exists() and (time.time() - cache.stat().st_mtime) < CACHE_TTL_SECONDS:
-        logger.debug(f'EDGAR chunk cache hit: {filename}')
         return json.loads(cache.read_text())
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     logger.info(f'GET https://data.sec.gov/submissions/{filename}')
@@ -65,7 +64,6 @@ def _fetch_submissions(cik: int) -> dict:
     cik_str = f'{cik:010d}'
     cache = CACHE_DIR / f'{cik_str}.json'
     if cache.exists() and (time.time() - cache.stat().st_mtime) < CACHE_TTL_SECONDS:
-        logger.debug(f'EDGAR submissions cache hit: CIK {cik}')
         data = json.loads(cache.read_text())
     else:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)

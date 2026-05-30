@@ -511,10 +511,12 @@ def filter_tickers(
     Output('price-compare', 'options'),
     Input('all-tickers-store', 'data'),
     Input('price-compare', 'search_value'),
+    State('price-compare', 'value'),
 )
 def filter_compare_tickers(
     all_data: list[dict] | None,
     search: str | None,
+    current_value: str | None,
 ) -> list[dict]:
     if not all_data:
         return []
@@ -530,7 +532,13 @@ def filter_compare_tickers(
         q = search.upper()
         options = [o for o in options if q in o['value'].upper() or q in o['label'].upper()]
         options.sort(key=lambda o: _ticker_sort_key(o, q))
-    return options[:150]
+    result = options[:150]
+    # Always include currently selected value so Dash doesn't reset it to None
+    if current_value and not any(o['value'] == current_value for o in result):
+        pinned = next((o for o in options if o['value'] == current_value), None)
+        if pinned:
+            result = [pinned] + result[:149]
+    return result
 
 
 @callback(
@@ -687,8 +695,8 @@ def render_prices(
                 cdf = cdf.sort_values('Date').copy()
                 cdf['_date_str'] = pd.to_datetime(cdf['Date']).dt.strftime('%Y-%m-%d')
                 compare_df = cdf
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f'compare fetch failed for {compare_ticker!r}: {exc}')
 
     # ---- dividends + splits ----
     div_traces: list = []
@@ -784,9 +792,10 @@ def render_prices(
             for trace in spec.fn(close_for_ta, dates):
                 fig.add_trace(trace, row=price_row, col=1)
 
-    # Dividend markers
-    for trace in div_traces:
-        fig.add_trace(trace, row=price_row, col=1)
+    # Dividend markers (skip in compare mode — y values are absolute prices, wrong scale)
+    if compare_df is None:
+        for trace in div_traces:
+            fig.add_trace(trace, row=price_row, col=1)
 
     # Split lines (spans full chart height)
     for sd in split_dates:
