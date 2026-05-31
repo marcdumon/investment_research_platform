@@ -61,6 +61,10 @@ _TA_SPECS: list[TaSpec] = [
         name='ma7_ma28', label='MA7>MA28',
         fn=lambda c: _tl(c, (talib.SMA(c.to_numpy(dtype='float64'), timeperiod=7) > talib.SMA(c.to_numpy(dtype='float64'), timeperiod=28)).astype(float)),
     ),
+    TaSpec(
+        name='ma14_ma56', label='MA14>MA56',
+        fn=lambda c: _tl(c, (talib.SMA(c.to_numpy(dtype='float64'), timeperiod=14) > talib.SMA(c.to_numpy(dtype='float64'), timeperiod=56)).astype(float)),
+    ),
 ]
 
 for _s in _TA_SPECS:
