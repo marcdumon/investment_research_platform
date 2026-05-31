@@ -8,6 +8,7 @@ cross-page logic (universe filtering, watchlist resolution, etc.).
 from irp.ui.services import (
     backtest_service,
     factors_service,
+    features_service,
     price_service,
     universe_service,
     watchlist_service,
@@ -16,6 +17,7 @@ from irp.ui.services import (
 __all__ = [
     'backtest_service',
     'factors_service',
+    'features_service',
     'price_service',
     'universe_service',
     'watchlist_service',
