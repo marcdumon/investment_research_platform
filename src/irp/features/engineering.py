@@ -73,6 +73,14 @@ def add_pct_change(df: pd.DataFrame, col: str, k: int) -> pd.DataFrame:
     return out
 
 
+def add_lag_window(df: pd.DataFrame, col: str, n: int) -> pd.DataFrame:
+    """Level + n lags as columns: col, col_lag1 … col_lag_n (a price window per row)."""
+    out = df.copy()
+    for k in range(1, int(n) + 1):
+        out[f'{col}_lag{k}'] = _grouped(out, col).shift(k)
+    return out
+
+
 def add_rolling(df: pd.DataFrame, col: str, window: int, fn: str) -> pd.DataFrame:
     if fn not in _ROLL_FNS:
         raise ValueError(f'unknown rolling fn {fn!r}; expected one of {_ROLL_FNS}')
@@ -187,6 +195,9 @@ def step_output_cols(step: dict) -> list[str]:
     if op in ('lag', 'diff', 'pct_change'):
         suffix = {'lag': 'lag', 'diff': 'diff', 'pct_change': 'pct'}[op]
         return [f'{step["col"]}_{suffix}{int(step.get("k", 1))}']
+    if op == 'lagwin':
+        c, n = step['col'], int(step.get('n', step.get('window', 1)))
+        return [c] + [f'{c}_lag{k}' for k in range(1, n + 1)]
     if op == 'rolling':
         return [f'{step["col"]}_roll{int(step["window"])}{step.get("fn", "mean")}']
     if op == 'ratio':
@@ -219,6 +230,8 @@ def apply_step(df: pd.DataFrame, step: dict) -> pd.DataFrame:
         return add_diff(df, step['col'], int(step.get('k', 1)))
     if op == 'pct_change':
         return add_pct_change(df, step['col'], int(step.get('k', 1)))
+    if op == 'lagwin':
+        return add_lag_window(df, step['col'], int(step.get('n', step.get('window', 1))))
     if op == 'rolling':
         return add_rolling(df, step['col'], int(step['window']), step.get('fn', 'mean'))
     if op == 'ratio':
@@ -236,6 +249,25 @@ def apply_step(df: pd.DataFrame, step: dict) -> pd.DataFrame:
             df, step['cols'], step.get('method', 'zscore'), step.get('sector')
         )
     raise ValueError(f'unknown op {op!r}')
+
+
+# ── PIT carry-forward (for dense sequence builds) ─────────────────────
+
+def asof_join(left: pd.DataFrame, right: pd.DataFrame, by: str = 'Ticker') -> pd.DataFrame:
+    """Backward as-of merge: each left row gets the last right row with Date <= it.
+
+    Per `by` group, no look-ahead. Both frames are sorted on Date internally.
+    Used to carry forward filing/snapshot values onto a dense price grid.
+    """
+    if right.empty:
+        return left.copy()
+    left = left.copy()
+    right = right.copy()
+    left['Date'] = left['Date'].astype('datetime64[ns]')
+    right['Date'] = right['Date'].astype('datetime64[ns]')
+    left = left.sort_values('Date')
+    right = right.sort_values('Date')
+    return pd.merge_asof(left, right, on='Date', by=by, direction='backward')
 
 
 # ── label attachment (per-date bucketing, no look-ahead) ──────────────

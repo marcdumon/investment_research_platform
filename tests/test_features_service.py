@@ -97,9 +97,70 @@ def test_build_panel_keeps_only_selected_features(monkeypatch):
     assert set(panel_a.columns) != set(panel_b.columns)
 
 
-def test_available_columns_nonempty():
+def test_build_panel_adds_close_volume(monkeypatch):
+    tickers = ['AAA', 'BBB']
+
+    def _fake_load(d, v):
+        return pd.DataFrame({'roe': [0.1, 0.2]}, index=pd.Index(tickers, name='Ticker'))
+
+    def _fake_pv(dates, tickers=None):
+        rows = [(d, t, 10.0, 1000.0) for d in dates for t in ['AAA', 'BBB']]
+        return pd.DataFrame(rows, columns=['Date', 'Ticker', 'close', 'volume'])
+
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc._snapshot, 'load', _fake_load)
+    monkeypatch.setattr(svc, '_price_volume', _fake_pv)
+
+    panel, _ = svc.build_panel(
+        2020, 2021, 'A', 'A',
+        steps=[{'op': 'base', 'col': 'close'}, {'op': 'pct_change', 'col': 'close', 'k': 1}],
+        label_cfg={'mode': 'none'},
+    )
+    assert 'close' in panel.columns and 'close_pct1' in panel.columns
+
+
+def test_available_columns_includes_price_volume():
     cols = svc.available_columns()
     assert 'roe' in cols and 'pe' in cols
+    assert 'close' in cols and 'volume' in cols
+
+
+def test_available_columns_dense_drops_price_factors():
+    cols = svc.available_columns('D')
+    assert 'roe' in cols and 'close' in cols and 'volume' in cols
+    assert 'pe' not in cols and 'mktcap' not in cols  # price-dependent dropped
+
+
+def test_dense_build_dispatch_and_carry_forward(monkeypatch):
+    """Dense freq → dense path: dense close + carried (PIT) fundamentals."""
+    import datetime as _dt
+
+    def _fake_pv(grid, tickers=None):
+        rows = [(d, 'AAA', 10.0 + i, 100.0) for i, d in enumerate(grid)]
+        return pd.DataFrame(rows, columns=['Date', 'Ticker', 'close', 'volume'])
+
+    def _fake_snap_long(sy, ey, variant, cols):
+        # one filing at 2019-12-31 with roe=0.3
+        return pd.DataFrame({'Date': [pd.Timestamp('2019-12-31')],
+                             'Ticker': ['AAA'], 'roe': [0.3]})
+
+    def _fake_ta(grid, tickers):
+        return pd.DataFrame(columns=['Date', 'Ticker'] + svc._DENSE_TA_COLS)
+
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc, '_price_volume', _fake_pv)
+    monkeypatch.setattr(svc, '_load_snapshots_long', _fake_snap_long)
+    monkeypatch.setattr(svc, '_dense_ta', _fake_ta)
+
+    panel, notes = svc.build_panel(
+        2020, 2020, 'M', 'A',
+        steps=[{'op': 'base', 'col': 'close'}, {'op': 'base', 'col': 'roe'}],
+        label_cfg={'mode': 'none'},
+    )
+    assert 'close' in panel.columns and 'roe' in panel.columns
+    assert panel['Ticker'].nunique() == 1
+    assert panel['close'].nunique() > 1          # dense sequence
+    assert (panel['roe'] == 0.3).all()           # carried forward to every month
 
 
 def test_panel_head_survives_dash_json(snapshots_dates_panel):

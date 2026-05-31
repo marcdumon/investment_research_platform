@@ -75,6 +75,21 @@ def test_add_pct_change(panel):
     assert aaa['revenue_pct1'].iloc[1] == pytest.approx(0.10)
 
 
+def test_add_lag_window(panel):
+    out = eng.add_lag_window(panel, 'roe', 3)
+    assert {'roe_lag1', 'roe_lag2', 'roe_lag3'} <= set(out.columns)
+    aaa = out[out['Ticker'] == 'AAA'].sort_values('Date')
+    assert aaa['roe_lag1'].iloc[1] == pytest.approx(0.10)  # prior period level
+    assert pd.isna(aaa['roe_lag3'].iloc[1])                # not enough history
+
+
+def test_apply_step_lagwin_outputs(panel):
+    step = {'op': 'lagwin', 'col': 'roe', 'n': 2}
+    out = eng.apply_step(panel, step)
+    assert eng.step_output_cols(step) == ['roe', 'roe_lag1', 'roe_lag2']
+    assert {'roe_lag1', 'roe_lag2'} <= set(out.columns)
+
+
 def test_add_rolling_mean_window(panel):
     out = eng.add_rolling(panel, 'roe', 2, 'mean')
     aaa = out[out['Ticker'] == 'AAA'].sort_values('Date')
@@ -186,6 +201,40 @@ def test_attach_label_binary_is_per_date(fwd):
     assert out.loc[(datetime.date(2020, 12, 31), 'AAA'), 'label'] == 0
     assert out.loc[(datetime.date(2021, 12, 31), 'AAA'), 'label'] == 1
     assert out.loc[(datetime.date(2021, 12, 31), 'BBB'), 'label'] == 0
+
+
+def test_asof_join_is_pit_backward():
+    """Carry-forward must use the last value with Date <= grid date (no look-ahead)."""
+    spine = pd.DataFrame({
+        'Date': pd.to_datetime(['2020-06-30', '2021-06-30', '2022-06-30']),
+        'Ticker': ['AAA', 'AAA', 'AAA'],
+        'close': [1.0, 2.0, 3.0],
+    })
+    filings = pd.DataFrame({
+        'Date': pd.to_datetime(['2020-12-31', '2021-12-31']),
+        'Ticker': ['AAA', 'AAA'],
+        'roe': [0.10, 0.20],
+    })
+    out = eng.asof_join(spine, filings, by='Ticker').set_index('Date')
+    # 2020-06-30: no filing on/before -> NaN (no look-ahead to 2020-12-31)
+    assert pd.isna(out.loc['2020-06-30', 'roe'])
+    # 2021-06-30: last filing <= is 2020-12-31 -> 0.10
+    assert out.loc['2021-06-30', 'roe'] == pytest.approx(0.10)
+    # 2022-06-30: last filing <= is 2021-12-31 -> 0.20
+    assert out.loc['2022-06-30', 'roe'] == pytest.approx(0.20)
+
+
+def test_asof_join_no_cross_ticker_bleed():
+    spine = pd.DataFrame({
+        'Date': pd.to_datetime(['2021-06-30', '2021-06-30']),
+        'Ticker': ['AAA', 'BBB'], 'close': [1.0, 1.0],
+    })
+    filings = pd.DataFrame({
+        'Date': pd.to_datetime(['2020-12-31']), 'Ticker': ['AAA'], 'roe': [0.5],
+    })
+    out = eng.asof_join(spine, filings, by='Ticker').set_index('Ticker')
+    assert out.loc['AAA', 'roe'] == pytest.approx(0.5)
+    assert pd.isna(out.loc['BBB', 'roe'])  # BBB has no filing
 
 
 def test_attach_label_none_adds_nothing(fwd):
