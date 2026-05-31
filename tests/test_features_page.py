@@ -10,6 +10,13 @@ def test_parse_ints():
     assert pg._parse_ints('2, 2, 8', 1) == [2, 8]  # dedup, whitespace
 
 
+def test_parse_ints_ranges():
+    assert pg._parse_ints('1-5', 1) == [1, 2, 3, 4, 5]          # price window
+    assert pg._parse_ints('1-10:2', 1) == [1, 3, 5, 7, 9]       # stepped range
+    assert pg._parse_ints('1,5-7,20', 1) == [1, 5, 6, 7, 20]    # mixed
+    assert pg._parse_ints('3-3', 1) == [3]                       # degenerate range
+
+
 def test_expand_multi_col_multi_k():
     out = pg._expand_add('lag', ['roe', 'pe'], [], [1, 2], [4], None, None, None)
     assert len(out) == 4

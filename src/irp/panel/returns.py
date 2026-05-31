@@ -69,3 +69,56 @@ def forward_returns_panel(
     if not out_rows:
         return pd.DataFrame(columns=['Date', 'Ticker', 'fwd_ret'])
     return pd.concat(out_rows, ignore_index=True)
+
+
+def price_volume_panel(
+    rebalance_dates: list[datetime.date],
+    tickers: Optional[list[str]] = None,
+) -> pd.DataFrame:
+    """PIT close + volume per ticker at each rebalance date.
+
+    Returns DataFrame [Date, Ticker, close, volume]. Each value is the latest
+    observation with price/volume Date <= the rebalance date (point-in-time).
+    Rows where neither close nor volume is available are dropped.
+    """
+    if not rebalance_dates:
+        return pd.DataFrame(columns=['Date', 'Ticker', 'close', 'volume'])
+
+    close = load_prices_wide('Close')
+    vol = load_prices_wide('Volume')
+
+    if tickers is not None:
+        tick_arr = np.array([t for t in tickers if t in close.ticker_to_idx])
+    else:
+        tick_arr = close.tickers
+    if len(tick_arr) == 0:
+        return pd.DataFrame(columns=['Date', 'Ticker', 'close', 'volume'])
+
+    c_idx = np.array([close.ticker_to_idx[t] for t in tick_arr])
+    v_idx = np.array([vol.ticker_to_idx.get(t, -1) for t in tick_arr])
+    v_has = v_idx >= 0
+
+    out_rows = []
+    for rd in rebalance_dates:
+        rd64 = np.datetime64(rd, 'D')
+        i_c = int(np.searchsorted(close.dates, rd64, side='right')) - 1
+        i_v = int(np.searchsorted(vol.dates, rd64, side='right')) - 1
+        if i_c < 0:
+            continue
+        c = close.values[i_c, c_idx]
+        v = np.full(len(tick_arr), np.nan, dtype='float64')
+        if i_v >= 0 and v_has.any():
+            v[v_has] = vol.values[i_v, v_idx[v_has]]
+        mask = np.isfinite(c) | np.isfinite(v)
+        if not mask.any():
+            continue
+        out_rows.append(pd.DataFrame({
+            'Date': rd,
+            'Ticker': tick_arr[mask],
+            'close': c[mask].astype('float64'),
+            'volume': v[mask].astype('float64'),
+        }))
+
+    if not out_rows:
+        return pd.DataFrame(columns=['Date', 'Ticker', 'close', 'volume'])
+    return pd.concat(out_rows, ignore_index=True)

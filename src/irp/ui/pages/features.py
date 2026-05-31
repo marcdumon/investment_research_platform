@@ -33,10 +33,16 @@ _BUILD_CACHE: dict[str, pd.DataFrame] = {}
 _BUILD_CACHE_CAP = 4
 
 _VARIANT_OPTIONS = [{'label': ' Annual (FY)', 'value': 'A'}, {'label': ' Quarterly (TTM)', 'value': 'Q'}]
-_FREQ_OPTIONS = [{'label': ' Yearly', 'value': 'A'}, {'label': ' Quarterly', 'value': 'Q'}]
+_FREQ_OPTIONS = [
+    {'label': ' Yearly', 'value': 'A'}, {'label': ' Quarterly', 'value': 'Q'},
+    {'label': ' Monthly', 'value': 'M'}, {'label': ' Weekly', 'value': 'W'},
+    {'label': ' Daily', 'value': 'D'},
+]
+_DENSE_FREQS = {'M', 'W', 'D'}
 _OP_OPTIONS = [
     {'label': 'Base column', 'value': 'base'},
     {'label': 'Lag', 'value': 'lag'},
+    {'label': 'Lag window (p0..p-n)', 'value': 'lagwin'},
     {'label': 'Diff', 'value': 'diff'},
     {'label': 'Pct change', 'value': 'pct_change'},
     {'label': 'Rolling', 'value': 'rolling'},
@@ -95,6 +101,7 @@ def _field(label: str, control, wrap_id: str | None = None):
 _OP_FIELDS: dict[str, set[str]] = {
     'base': {'col'},
     'lag': {'col', 'k'}, 'diff': {'col', 'k'}, 'pct_change': {'col', 'k'},
+    'lagwin': {'col', 'window'},
     'rolling': {'col', 'window', 'fn'},
     'ratio': {'col', 'colb'}, 'product': {'col', 'colb'},
     'log': {'col'},
@@ -104,6 +111,8 @@ _OP_FIELDS: dict[str, set[str]] = {
 _OP_HINT: dict[str, str] = {
     'base': 'Include a raw column as-is.',
     'lag': 'Value k periods earlier (per ticker, along the date grid).',
+    'lagwin': 'Price window: level + n lags as columns (col, col_lag1 … col_lag_n). '
+              'Use Window = n. Daily freq → past-day prices p0..p-n in each row.',
     'diff': 'Change vs k periods earlier.',
     'pct_change': 'Percent change vs k periods earlier.',
     'rolling': 'Rolling-window statistic over the last N grid periods.',
@@ -127,20 +136,56 @@ _PACK_OPTIONS = [{'label': 'All base columns', 'value': '__all__'}] + [
 ]
 
 
+# Column palette for the dropdowns: registry factors + raw price/volume.
+_PRICE_VOL_OPTS = [
+    {'label': 'Close price', 'value': 'close'},
+    {'label': 'Volume', 'value': 'volume'},
+]
+_COL_OPTIONS = FACTOR_OPTIONS + _PRICE_VOL_OPTS
+# Dense mode drops price-dependent factors (incoherent next to a daily close).
+_DENSE_EXCL = {'mktcap', 'pe', 'pb', 'ps', 'ev_ebitda', 'ev_ebit', 'ev_sales',
+               'fcf_yield', 'mom_12_1', 'mom_6_1', 'vol_21d', 'ma200_ratio'}
+_COL_OPTIONS_DENSE = [o for o in FACTOR_OPTIONS if o['value'] not in _DENSE_EXCL] + _PRICE_VOL_OPTS
+
+
 def _parse_ints(text, default: int) -> list[int]:
-    """Parse '1,2,4' -> [1,2,4]; blank -> [default]; dedup, keep order."""
+    """Parse an int list with comma + range syntax.
+
+    '1,2,4'      -> [1, 2, 4]
+    '1-5'        -> [1, 2, 3, 4, 5]          (inclusive range, for price windows)
+    '1-10:2'     -> [1, 3, 5, 7, 9]          (range with step)
+    '1,5-7,20'   -> [1, 5, 6, 7, 20]         (mixed)
+    blank        -> [default]
+    Dedups, preserves order.
+    """
     if text is None or str(text).strip() == '':
         return [default]
     out: list[int] = []
+
+    def _add(v: int) -> None:
+        if v not in out:
+            out.append(v)
+
     for tok in str(text).replace(' ', '').split(','):
         if tok == '':
             continue
-        try:
-            v = int(float(tok))
-        except ValueError:
-            continue
-        if v not in out:
-            out.append(v)
+        if '-' in tok.lstrip('-'):  # a range like 1-5 or 1-10:2 (not a lone negative)
+            body, _, step_s = tok.partition(':')
+            a_s, _, b_s = body.partition('-')
+            try:
+                a, b = int(a_s), int(b_s)
+                step = int(step_s) if step_s else 1
+            except ValueError:
+                continue
+            if step <= 0:
+                step = 1
+            for v in range(a, b + 1, step):
+                _add(v)
+        else:
+            try:
+                _add(int(float(tok)))
+            except ValueError:
+                continue
     return out or [default]
 
 
@@ -168,7 +213,10 @@ layout = html.Div(
         # ── Step 1: universe & date grid ──────────────────────────────
         html.H4('1 · Universe & dates', className='section-title',
                 style={'margin': '14px 0 4px', 'color': ACCENT}),
-        html.P('Which stocks, and one row per stock at each sampled date.',
+        html.P('Yearly/Quarterly = cross-section at filing snapshots. '
+               'Monthly/Weekly/Daily = dense price SEQUENCE per ticker (close/volume/TA '
+               'dense; fundamentals carried forward from last filing; price-ratio factors '
+               'like P/E unavailable in dense mode — build them from Close).',
                style={'color': MUTED, 'fontSize': '12px', 'margin': '0 0 6px'}),
         html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
             _field('From year', _num('feat-start-year', '2015', 2015, '90px')),
@@ -198,19 +246,19 @@ layout = html.Div(
         html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
             _field('Operation', _dd('feat-op', _OP_OPTIONS, value='lag', width='180px')),
             _field('Column(s)', dcc.Dropdown(
-                id='feat-col-a', options=FACTOR_OPTIONS, value=['roe'], multi=True,
+                id='feat-col-a', options=_COL_OPTIONS, value=['roe'], multi=True,
                 className='filter-dropdown', style={'minWidth': '220px'}),
                 wrap_id='feat-f-col'),
             _field('Column(s) B', dcc.Dropdown(
-                id='feat-col-b', options=FACTOR_OPTIONS, value=['revenue'], multi=True,
+                id='feat-col-b', options=_COL_OPTIONS, value=['revenue'], multi=True,
                 className='filter-dropdown', style={'minWidth': '200px'}),
                 wrap_id='feat-f-colb'),
-            _field('Periods back (k, e.g. 1,2,4)',
+            _field('Periods back (k: 1,2,4 or 1-20)',
                    dcc.Input(id='feat-k', type='text', value='1', className='filter-input',
-                             style={'width': '130px'}), wrap_id='feat-f-k'),
-            _field('Window (e.g. 4,8,12)',
+                             style={'width': '150px'}), wrap_id='feat-f-k'),
+            _field('Window (4,8 or 1-20:2)',
                    dcc.Input(id='feat-window', type='text', value='4', className='filter-input',
-                             style={'width': '130px'}), wrap_id='feat-f-window'),
+                             style={'width': '150px'}), wrap_id='feat-f-window'),
             _field('Statistic', _dd('feat-fn', _ROLL_FN_OPTIONS, value='mean', width='100px'),
                    wrap_id='feat-f-fn'),
             _field('Method', _dd('feat-method', _NORM_OPTIONS, value='zscore', width='140px'),
@@ -279,6 +327,16 @@ def toggle_step_inputs(op):
 
 
 @callback(
+    Output('feat-col-a', 'options'), Output('feat-col-b', 'options'),
+    Input('feat-freq', 'value'),
+)
+def update_col_options(freq):
+    """Dense frequencies expose the fundamentals-only + price/volume palette."""
+    opts = _COL_OPTIONS_DENSE if freq in _DENSE_FREQS else _COL_OPTIONS
+    return opts, opts
+
+
+@callback(
     Output('feat-market', 'options'),
     Output('feat-sector', 'options'),
     Output('feat-watchlist', 'options'),
@@ -308,6 +366,8 @@ def _step_label(step: dict) -> str:
         return f'base · {step["col"]}'
     if op in ('lag', 'diff', 'pct_change'):
         return f'{op} · {step["col"]} k={step["k"]}'
+    if op == 'lagwin':
+        return f'window · {step["col"]} p0..p-{step.get("n", step.get("window"))}'
     if op == 'rolling':
         return f'rolling · {step["fn"]}({step["col"]}, {step["window"]})'
     if op in ('ratio', 'product'):
@@ -328,6 +388,9 @@ def _expand_add(op, cols_a, cols_b, ks, windows, fn, method, p) -> list[dict]:
         return [{'op': 'base', 'col': c} for c in cols_a]
     if op in ('lag', 'diff', 'pct_change'):
         return [{'op': op, 'col': c, 'k': k} for c in cols_a for k in ks]
+    if op == 'lagwin':
+        n = max(windows) if windows else 1
+        return [{'op': 'lagwin', 'col': c, 'n': int(n)} for c in cols_a]
     if op == 'rolling':
         return [{'op': 'rolling', 'col': c, 'window': w, 'fn': fn or 'mean'}
                 for c in cols_a for w in windows]
@@ -529,14 +592,24 @@ def run_build(n, start, end, freq, variant, steps, horizon, mode, buckets,
         return None, msg, None
 
     token = _cache_put(spec, df)
-    head = df.head(50).to_dict('records')
+    # Representative preview: spread across the (Ticker, Date)-sorted frame so the
+    # sample shows many tickers, not just the alphabetically-first one.
+    step = max(1, len(df) // 50)
+    head = df.iloc[::step].head(50).to_dict('records')
     store = {'token': token, 'spec': spec, 'n_rows': len(df),
              'n_cols': df.shape[1], 'head': head, 'columns': list(df.columns)}
 
     status = 'Build complete.'
     if missing:
-        status = (f'Build complete — skipped {len(missing)} uncached date(s) '
-                  f'(e.g. {", ".join(missing[:3])}); built from the rest.')
+        # coarse path → list of skipped dates; dense path → free-text warnings
+        looks_like_dates = all('-' in str(m) and str(m)[:4].isdigit() for m in missing)
+        if looks_like_dates:
+            status = (f'Build complete — skipped {len(missing)} uncached date(s) '
+                      f'(e.g. {", ".join(missing[:3])}); built from the rest.')
+        else:
+            status = 'Build complete. Note: ' + '; '.join(missing)
+    if len(df) > 2_000_000:
+        status += f'  ⚠ large dataset ({len(df):,} rows) — export may be slow/big.'
 
     def chip(text):
         return html.Span(text, style={
