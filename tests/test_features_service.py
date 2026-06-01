@@ -125,6 +125,28 @@ def test_available_columns_includes_price_volume():
     assert 'close' in cols and 'volume' in cols
 
 
+def test_build_skips_steps_with_missing_inputs(monkeypatch):
+    """A step on a column absent from the panel is skipped + warned, not crashed."""
+    tickers = ['AAA', 'BBB']
+
+    def _fake_load(d, v):
+        return pd.DataFrame({'roe': [0.1, 0.2]}, index=pd.Index(tickers, name='Ticker'))
+
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc._snapshot, 'load', _fake_load)
+    monkeypatch.setattr(svc, '_forward_returns',
+                        lambda *a, **k: pd.DataFrame(columns=['Date', 'Ticker', 'fwd_ret']))
+
+    panel, notes = svc.build_panel(
+        2020, 2021, 'A', 'A',
+        steps=[{'op': 'base', 'col': 'roe'}, {'op': 'base', 'col': 'nonexistent'}],
+        label_cfg={'mode': 'none'},
+    )
+    assert 'roe' in panel.columns
+    assert 'nonexistent' not in panel.columns
+    assert any('nonexistent' in n for n in notes)  # warned, did not raise
+
+
 def test_available_columns_dense_drops_price_factors():
     cols = svc.available_columns('D')
     assert 'roe' in cols and 'close' in cols and 'volume' in cols

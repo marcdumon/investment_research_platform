@@ -216,6 +216,20 @@ def step_output_cols(step: dict) -> list[str]:
     raise ValueError(f'unknown op {op!r}')
 
 
+def step_input_cols(step: dict) -> list[str]:
+    """Columns a step READS (its inputs) — used to skip steps whose inputs are absent."""
+    op = step.get('op')
+    if op in ('ratio', 'product'):
+        return [step['a'], step['b']]
+    if op == 'norm':
+        return list(step.get('cols', []))
+    if op in ('lag', 'diff', 'pct_change', 'rolling', 'log', 'winsorize', 'lagwin', 'base'):
+        return [step['col']]
+    if op == 'linear':
+        return list(step.get('weights', {}).keys())
+    return []
+
+
 def apply_step(df: pd.DataFrame, step: dict) -> pd.DataFrame:
     """Apply one recipe step. `step['op']` selects the operation."""
     op = step.get('op')

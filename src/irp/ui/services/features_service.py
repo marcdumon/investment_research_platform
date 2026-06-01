@@ -68,6 +68,35 @@ def _date_grid(start_year: int, end_year: int, freq: str) -> list[datetime.date]
     return [ts.date() for ts in pd.date_range(start, end, freq=pd_freq)]
 
 
+def _apply_steps(panel: pd.DataFrame, steps: list[dict]) -> tuple[pd.DataFrame, list[str]]:
+    """Apply steps, pruning output to produced columns.
+
+    Steps whose input columns aren't in the panel (e.g. a price-ratio factor
+    selected then the grid switched to a dense frequency) are SKIPPED with a
+    warning instead of crashing the build.
+    """
+    sector_series = None
+    feature_cols: list[str] = []
+    skipped: list[str] = []
+    for step in steps:
+        missing = [c for c in _eng.step_input_cols(step) if c not in panel.columns]
+        if missing:
+            skipped.append(f'skipped {step.get("op")} on {",".join(missing)} '
+                           f'(not available for this frequency)')
+            continue
+        if step.get('op') == 'norm' and step.get('method') == 'sector':
+            if sector_series is None:
+                from irp.query.simfin import sector_map
+                sector_series = sector_map()
+            step = {**step, 'sector': sector_series}
+        panel = _eng.apply_step(panel, step)
+        for c in _eng.step_output_cols(step):
+            if c not in feature_cols:
+                feature_cols.append(c)
+    keep = ['Date', 'Ticker'] + [c for c in feature_cols if c in panel.columns]
+    return panel[keep], skipped
+
+
 def _load_snapshots_long(start_year, end_year, variant, cols) -> pd.DataFrame:
     """Stack all cached snapshots in [start, end] into a long (Date, Ticker, cols) frame.
 
@@ -149,21 +178,8 @@ def _build_dense(start_year, end_year, freq, variant, steps, label_cfg,
     panel = spine.sort_values(['Ticker', 'Date']).reset_index(drop=True)
     panel['Date'] = panel['Date'].dt.date
 
-    sector_series = None
-    feature_cols: list[str] = []
-    for step in steps:
-        if step.get('op') == 'norm' and step.get('method') == 'sector':
-            if sector_series is None:
-                from irp.query.simfin import sector_map
-                sector_series = sector_map()
-            step = {**step, 'sector': sector_series}
-        panel = _eng.apply_step(panel, step)
-        for c in _eng.step_output_cols(step):
-            if c not in feature_cols:
-                feature_cols.append(c)
-
-    keep = ['Date', 'Ticker'] + [c for c in feature_cols if c in panel.columns]
-    panel = panel[keep]
+    panel, skipped = _apply_steps(panel, steps)
+    warnings += skipped
 
     mode = label_cfg.get('mode', 'none')
     if mode != 'none':
@@ -230,23 +246,10 @@ def build_panel(
     pv = _price_volume(built_dates, tickers=tickers)
     panel = panel.merge(pv, on=['Date', 'Ticker'], how='left')
 
-    sector_series = None
-    feature_cols: list[str] = []
-    for step in steps:
-        if step.get('op') == 'norm' and step.get('method') == 'sector':
-            if sector_series is None:
-                from irp.query.simfin import sector_map
-                sector_series = sector_map()
-            step = {**step, 'sector': sector_series}
-        panel = _eng.apply_step(panel, step)
-        for c in _eng.step_output_cols(step):
-            if c not in feature_cols:
-                feature_cols.append(c)
-
-    # Keep only the user-selected features (the 39 base columns are inputs, not
-    # output): Date, Ticker, each step's produced column(s), then the label.
-    keep = ['Date', 'Ticker'] + [c for c in feature_cols if c in panel.columns]
-    panel = panel[keep]
+    # Apply steps; output pruned to produced columns (the 39 base columns are
+    # inputs, not output). Steps with absent inputs are skipped with a warning.
+    panel, skipped = _apply_steps(panel, steps)
+    missing += skipped
 
     mode = label_cfg.get('mode', 'none')
     if mode != 'none':
