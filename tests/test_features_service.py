@@ -147,6 +147,133 @@ def test_build_skips_steps_with_missing_inputs(monkeypatch):
     assert any('nonexistent' in n for n in notes)  # warned, did not raise
 
 
+def test_build_panel_scales_features_per_date(monkeypatch):
+    tickers = ['AAA', 'BBB']
+
+    def _fake_load(d, v):
+        val = [0.1, 0.2] if d.year == 2020 else [0.3, 0.5]
+        return pd.DataFrame({'roe': val}, index=pd.Index(tickers, name='Ticker'))
+
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc._snapshot, 'load', _fake_load)
+    monkeypatch.setattr(svc, '_price_volume',
+                        lambda dates, tickers=None: pd.DataFrame(
+                            columns=['Date', 'Ticker', 'close', 'volume']))
+
+    panel, notes = svc.build_panel(
+        2020, 2021, 'A', 'A',
+        steps=[{'op': 'base', 'col': 'roe'}], label_cfg={'mode': 'none'},
+        scale_cfg={'method': 'minmax', 'scope': 'date'},
+    )
+    for _, g in panel.groupby('Date'):
+        assert g['roe'].min() == 0.0 and g['roe'].max() == 1.0
+
+
+def test_build_panel_scale_global_no_cutoff_warns(monkeypatch):
+    tickers = ['AAA', 'BBB']
+
+    def _fake_load(d, v):
+        return pd.DataFrame({'roe': [0.1, 0.2]}, index=pd.Index(tickers, name='Ticker'))
+
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc._snapshot, 'load', _fake_load)
+    monkeypatch.setattr(svc, '_price_volume',
+                        lambda dates, tickers=None: pd.DataFrame(
+                            columns=['Date', 'Ticker', 'close', 'volume']))
+
+    _, notes = svc.build_panel(
+        2020, 2021, 'A', 'A',
+        steps=[{'op': 'base', 'col': 'roe'}], label_cfg={'mode': 'none'},
+        scale_cfg={'method': 'minmax', 'scope': 'global'},
+    )
+    assert any('look-ahead' in n for n in notes)
+
+
+def test_build_panel_scale_does_not_touch_label(monkeypatch):
+    tickers = ['AAA', 'BBB']
+
+    def _fake_load(d, v):
+        return pd.DataFrame({'roe': [0.1, 0.9]}, index=pd.Index(tickers, name='Ticker'))
+
+    def _fake_fwd(dates, horizon, tickers=None):
+        return pd.DataFrame([(d, t, 0.05) for d in dates for t in ['AAA', 'BBB']],
+                            columns=['Date', 'Ticker', 'fwd_ret'])
+
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc._snapshot, 'load', _fake_load)
+    monkeypatch.setattr(svc, '_forward_returns', _fake_fwd)
+    monkeypatch.setattr(svc, '_price_volume',
+                        lambda dates, tickers=None: pd.DataFrame(
+                            columns=['Date', 'Ticker', 'close', 'volume']))
+
+    panel, _ = svc.build_panel(
+        2020, 2021, 'A', 'A',
+        steps=[{'op': 'base', 'col': 'roe'}],
+        label_cfg={'mode': 'continuous', 'horizon_days': 252},
+        scale_cfg={'method': 'minmax', 'scope': 'date'},
+    )
+    assert (panel['fwd_ret'] == 0.05).all()   # label untouched by scaling
+
+
+def test_build_panel_date_split_adds_column(monkeypatch):
+    tickers = ['AAA', 'BBB']
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc._snapshot, 'load', lambda d, v: pd.DataFrame(
+        {'roe': [0.1, 0.2]}, index=pd.Index(tickers, name='Ticker')))
+    monkeypatch.setattr(svc, '_price_volume', lambda dates, tickers=None: pd.DataFrame(
+        columns=['Date', 'Ticker', 'close', 'volume']))
+
+    panel, _ = svc.build_panel(
+        2015, 2020, 'A', 'A',
+        steps=[{'op': 'base', 'col': 'roe'}], label_cfg={'mode': 'none'},
+        split_cfg={'method': 'date', 'train': 0.5, 'valid': 0.25, 'test': 0.25},
+    )
+    assert 'split' in panel.columns
+    assert set(panel['split'].unique()) <= {'train', 'valid', 'test'}
+    assert panel[panel.split == 'train']['Date'].max() < panel[panel.split == 'test']['Date'].min()
+
+
+def test_build_panel_scaler_fits_on_train_split(monkeypatch):
+    tickers = ['AAA', 'BBB']
+
+    def _load(d, v):
+        base = (d.year - 2015) / 10.0           # grows over time
+        return pd.DataFrame({'roe': [base, base + 0.01]},
+                            index=pd.Index(tickers, name='Ticker'))
+
+    monkeypatch.setattr(svc.universe_service, '_filter_tickers', lambda *a, **k: None)
+    monkeypatch.setattr(svc._snapshot, 'load', _load)
+    monkeypatch.setattr(svc, '_price_volume', lambda dates, tickers=None: pd.DataFrame(
+        columns=['Date', 'Ticker', 'close', 'volume']))
+
+    panel, _ = svc.build_panel(
+        2015, 2020, 'A', 'A',
+        steps=[{'op': 'base', 'col': 'roe'}], label_cfg={'mode': 'none'},
+        scale_cfg={'method': 'minmax', 'scope': 'global'},
+        split_cfg={'method': 'date', 'train': 0.5, 'valid': 0.25, 'test': 0.25},
+    )
+    # scaler fit on train → later (test) roe exceeds the train [0,1] range
+    assert panel[panel.split == 'test']['roe'].max() > 1.0
+    assert panel[panel.split == 'train']['roe'].max() <= 1.0 + 1e-9
+
+
+def test_export_panel_writes_three_split_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(svc, '_EXPORT_DIR', tmp_path)
+    df = pd.DataFrame({
+        'Date': pd.to_datetime(['2015-12-31', '2018-12-31', '2020-12-31']).date if False
+        else ['2015-12-31', '2018-12-31', '2020-12-31'],
+        'Ticker': ['A', 'A', 'A'], 'roe': [0.1, 0.2, 0.3],
+        'split': ['train', 'valid', 'test'],
+    })
+    out = svc.export_panel(df, 'parquet', name='ds')
+    assert isinstance(out, list) and len(out) == 3
+    for p in out:
+        d = pd.read_parquet(p)
+        assert 'split' not in d.columns         # split column dropped from each file
+    names = sorted(p.stem.split('_')[-1] for p in out)
+    assert names == ['test', 'train', 'valid']
+
+
 def test_available_columns_dense_drops_price_factors():
     cols = svc.available_columns('D')
     assert 'roe' in cols and 'close' in cols and 'volume' in cols

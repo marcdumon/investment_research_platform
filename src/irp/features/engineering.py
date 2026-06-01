@@ -140,6 +140,150 @@ def add_winsorize(df: pd.DataFrame, col: str, p: float) -> pd.DataFrame:
     return out
 
 
+# ── feature scaling (whole-matrix, model preprocessing) ───────────────
+
+_SCALE_METHODS = ('minmax', 'robust')
+
+
+def _scale_params(s: pd.Series, method: str) -> tuple[float, float]:
+    """(center, scale) for a fit series. NaN-skipping; scale may be 0 (constant)."""
+    if method == 'minmax':
+        return s.min(), s.max() - s.min()
+    if method == 'robust':
+        return s.median(), s.quantile(0.75) - s.quantile(0.25)
+    raise ValueError(f'unknown scale method {method!r}; expected one of {_SCALE_METHODS}')
+
+
+def _apply_scale(s: pd.Series, center: float, scale: float) -> pd.Series:
+    """(s - center) / scale. Zero/NaN scale (constant group) → 0 where present, NaN where absent."""
+    s = s.astype('float64')
+    if scale == 0 or pd.isna(scale):
+        return pd.Series(np.where(s.notna(), 0.0, np.nan), index=s.index)
+    return _safe_div(s - center, scale)
+
+
+def scale_features(
+    df: pd.DataFrame,
+    cols: list[str],
+    method: str = 'minmax',
+    scope: str = 'date',
+    train_cutoff: int | None = None,
+    train_mask: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Scale feature columns IN PLACE (model preprocessing), grouped by `scope`.
+
+    method: 'minmax' → [0, 1]; 'robust' → (x − median) / IQR.
+    scope:
+        'date'   — fit within each Date cross-section. Unconditionally leak-free
+                   for walk-forward (training on Date<d never sees d's scale).
+        'global' — fit one scaler on the TRAIN rows (Date.year ≤ train_cutoff),
+                   apply to all rows. Leak-free only w.r.t. the post-cutoff test
+                   split — a fixed single train/test split, NOT expanding
+                   walk-forward (pre-cutoff rows still see up-to-cutoff stats).
+        'ticker' — like 'global' but fit per ticker on its own train rows.
+    train_cutoff: calendar year; train = rows with Date.year ≤ cutoff. Ignored
+        for 'date'. None for global/ticker → fit on full sample (look-ahead).
+    train_mask: explicit boolean Series (aligned to df.index) marking the train
+        rows — e.g. the train split. Overrides `train_cutoff` when given. This is
+        how the service fits the scaler on the train split.
+    Constant group (range/IQR 0) → 0. Input NaN preserved. Reserved columns
+    (Date/Ticker/fwd_ret/label) are scaled only if the caller passes them in
+    `cols` (the service excludes them).
+    """
+    cols = [c for c in cols if c in df.columns]
+    if not cols:
+        return df
+    out = df.copy()
+
+    if scope == 'date':
+        for _, idx in out.groupby('Date', sort=False).groups.items():
+            for c in cols:
+                s = out.loc[idx, c]
+                out.loc[idx, c] = _apply_scale(s, *_scale_params(s, method))
+        return out
+
+    if train_mask is not None:
+        mask = train_mask.reindex(out.index).fillna(False).astype(bool)
+    elif train_cutoff is not None:
+        mask = pd.to_datetime(out['Date']).dt.year <= int(train_cutoff)
+    else:
+        mask = pd.Series(True, index=out.index)
+
+    if scope == 'global':
+        for c in cols:
+            train_s = out.loc[mask, c]
+            if train_s.dropna().empty:
+                train_s = out[c]
+            out[c] = _apply_scale(out[c], *_scale_params(train_s, method))
+        return out
+
+    if scope == 'ticker':
+        for _, idx in out.groupby('Ticker', sort=False).groups.items():
+            tmask = mask.loc[idx].to_numpy()
+            for c in cols:
+                col_all = out.loc[idx, c]
+                train_s = col_all[tmask]
+                if train_s.dropna().empty:
+                    train_s = col_all          # IPO ticker w/ no train rows
+                out.loc[idx, c] = _apply_scale(col_all, *_scale_params(train_s, method))
+        return out
+
+    raise ValueError(f'unknown scale scope {scope!r}')
+
+
+# ── train / valid / test split ────────────────────────────────────────
+
+def assign_split(
+    df: pd.DataFrame,
+    method: str = 'date',
+    ratios: tuple[float, float, float] = (0.7, 0.15, 0.15),
+    seed: int = 0,
+) -> pd.Series:
+    """Return a 'train'/'valid'/'test' label Series aligned to `df.index`.
+
+    method='date'   — chronological by UNIQUE date: earliest ratios[0] of dates →
+                      train, next ratios[1] → valid, rest → test (train < valid <
+                      test, test most recent). Every row of a date shares a split.
+    method='ticker' — leave-tickers-out: each ticker assigned wholly to one split
+                      by a seeded shuffle, partitioned by `ratios`. No ticker spans
+                      splits (group-disjoint).
+    `ratios` need not sum to 1 (normalized). The valid boundary uses round();
+    test takes the remainder so all three are non-empty when the unit count allows.
+    """
+    total = float(sum(ratios)) or 1.0
+    r_train, r_valid = ratios[0] / total, ratios[1] / total
+
+    if method == 'date':
+        units = sorted(df['Date'].unique())
+    elif method == 'ticker':
+        units = sorted(df['Ticker'].unique())
+        rng = np.random.default_rng(seed)
+        units = list(np.array(units, dtype=object)[rng.permutation(len(units))])
+    else:
+        raise ValueError(f'unknown split method {method!r}')
+
+    n = len(units)
+    n_train = round(n * r_train)
+    n_valid = round(n * r_valid)
+    # keep all three non-empty when the unit count allows (n >= 3): a tiny or
+    # skewed valid/test fraction can round to 0 — borrow from train.
+    if n >= 3:
+        n_train = min(max(n_train, 1), n - 2)      # leave ≥1 each for valid + test
+        n_valid = max(n_valid, 1)
+        if n_train + n_valid > n - 1:              # ensure ≥1 left for test
+            n_valid = n - 1 - n_train
+    label = {}
+    for i, u in enumerate(units):
+        if i < n_train:
+            label[u] = 'train'
+        elif i < n_train + n_valid:
+            label[u] = 'valid'
+        else:
+            label[u] = 'test'
+    key = 'Date' if method == 'date' else 'Ticker'
+    return df[key].map(label)
+
+
 # ── cross-sectional normalization (per Date) ──────────────────────────
 
 _NORM_SUFFIX = {'zscore': '_z', 'rank': '_rank', 'sector': '_sn'}
