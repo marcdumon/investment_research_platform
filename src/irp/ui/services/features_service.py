@@ -97,6 +97,53 @@ def _apply_steps(panel: pd.DataFrame, steps: list[dict]) -> tuple[pd.DataFrame, 
     return panel[keep], skipped
 
 
+_RESERVED_COLS = frozenset({'Date', 'Ticker', 'fwd_ret', 'label', 'split'})
+
+
+def _split_and_scale(
+    panel: pd.DataFrame, scale_cfg: dict | None, split_cfg: dict | None,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Assign a train/valid/test split and scale feature columns in place.
+
+    Applied last (after steps + label). The split is computed first so the scaler
+    (global/ticker scope) can fit on the TRAIN rows only — the leak-free protocol.
+    Per-date scaling is unaffected by the split. A `split` column is appended when
+    a split is configured; scaling never touches reserved columns.
+    """
+    notes: list[str] = []
+    if panel.empty:
+        return panel, notes
+
+    split_method = (split_cfg or {}).get('method', 'none')
+    split_series = None
+    if split_method and split_method != 'none':
+        ratios = (float(split_cfg.get('train', 0.7)), float(split_cfg.get('valid', 0.15)),
+                  float(split_cfg.get('test', 0.15)))
+        split_series = _eng.assign_split(panel, method=split_method, ratios=ratios,
+                                         seed=int(split_cfg.get('seed', 0)))
+
+    method = (scale_cfg or {}).get('method')
+    if method and method != 'none':
+        feat_cols = [c for c in panel.columns if c not in _RESERVED_COLS]
+        if feat_cols:
+            scope = scale_cfg.get('scope', 'date')
+            cutoff = scale_cfg.get('train_cutoff')
+            train_mask = None
+            if scope in ('global', 'ticker') and split_series is not None:
+                train_mask = (split_series == 'train')   # fit on the train split
+                cutoff = None
+            elif scope in ('global', 'ticker') and cutoff is None:
+                notes.append(f'scaling ({scope}/{method}) fit on full sample — set a '
+                             f'train cutoff year or a split to avoid look-ahead')
+            panel = _eng.scale_features(panel, feat_cols, method=method, scope=scope,
+                                        train_cutoff=cutoff, train_mask=train_mask)
+
+    if split_series is not None:
+        panel = panel.copy()
+        panel['split'] = split_series.to_numpy()
+    return panel, notes
+
+
 def _load_snapshots_long(start_year, end_year, variant, cols) -> pd.DataFrame:
     """Stack all cached snapshots in [start, end] into a long (Date, Ticker, cols) frame.
 
@@ -149,7 +196,7 @@ def _dense_ta(grid: list[datetime.date], tickers) -> pd.DataFrame:
 
 
 def _build_dense(start_year, end_year, freq, variant, steps, label_cfg,
-                 tickers) -> tuple[pd.DataFrame, list[str]]:
+                 tickers, scale_cfg=None, split_cfg=None) -> tuple[pd.DataFrame, list[str]]:
     """Dense price-sequence build: dense close/volume/TA + carry-forward fundamentals."""
     grid = _date_grid(start_year, end_year, freq)
     if not grid:
@@ -186,7 +233,8 @@ def _build_dense(start_year, end_year, freq, variant, steps, label_cfg,
         fwd = _forward_returns(grid, int(label_cfg.get('horizon_days', 252)), tickers=tickers)
         panel = _eng.attach_label(panel, fwd, mode=mode,
                                   n_buckets=int(label_cfg.get('n_buckets', 5)))
-    return panel, warnings
+    panel, snotes = _split_and_scale(panel, scale_cfg, split_cfg)
+    return panel, warnings + snotes
 
 
 def build_panel(
@@ -199,6 +247,8 @@ def build_panel(
     market: str | None = None,
     sector: str | None = None,
     watchlist: str | None = None,
+    scale_cfg: dict | None = None,
+    split_cfg: dict | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Build the long (Date, Ticker) feature panel.
 
@@ -212,7 +262,8 @@ def build_panel(
     tickers = universe_service._filter_tickers(market, sector, watchlist)
 
     if freq in _DENSE_FREQS:
-        return _build_dense(start_year, end_year, freq, variant, steps, label_cfg, tickers)
+        return _build_dense(start_year, end_year, freq, variant, steps, label_cfg,
+                            tickers, scale_cfg, split_cfg)
 
     grid = _date_grid(start_year, end_year, freq)
     if not grid:
@@ -258,20 +309,40 @@ def build_panel(
         panel = _eng.attach_label(
             panel, fwd, mode=mode, n_buckets=int(label_cfg.get('n_buckets', 5))
         )
-    return panel, missing
+    panel, snotes = _split_and_scale(panel, scale_cfg, split_cfg)
+    return panel, missing + snotes
 
 
-def export_panel(df: pd.DataFrame, fmt: Literal['parquet', 'csv'], name: str = 'features') -> Path:
-    """Write the panel to data/feature_exports/<name>_<timestamp>.<fmt>; return path."""
-    _EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    safe = ''.join(c if (c.isalnum() or c in '-_') else '_' for c in name) or 'features'
-    path = _EXPORT_DIR / f'{safe}_{ts}.{fmt}'
+def _write_frame(df: pd.DataFrame, fmt: str, stem: str) -> Path:
+    path = _EXPORT_DIR / f'{stem}.{fmt}'
     if fmt == 'csv':
         df.to_csv(path, index=False)
     else:
         df.to_parquet(path, index=False)
     return path
+
+
+def export_panel(
+    df: pd.DataFrame, fmt: Literal['parquet', 'csv'], name: str = 'features',
+) -> Path | list[Path]:
+    """Write the panel to data/feature_exports/.
+
+    No `split` column → one file `<name>_<ts>.<fmt>` (returns a Path). With a
+    `split` column → one file per split `<name>_<ts>_<split>.<fmt>` (train/valid/
+    test, in that order; the `split` column is dropped from each); returns a list.
+    """
+    _EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    safe = ''.join(c if (c.isalnum() or c in '-_') else '_' for c in name) or 'features'
+    if 'split' not in df.columns:
+        return _write_frame(df, fmt, f'{safe}_{ts}')
+    paths = []
+    for split_name in ('train', 'valid', 'test'):
+        part = df[df['split'] == split_name].drop(columns=['split'])
+        if part.empty:
+            continue
+        paths.append(_write_frame(part, fmt, f'{safe}_{ts}_{split_name}'))
+    return paths
 
 
 # ── recipe passthroughs (keep page services-only) ─────────────────────
