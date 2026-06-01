@@ -17,13 +17,6 @@ from scipy import stats
 from sklearn.base import clone
 from sklearn.linear_model import Ridge
 
-_DEFAULT_FACTORS = [
-    'pe', 'pb', 'ps', 'fcf_yield',          # value
-    'roe', 'roic', 'op_margin', 'fcf_margin',  # quality
-    'debt_equity',                           # leverage
-    'mom_12_1', 'mom_6_1',                   # momentum
-    'rev_growth_1y', 'earn_growth_1y',       # growth
-]
 _ACCENT = '#58a6ff'
 _MUTED = '#7d8590'
 _QCOLORS = ['#d65a5a', '#d6a05a', '#c9c95a', '#7ec97e', '#4ec94e']  # Q1..Q5
@@ -42,38 +35,59 @@ class BaselineResult:
     ls_cumret: pd.Series = field(default=None)
 
 
-# ── dataset ───────────────────────────────────────────────────────────
+# ── dataset (load an export from the /features page) ──────────────────
 
-def make_dataset(
-    start_year: int = 2010,
-    end_year: int = 2024,
-    freq: str = 'Q',
-    variant: str = 'A',
-    horizon_days: int = 252,
-    factors: list[str] | None = None,
-    market: str | None = None,
-    sector: str | None = None,
-    watchlist: str | None = None,
-) -> tuple[pd.DataFrame, list[str]]:
-    """Build a z-scored factor panel + continuous forward-return label.
+_NON_FEATURE = {'Date', 'Ticker', 'fwd_ret', 'label'}
 
-    Returns (df, feature_cols). One z-score-per-date normalize step keeps the
-    features comparable for a linear model. Requires a warm snapshot cache
-    (use the /features Precompute button or `precompute_all`).
-    """
+
+def _export_dir():
     from irp.ui.services import features_service
+    return features_service._EXPORT_DIR
 
-    factors = factors or _DEFAULT_FACTORS
-    steps = [{'op': 'norm', 'cols': list(factors), 'method': 'zscore'}]
-    label_cfg = {'mode': 'continuous', 'horizon_days': horizon_days}
-    df, notes = features_service.build_panel(
-        start_year, end_year, freq, variant, steps, label_cfg,
-        market=market, sector=sector, watchlist=watchlist,
-    )
-    if notes:
-        print('build notes:', notes)
-    feature_cols = [f'{c}_z' for c in factors]
-    feature_cols = [c for c in feature_cols if c in df.columns]
+
+def list_exports() -> pd.DataFrame:
+    """Datasets exported from the /features page, newest first."""
+    d = _export_dir()
+    files = list(d.glob('*.parquet')) + list(d.glob('*.csv')) if d.exists() else []
+    rows = [{'file': f.name, 'modified': datetime.datetime.fromtimestamp(f.stat().st_mtime),
+             'mb': round(f.stat().st_size / 1e6, 2)} for f in files]
+    if not rows:
+        return pd.DataFrame(columns=['file', 'modified', 'mb'])
+    return pd.DataFrame(rows).sort_values('modified', ascending=False).reset_index(drop=True)
+
+
+def load_export(
+    path=None,
+    feature_cols: list[str] | None = None,
+    target: str = 'fwd_ret',
+) -> tuple[pd.DataFrame, list[str]]:
+    """Load a dataset built on the /features page (parquet/CSV).
+
+    `path=None` loads the most recently exported file from `data/feature_exports/`.
+    `feature_cols=None` infers features as every numeric column except
+    Date/Ticker/fwd_ret/label. The export must carry the `target` column — build
+    it with a label (Return / Up-Down / Quantile) on the /features page.
+    """
+    from pathlib import Path
+
+    if path is None:
+        files = list(_export_dir().glob('*.parquet')) + list(_export_dir().glob('*.csv'))
+        if not files:
+            raise FileNotFoundError(
+                'No exports in data/feature_exports/. Build + Export a dataset on '
+                'the /features page first (with a forward-return label).')
+        path = max(files, key=lambda f: f.stat().st_mtime)
+    path = Path(path)
+    df = pd.read_csv(path) if path.suffix == '.csv' else pd.read_parquet(path)
+    print(f'loaded {path.name}  {df.shape[0]:,} rows × {df.shape[1]} cols')
+
+    if target not in df.columns:
+        raise ValueError(
+            f'export has no "{target}" column — rebuild on /features with a label '
+            f'(Target type = Return / Up-Down / Quantile).')
+    if feature_cols is None:
+        feature_cols = [c for c in df.columns
+                        if c not in _NON_FEATURE and pd.api.types.is_numeric_dtype(df[c])]
     return df, feature_cols
 
 
@@ -241,6 +255,6 @@ def plot_pred_vs_actual(res: BaselineResult, sample: int = 5000,
         d = d.sample(sample, random_state=0)
     fig = go.Figure(go.Scattergl(x=d['pred'], y=d['fwd_ret'], mode='markers',
                                  marker=dict(color=_ACCENT, size=4, opacity=0.4)))
-    fig.update_layout(_layout(template, title='Predicted vs actual forward return',
-                              xaxis_title='predicted', yaxis_title='actual (log ret)'))
+    fig.update_layout(_layout(template, title='Predicted vs actual forward return (log ret)',
+                              xaxis_title='predicted log ret', yaxis_title='actual log ret'))
     return fig
