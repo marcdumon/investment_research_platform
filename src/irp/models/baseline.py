@@ -78,6 +78,8 @@ def load_export(
                 'the /features page first (with a forward-return label).')
         path = max(files, key=lambda f: f.stat().st_mtime)
     path = Path(path)
+    if not path.is_absolute() and not path.exists():
+        path = _export_dir() / path
     df = pd.read_csv(path) if path.suffix == '.csv' else pd.read_parquet(path)
     print(f'loaded {path.name}  {df.shape[0]:,} rows × {df.shape[1]} cols')
 
