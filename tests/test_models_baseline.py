@@ -22,6 +22,32 @@ def _synthetic(n_dates=20, n_tickers=60, signal=1.0, seed=0):
     return pd.concat(rows, ignore_index=True), ['f1_z', 'f2_z']
 
 
+def test_load_export_infers_features(tmp_path, monkeypatch):
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 1, 1)] * 3,
+        'Ticker': ['A', 'B', 'C'],
+        'roe_z': [0.1, 0.2, 0.3], 'close': [10.0, 20.0, 30.0],
+        'fwd_ret': [0.01, 0.02, 0.03], 'label': [0, 1, 1],
+    })
+    p = tmp_path / 'feat_20200101_000000.parquet'
+    df.to_parquet(p, index=False)
+    monkeypatch.setattr(bl, '_export_dir', lambda: tmp_path)
+
+    loaded, feats = bl.load_export()  # picks latest in dir
+    assert set(feats) == {'roe_z', 'close'}      # Date/Ticker/fwd_ret/label excluded
+    assert len(loaded) == 3
+
+
+def test_load_export_missing_target_raises(tmp_path, monkeypatch):
+    df = pd.DataFrame({'Date': [datetime.date(2020, 1, 1)], 'Ticker': ['A'], 'roe_z': [0.1]})
+    p = tmp_path / 'nolabel_20200101_000000.parquet'
+    df.to_parquet(p, index=False)
+    monkeypatch.setattr(bl, '_export_dir', lambda: tmp_path)
+    import pytest
+    with pytest.raises(ValueError, match='no "fwd_ret"'):
+        bl.load_export(p)
+
+
 def test_walk_forward_recovers_signal():
     df, feats = _synthetic(signal=1.0)
     res = bl.walk_forward_linear(df, feats, min_train_dates=5)
