@@ -22,7 +22,7 @@ from irp.ui.services import features_service, watchlist_service
 from irp.ui.tables import column_format as _col_fmt
 from irp.ui.theme import ACCENT, MUTED, TABLE_STYLE
 
-dash.register_page(__name__, path='/features', name='Feature Engineering')
+dash.register_page(__name__, path='/features', name='Dataset Builder')
 
 logger = logging.getLogger(__name__)
 
@@ -67,23 +67,6 @@ _LABEL_MODE_OPTIONS = [
     {'label': ' Up/Down (0/1)', 'value': 'binary'},
     {'label': ' Quantile bucket', 'value': 'quantile'},
 ]
-_SCALE_METHOD_OPTIONS = [
-    {'label': ' None', 'value': 'none'},
-    {'label': ' MinMax [0,1]', 'value': 'minmax'},
-    {'label': ' Robust (median/IQR)', 'value': 'robust'},
-]
-_SCALE_SCOPE_OPTIONS = [
-    {'label': ' Per-date (leak-free)', 'value': 'date'},
-    {'label': ' Per-ticker', 'value': 'ticker'},
-    {'label': ' Global', 'value': 'global'},
-]
-_SPLIT_METHOD_OPTIONS = [
-    {'label': ' None (single file)', 'value': 'none'},
-    {'label': ' By date (train < valid < test)', 'value': 'date'},
-    {'label': ' Leave tickers out', 'value': 'ticker'},
-]
-
-
 def _num(id_: str, placeholder: str, value=None, width='90px'):
     return dcc.Input(
         id=id_, type='number', placeholder=placeholder, value=value,
@@ -218,7 +201,7 @@ layout = html.Div(
         dcc.Store(id='features-steps-store', data=[]),
         dcc.Store(id='features-build-store'),  # {token, spec, n_rows, n_cols, missing, head}
         dcc.Store(id='features-recipe-trigger', data=0),
-        html.H2('Feature Engineering', className='page-title'),
+        html.H2('Dataset Builder', className='page-title'),
         html.P(
             'Compose ML features from cached factor snapshots, attach a label, export.',
             className='home-subtitle',
@@ -303,71 +286,12 @@ layout = html.Div(
             _field('Quantile buckets', _num('feat-buckets', '5', 5, '110px')),
         ]),
 
-        # ── Step 3b: scaling (model preprocessing) ────────────────────
-        html.H4('3b · Scale features (for the model)', className='section-title',
-                style={'margin': '16px 0 4px', 'color': ACCENT}),
-        html.P('Most models want scaled inputs. Scales every feature column (not the '
-               'label). Per-date fits within each date — leak-free for walk-forward. '
-               'Per-ticker / Global fit on the train years (≤ cutoff) only; that is a '
-               'single train/test split, not expanding walk-forward (for the latter, '
-               'put the scaler in the notebook\'s sklearn Pipeline instead).',
-               style={'color': MUTED, 'fontSize': '12px', 'margin': '0 0 6px'}),
-        html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
-            _field('Method',
-                   dcc.RadioItems(id='feat-scale-method', options=_SCALE_METHOD_OPTIONS,
-                                  value='none', inline=True, labelClassName='check-item')),
-            _field('Fit scope',
-                   dcc.RadioItems(id='feat-scale-scope', options=_SCALE_SCOPE_OPTIONS,
-                                  value='date', inline=True, labelClassName='check-item')),
-            _field('Train cutoff year', _num('feat-scale-cutoff', '2020', None, '110px'),
-                   wrap_id='feat-f-scale-cutoff'),
-        ]),
-        html.P('Heavy-tailed columns (named in build notes after a build) stay huge '
-               'after robust/minmax. Pick them here to clip / log before scaling, or '
-               'drop them. Clip & Log fit on the train rows.',
-               style={'color': MUTED, 'fontSize': '12px', 'margin': '6px 0 4px'}),
-        html.Div(className='control-row', style={'alignItems': 'flex-end'},
-                 id='feat-tame-row', children=[
-            _field('Heavy tails',
-                   dcc.RadioItems(id='feat-scale-tame-action',
-                                  options=[{'label': 'None', 'value': 'none'},
-                                           {'label': 'Clip', 'value': 'clip'},
-                                           {'label': 'Log', 'value': 'log'},
-                                           {'label': 'Drop', 'value': 'drop'}],
-                                  value='none', inline=True, labelClassName='check-item')),
-            _field('Columns',
-                   dcc.Dropdown(id='feat-scale-tame-cols', options=[], value=[],
-                                multi=True, placeholder='columns to tame…',
-                                style={'width': '320px'})),
-            _field('Clip p', _num('feat-scale-tame-p', '0.01', 0.01, '90px'),
-                   wrap_id='feat-f-tame-p'),
-        ]),
-
-        # ── Step 3c: train / valid / test split ───────────────────────
-        html.H4('3c · Train / valid / test split', className='section-title',
-                style={'margin': '16px 0 4px', 'color': ACCENT}),
-        html.P('Optional. Exports 3 files (train/valid/test) instead of 1. '
-               'By date = chronological (test most recent, no look-ahead). Leave '
-               'tickers out = whole tickers held out (seeded). When scaling is on, '
-               'the scaler fits on the train split only.',
-               style={'color': MUTED, 'fontSize': '12px', 'margin': '0 0 6px'}),
-        html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
-            _field('Method',
-                   dcc.RadioItems(id='feat-split-method', options=_SPLIT_METHOD_OPTIONS,
-                                  value='none', inline=True, labelClassName='check-item')),
-            _field('Train frac', _num('feat-split-train', '0.7', 0.7, '80px'),
-                   wrap_id='feat-f-split-train'),
-            _field('Valid frac', _num('feat-split-valid', '0.15', 0.15, '80px'),
-                   wrap_id='feat-f-split-valid'),
-            _field('Test frac', _num('feat-split-test', '0.15', 0.15, '80px'),
-                   wrap_id='feat-f-split-test'),
-            _field('Seed', _num('feat-split-seed', '0', 0, '70px'),
-                   wrap_id='feat-f-split-seed'),
-        ]),
-
         # ── Step 4: build, export, save ───────────────────────────────
         html.H4('4 · Build & export', className='section-title',
                 style={'margin': '16px 0 4px', 'color': ACCENT}),
+        html.P('Builds the RAW dataset (no scaling/splitting). Scale, split, and '
+               'heavy-tail cleaning live on the Feature Engineering page.',
+               style={'color': MUTED, 'fontSize': '12px', 'margin': '0 0 6px'}),
         html.Div(className='control-row', children=[
             html.Button('Run Build', id='feat-run', className='run-btn', n_clicks=0),
             html.Button('Export parquet', id='feat-export-parquet', className='run-btn', n_clicks=0),
@@ -406,49 +330,13 @@ def toggle_step_inputs(op):
 
 
 @callback(
-    Output('feat-f-scale-cutoff', 'style'),
-    Input('feat-scale-scope', 'value'),
-)
-def toggle_scale_cutoff(scope):
-    """Train cutoff only matters for the global / per-ticker fit scopes."""
-    return dict(_SHOW) if scope in ('global', 'ticker') else dict(_HIDE)
-
-
-@callback(
-    Output('feat-tame-row', 'style'),
-    Output('feat-f-tame-p', 'style'),
-    Input('feat-scale-method', 'value'),
-    Input('feat-scale-tame-action', 'value'),
-)
-def toggle_tame_inputs(method, action):
-    """Tame row only when scaling is on; Clip p only for the clip action."""
-    row = dict(_HIDE) if method in (None, 'none') else {'display': 'flex'}
-    p = dict(_SHOW) if action == 'clip' else dict(_HIDE)
-    return row, p
-
-
-@callback(
-    Output('feat-f-split-train', 'style'), Output('feat-f-split-valid', 'style'),
-    Output('feat-f-split-test', 'style'), Output('feat-f-split-seed', 'style'),
-    Input('feat-split-method', 'value'),
-)
-def toggle_split_inputs(method):
-    """Show fraction inputs when splitting; seed only for the ticker leave-out."""
-    on = method in ('date', 'ticker')
-    frac = dict(_SHOW) if on else dict(_HIDE)
-    seed = dict(_SHOW) if method == 'ticker' else dict(_HIDE)
-    return frac, frac, frac, seed
-
-
-@callback(
     Output('feat-col-a', 'options'), Output('feat-col-b', 'options'),
-    Output('feat-scale-tame-cols', 'options'),
     Input('feat-freq', 'value'),
 )
 def update_col_options(freq):
     """Dense frequencies expose the fundamentals-only + price/volume palette."""
     opts = _COL_OPTIONS_DENSE if freq in _DENSE_FREQS else _COL_OPTIONS
-    return opts, opts, opts
+    return opts, opts
 
 
 @callback(
@@ -624,22 +512,12 @@ def render_step_stack(steps):
 
 
 def _spec(start, end, freq, variant, steps, horizon, mode, buckets,
-          market, sector, watchlist, scale_method='none', scale_scope='date',
-          scale_cutoff=None, tame_action='none', tame_cols=None, tame_p=0.01,
-          split_method='none', split_train=0.7, split_valid=0.15,
-          split_test=0.15, split_seed=0) -> dict:
+          market, sector, watchlist) -> dict:
     return {
         'start': int(start or 2015), 'end': int(end or 2025),
         'freq': freq, 'variant': variant, 'steps': steps or [],
         'label': {'mode': mode, 'horizon_days': int(horizon or 252),
                   'n_buckets': int(buckets or 5)},
-        'scale': {'method': scale_method or 'none', 'scope': scale_scope or 'date',
-                  'train_cutoff': int(scale_cutoff) if scale_cutoff not in (None, '') else None,
-                  'tame_action': tame_action or 'none', 'tame_cols': tame_cols or [],
-                  'tame_p': float(tame_p) if tame_p not in (None, '') else 0.01},
-        'split': {'method': split_method or 'none',
-                  'train': float(split_train or 0.7), 'valid': float(split_valid or 0.15),
-                  'test': float(split_test or 0.15), 'seed': int(split_seed or 0)},
         'filters': {'market': market, 'sector': sector, 'watchlist': watchlist},
     }
 
@@ -650,7 +528,6 @@ def _run_spec(spec: dict):
         spec['start'], spec['end'], spec['freq'], spec['variant'],
         spec['steps'], spec['label'],
         market=f.get('market'), sector=f.get('sector'), watchlist=f.get('watchlist'),
-        scale_cfg=spec.get('scale'), split_cfg=spec.get('split'),
     )
 
 
@@ -693,25 +570,14 @@ def precompute_cache(n, start, end, variant):
     State('feat-buckets', 'value'),
     State('feat-market', 'value'), State('feat-sector', 'value'),
     State('feat-watchlist', 'value'),
-    State('feat-scale-method', 'value'), State('feat-scale-scope', 'value'),
-    State('feat-scale-cutoff', 'value'),
-    State('feat-scale-tame-action', 'value'), State('feat-scale-tame-cols', 'value'),
-    State('feat-scale-tame-p', 'value'),
-    State('feat-split-method', 'value'), State('feat-split-train', 'value'),
-    State('feat-split-valid', 'value'), State('feat-split-test', 'value'),
-    State('feat-split-seed', 'value'),
     running=[(Output('feat-run', 'disabled'), True, False),
              (Output('feat-run', 'children'), 'Building…', 'Run Build')],
     prevent_initial_call=True,
 )
 def run_build(n, start, end, freq, variant, steps, horizon, mode, buckets,
-              market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
-              tame_action, tame_cols, tame_p,
-              split_method, split_train, split_valid, split_test, split_seed):
+              market, sector, watchlist):
     spec = _spec(start, end, freq, variant, steps, horizon, mode, buckets,
-                 market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
-                 tame_action, tame_cols, tame_p,
-                 split_method, split_train, split_valid, split_test, split_seed)
+                 market, sector, watchlist)
     try:
         df, missing = _run_spec(spec)
     except Exception as exc:
@@ -729,6 +595,8 @@ def run_build(n, start, end, freq, variant, steps, horizon, mode, buckets,
         return None, msg, None
 
     token = _cache_put(spec, df)
+    # Hand the raw build to the Feature-Engineering page (in-memory source).
+    features_service.set_last_build(df, {'spec': spec, 'n_rows': len(df)})
     # Representative preview: spread across the (Ticker, Date)-sorted frame so the
     # sample shows many tickers, not just the alphabetically-first one.
     step = max(1, len(df) // 50)
@@ -821,26 +689,15 @@ def export(parquet_n, csv_n, store, name):
     State('feat-buckets', 'value'),
     State('feat-market', 'value'), State('feat-sector', 'value'),
     State('feat-watchlist', 'value'),
-    State('feat-scale-method', 'value'), State('feat-scale-scope', 'value'),
-    State('feat-scale-cutoff', 'value'),
-    State('feat-scale-tame-action', 'value'), State('feat-scale-tame-cols', 'value'),
-    State('feat-scale-tame-p', 'value'),
-    State('feat-split-method', 'value'), State('feat-split-train', 'value'),
-    State('feat-split-valid', 'value'), State('feat-split-test', 'value'),
-    State('feat-split-seed', 'value'),
     State('features-recipe-trigger', 'data'),
     prevent_initial_call=True,
 )
 def save_recipe(n, name, start, end, freq, variant, steps, horizon, mode, buckets,
-                market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
-                tame_action, tame_cols, tame_p,
-                split_method, split_train, split_valid, split_test, split_seed, trigger):
+                market, sector, watchlist, trigger):
     if not name:
         return trigger, 'Enter a recipe name to save.'
     spec = _spec(start, end, freq, variant, steps, horizon, mode, buckets,
-                 market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
-                 tame_action, tame_cols, tame_p,
-                 split_method, split_train, split_valid, split_test, split_seed)
+                 market, sector, watchlist)
     features_service.save_recipe(name, spec)
     return (trigger or 0) + 1, f'Saved recipe "{name}".'
 
@@ -852,13 +709,6 @@ def save_recipe(n, name, start, end, freq, variant, steps, horizon, mode, bucket
     Output('feat-buckets', 'value'),
     Output('feat-market', 'value'), Output('feat-sector', 'value'),
     Output('feat-watchlist', 'value'),
-    Output('feat-scale-method', 'value'), Output('feat-scale-scope', 'value'),
-    Output('feat-scale-cutoff', 'value'),
-    Output('feat-scale-tame-action', 'value'), Output('feat-scale-tame-cols', 'value'),
-    Output('feat-scale-tame-p', 'value'),
-    Output('feat-split-method', 'value'), Output('feat-split-train', 'value'),
-    Output('feat-split-valid', 'value'), Output('feat-split-test', 'value'),
-    Output('feat-split-seed', 'value'),
     Input('feat-recipe-load', 'value'),
     prevent_initial_call=True,
 )
@@ -871,12 +721,6 @@ def load_recipe_controls(name):
         raise PreventUpdate from None
     lbl = s.get('label', {})
     f = s.get('filters', {})
-    sc = s.get('scale', {})
-    sp = s.get('split', {})
     return (s.get('start', 2015), s.get('end', 2025), s.get('freq', 'A'),
             s.get('variant', 'A'), lbl.get('horizon_days', 252), lbl.get('mode', 'continuous'),
-            lbl.get('n_buckets', 5), f.get('market'), f.get('sector'), f.get('watchlist'),
-            sc.get('method', 'none'), sc.get('scope', 'date'), sc.get('train_cutoff'),
-            sc.get('tame_action', 'none'), sc.get('tame_cols', []), sc.get('tame_p', 0.01),
-            sp.get('method', 'none'), sp.get('train', 0.7), sp.get('valid', 0.15),
-            sp.get('test', 0.15), sp.get('seed', 0))
+            lbl.get('n_buckets', 5), f.get('market'), f.get('sector'), f.get('watchlist'))
