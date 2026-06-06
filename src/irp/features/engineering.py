@@ -17,6 +17,7 @@ registry factors already in the base palette (`rev_growth_1y`,
 `earn_growth_1y`, `mom_*`).
 """
 import datetime
+from typing import TypedDict
 
 import numpy as np
 import pandas as pd
@@ -24,6 +25,27 @@ import pandas as pd
 from irp.features import normalize as _norm
 
 _ROLL_FNS = ('mean', 'std', 'min', 'max', 'sum')
+
+
+class StepDict(TypedDict, total=False):
+    """One recipe step. `op` selects the operation; the other keys are the
+    operands that op reads (see `apply_step`). All optional — the relevant
+    subset depends on `op`. This is the on-the-wire shape of a recipe step.
+    """
+    op: str                      # base|lag|diff|pctchange|lagwin|rolling|ratio|product|linear|log|winsorize|norm
+    col: str                     # single-column ops
+    cols: list[str]              # base / norm (multi-column)
+    a: str                       # ratio / product — left/numerator
+    b: str                       # ratio / product — right/denominator
+    k: int                       # lag / diff / pctchange period
+    n: int                       # lag-window length
+    window: int                  # rolling window
+    fn: str                      # rolling reducer (mean|std|min|max|sum)
+    weights: dict[str, float]    # linear combination weights
+    name: str                    # linear output column name
+    p: float                     # winsorize tail fraction
+    method: str                  # norm method (zscore|rank|sector)
+    sector: object               # norm sector Series (injected by the service)
 
 
 # ── panel assembly ────────────────────────────────────────────────────
@@ -327,7 +349,7 @@ def normalize_step(
 
 # ── step dispatch ─────────────────────────────────────────────────────
 
-def step_output_cols(step: dict) -> list[str]:
+def step_output_cols(step: StepDict) -> list[str]:
     """Names of the feature column(s) a step contributes to the output.
 
     Source columns are NOT included — only what the step produces (or, for
@@ -360,7 +382,7 @@ def step_output_cols(step: dict) -> list[str]:
     raise ValueError(f'unknown op {op!r}')
 
 
-def step_input_cols(step: dict) -> list[str]:
+def step_input_cols(step: StepDict) -> list[str]:
     """Columns a step READS (its inputs) — used to skip steps whose inputs are absent."""
     op = step.get('op')
     if op in ('ratio', 'product'):
@@ -374,7 +396,7 @@ def step_input_cols(step: dict) -> list[str]:
     return []
 
 
-def apply_step(df: pd.DataFrame, step: dict) -> pd.DataFrame:
+def apply_step(df: pd.DataFrame, step: StepDict) -> pd.DataFrame:
     """Apply one recipe step. `step['op']` selects the operation."""
     op = step.get('op')
     if op == 'base':
