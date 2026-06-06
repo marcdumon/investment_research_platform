@@ -26,6 +26,33 @@ def test_scale_minmax_per_date():
         assert g['f'].min() == 0.0 and g['f'].max() == 1.0
 
 
+def _f32_panel():
+    """float32 feature whose minmax scaling yields non-dyadic fractions (1/3, 2/3)
+    that float32 cannot hold losslessly — triggers pandas LossySetitemError on
+    partial-row .loc assignment if the column is not upcast first."""
+    d = datetime.date(2020, 12, 31)
+    df = pd.DataFrame({
+        'Date': [d, d, d, d],
+        'Ticker': ['A', 'B', 'C', 'D'],
+        'f': np.array([0, 1, 2, 3], dtype='float32'),
+        'fwd_ret': 0.0, 'label': 0,
+    })
+    return df
+
+
+def test_scale_float32_column_date_scope():
+    # Dense panels carry float32 columns; partial-row .loc assignment of float64
+    # scaled values must not raise pandas LossySetitemError.
+    out = eng.scale_features(_f32_panel(), ['f'], method='minmax', scope='date')
+    assert out['f'].min() == 0.0 and out['f'].max() == 1.0
+
+
+def test_scale_float32_column_ticker_scope():
+    out = eng.scale_features(_f32_panel(), ['f'], method='minmax', scope='ticker',
+                             train_cutoff=2020)
+    assert out['f'].notna().all()
+
+
 def test_scale_never_touches_reserved_cols():
     df = _panel()
     out = eng.scale_features(df, ['f'], 'minmax', 'date')
