@@ -234,20 +234,22 @@ git commit -m "feat: add tame_columns (clip/log/drop) for heavy-tailed features"
 Append to `tests/test_features_scaling.py`:
 
 ```python
-def test_residual_scale_flags_fires_then_silent_after_clip():
-    rng = np.random.default_rng(1)
-    n = 1000
+def test_residual_scale_flags_fires_on_large_silent_on_small():
     df = pd.DataFrame({
-        'Date': [datetime.date(2020, 1, 1)] * n,
-        'Ticker': [f'T{i}' for i in range(n)],
-        'huge': rng.standard_cauchy(n) * 1e6,
-        'small': rng.uniform(-1, 1, n),
+        'Date': [datetime.date(2020, 1, 1)] * 100,
+        'Ticker': [f'T{i}' for i in range(100)],
+        'huge': np.linspace(-500.0, 1000.0, 100),
+        'small': np.linspace(-1.0, 1.0, 100),
     })
     flags = eng.residual_scale_flags(df, ['huge', 'small'])
-    assert 'huge' in flags and 'small' not in flags
-    clipped = eng.tame_columns(df, ['huge'], 'clip', p=0.01)
-    assert eng.residual_scale_flags(clipped, ['huge', 'small']) == {}
+    assert 'huge' in flags and flags['huge'] > 10
+    assert 'small' not in flags
+    assert eng.residual_scale_flags(df, ['Ticker']) == {}   # reserved never flagged
 ```
+
+(A clip then a *bounded* scale is exercised end-to-end in the Task 4 integration
+test; clipping alone cannot push p99 below the clip cap, so this unit test checks
+the function contract only.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -321,12 +323,12 @@ def _panel_with_fat_col():
 
 def test_split_and_scale_tames_then_scales_with_notes():
     panel = _panel_with_fat_col()
-    scale_cfg = {'method': 'robust', 'scope': 'date',
+    scale_cfg = {'method': 'minmax', 'scope': 'date',
                  'tame_action': 'clip', 'tame_cols': ['roe'], 'tame_p': 0.01}
     out, notes = svc._split_and_scale(panel, scale_cfg, None)
     # detection named the fat column up front
     assert any('roe' in n for n in notes)
-    # after clip + robust-per-date scaling, no residual warning remains
+    # clip + minmax-per-date bounds the column to [0, 1] — no residual warning
     assert not any('still large' in n for n in notes)
     assert out['roe'].abs().quantile(0.99) < 10
 ```
