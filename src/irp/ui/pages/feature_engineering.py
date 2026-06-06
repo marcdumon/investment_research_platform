@@ -46,6 +46,7 @@ _SPLIT_METHOD_OPTIONS = [
     {'label': ' Leave tickers out', 'value': 'ticker'},
 ]
 _TAME_ACTION_OPTIONS = [
+    {'label': ' None', 'value': 'none'},
     {'label': ' Clip', 'value': 'clip'},
     {'label': ' Log', 'value': 'log'},
     {'label': ' Drop column', 'value': 'drop'},
@@ -120,18 +121,27 @@ layout = html.Div(className='page', children=[
     dcc.Loading(html.Div(id='fe-source-status',
                          style={'margin': '6px 0', 'fontSize': '13px', 'color': ACCENT})),
 
-    # ── 2 · Inspect heavy tails ──────────────────────────────────────
-    html.H4('2 · Inspect heavy tails', className='section-title',
+    # ── 2 · Inspect & clean (per column) ─────────────────────────────
+    html.H4('2 · Inspect & clean', className='section-title',
             style={'margin': '16px 0 4px', 'color': ACCENT}),
     html.P('Run Inspect to flag fat-tailed columns. Pick a column to see its worst rows, '
-           'which tickers own the outliers, and its distribution — then decide below.',
+           'which tickers own the outliers, and its distribution; choose an action and '
+           'Apply — the view below updates for THAT column so you confirm the fix, then '
+           'move to the next column. (Run Inspect again to refresh the overview table.)',
            style={'color': MUTED, 'fontSize': '12px', 'margin': '0 0 6px'}),
     html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
         html.Button('Run Inspect', id='fe-inspect', className='run-btn', n_clicks=0),
-        _field('Drill into column', _dd('fe-inspect-col', [], placeholder='column…',
-                                        width='200px', clearable=True)),
     ]),
     dcc.Loading(html.Div(id='fe-summary', style={'margin': '8px 0'})),
+
+    # column workspace: ONE dropdown drives both the drill-down and the cleaning
+    html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
+        _field('Column', _dd('fe-col', [], placeholder='column…', width='200px', clearable=True)),
+        _field('Action', dcc.RadioItems(id='fe-tame-action', options=_TAME_ACTION_OPTIONS,
+                                        value='none', inline=True, labelClassName='check-item')),
+        _field('Clip p', _num('fe-tame-p', '0.01', 0.01, '90px'), wrap_id='fe-f-tame-p'),
+        html.Button('Apply to column', id='fe-tame-add', className='run-btn', n_clicks=0),
+    ]),
     html.Div(style={'display': 'flex', 'gap': '16px', 'flexWrap': 'wrap'}, children=[
         html.Div(style={'flex': '1 1 380px'}, children=[
             html.Label('Worst rows', style={'color': MUTED, 'fontSize': '11px'}),
@@ -142,30 +152,17 @@ layout = html.Div(className='page', children=[
             dcc.Loading(html.Div(id='fe-by-ticker')),
         ]),
     ]),
-    dcc.Loading(dcc.Graph(id='fe-hist', figure=empty_figure('Pick a column to inspect'),
+    dcc.Loading(dcc.Graph(id='fe-hist', figure=empty_figure('Pick a column'),
                           config={'displayModeBar': False})),
 
-    # ── 3 · Tame plan ────────────────────────────────────────────────
-    html.H4('3 · Clean (per-column) + exclude tickers', className='section-title',
-            style={'margin': '16px 0 4px', 'color': ACCENT}),
-    html.P('Add one action per problem column. Clip caps to the [p, 1−p] quantiles '
-           '(fit on the train split); Log = signed-log; Drop removes the column. '
-           'Exclude tickers drops whole tickers from the dataset.',
-           style={'color': MUTED, 'fontSize': '12px', 'margin': '0 0 6px'}),
-    html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
-        _field('Column', _dd('fe-tame-col', [], placeholder='column…', width='180px')),
-        _field('Action', dcc.RadioItems(id='fe-tame-action', options=_TAME_ACTION_OPTIONS,
-                                        value='clip', inline=True, labelClassName='check-item')),
-        _field('Clip p', _num('fe-tame-p', '0.01', 0.01, '90px'), wrap_id='fe-f-tame-p'),
-        html.Button('Add action', id='fe-tame-add', className='run-btn', n_clicks=0),
-        html.Button('Clear', id='fe-tame-clear', className='run-btn', n_clicks=0),
-    ]),
-    html.Div(id='fe-tame-stack', style={'margin': '8px 0', 'maxWidth': '700px'}),
-    html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
+    # cleaning plan (queued actions) + exclude tickers
+    html.Div(className='control-row', style={'alignItems': 'flex-end', 'marginTop': '8px'}, children=[
+        html.Button('Clear plan', id='fe-tame-clear', className='run-btn', n_clicks=0),
         _field('Exclude tickers (comma list)',
                dcc.Input(id='fe-exclude', type='text', placeholder='e.g. BADCO, XYZ',
                          className='filter-input', style={'width': '320px'})),
     ]),
+    html.Div(id='fe-tame-stack', style={'margin': '8px 0', 'maxWidth': '700px'}),
 
     # ── 4 · Scale + split ────────────────────────────────────────────
     html.H4('4 · Scale & split', className='section-title',
@@ -246,8 +243,7 @@ def _cur_frame(src, plan, exclude):
 @callback(
     Output('fe-source-store', 'data'),
     Output('fe-source-status', 'children'),
-    Output('fe-tame-col', 'options'),
-    Output('fe-inspect-col', 'options'),
+    Output('fe-col', 'options'),
     Input('fe-use-last', 'n_clicks'),
     Input('fe-load', 'n_clicks'),
     State('fe-dataset', 'value'),
@@ -259,27 +255,26 @@ def fe_load_source(_last, _load, dataset):
         if trig == 'fe-use-last':
             last = features_service.get_last_build()
             if not last:
-                return None, 'No in-memory build — build one on the Dataset Builder first.', [], []
+                return None, 'No in-memory build — build one on the Dataset Builder first.', []
             df, name = last['df'], 'last build'
         else:
             if not dataset:
-                return None, 'Pick a dataset to load.', [], []
+                return None, 'Pick a dataset to load.', []
             df, name = features_service.load_dataset(dataset), dataset
     except Exception as exc:
         logger.exception('fe load source failed')
-        return None, f'Load failed: {exc}', [], []
+        return None, f'Load failed: {exc}', []
 
     token = str(abs(hash((name, df.shape[0], df.shape[1]))))
     _cache_put(_SRC_CACHE, token, df)
-    num = _numeric_cols(df)
-    opts = [{'label': c, 'value': c} for c in num]
+    opts = [{'label': c, 'value': c} for c in _numeric_cols(df)]
     msg = f'Loaded "{name}": {len(df):,} rows × {df.shape[1]} cols, {df["Ticker"].nunique():,} tickers.'
-    return {'token': token, 'n_rows': len(df), 'n_cols': df.shape[1], 'name': name}, msg, opts, opts
+    return {'token': token, 'n_rows': len(df), 'n_cols': df.shape[1], 'name': name}, msg, opts
 
 
 @callback(
     Output('fe-summary', 'children'),
-    Output('fe-inspect-col', 'value'),
+    Output('fe-col', 'value'),
     Input('fe-inspect', 'n_clicks'),
     State('fe-source-store', 'data'),
     State('fe-tame-store', 'data'),
@@ -289,49 +284,64 @@ def fe_load_source(_last, _load, dataset):
 def fe_run_inspect(_n, src, plan, exclude):
     if not src or src['token'] not in _SRC_CACHE:
         return html.P('Load a dataset first.', className='no-data'), None
-    cur = _cur_frame(src, plan, exclude)   # inspect the CURRENTLY-cleaned dataset
-    rep = features_service.inspect_dataset(cur, with_detail=False)   # overview pass
+    cur = _cur_frame(src, plan, exclude)   # overview of the CURRENTLY-cleaned dataset
+    rep = features_service.inspect_dataset(cur, with_detail=False)
     if rep.summary.empty:
         return html.P('No heavy-tailed columns remain — the dataset looks clean.',
                       className='no-data'), None
     summ = rep.summary[['col', 'n', 'median', 'p1', 'p99', 'min', 'max', 'iqr',
                         'tail_ratio', 'n_outliers', 'worst_ticker']]
-    first = summ.iloc[0]['col']
-    return _table(summ, page_size=15), first
+    return _table(summ, page_size=15), summ.iloc[0]['col']   # auto-drill the worst column
+
+
+def _plan_entry(plan, col):
+    return next((s for s in (plan or []) if s.get('col') == col), None)
 
 
 @callback(
     Output('fe-offenders', 'children'),
     Output('fe-by-ticker', 'children'),
     Output('fe-hist', 'figure'),
-    Input('fe-inspect-col', 'value'),
+    Output('fe-tame-action', 'value'),
+    Output('fe-tame-p', 'value'),
+    Input('fe-col', 'value'),
+    Input('fe-tame-store', 'data'),
     State('fe-source-store', 'data'),
-    State('fe-tame-store', 'data'),
     State('fe-exclude', 'value'),
     prevent_initial_call=True,
 )
-def fe_drilldown(col, src, plan, exclude):
+def fe_workspace(col, plan, src, exclude):
+    """Render ONE column's worst-rows + by-ticker + histogram, reflecting that
+    column's pending action. Updates live on Apply without rebuilding the panel.
+    Also syncs the action/p controls to the column's current plan entry."""
     if not col or not src or src['token'] not in _SRC_CACHE:
         raise PreventUpdate
-    df = _cur_frame(src, plan, exclude)
-    if col not in df.columns:
-        msg = html.P(f'"{col}" was dropped by the current plan.', className='no-data')
-        return msg, msg, empty_figure(f'{col} dropped')
-    rep = features_service.inspect_dataset(df, cols=[col])
-    off = rep.offenders[['Date', 'Ticker', 'value', 'z']] if not rep.offenders.empty else rep.offenders
+    df = _SRC_CACHE[src['token']]
+    entry = _plan_entry(plan, col)
+    action = entry['action'] if entry else 'none'
+    p = entry.get('p', 0.01) if entry else 0.01
+    if entry and entry.get('action') == 'drop':
+        msg = html.P(f'"{col}" is set to DROP — it will be removed at Prepare.',
+                     className='no-data')
+        return msg, msg, empty_figure(f'{col}: dropped'), action, p
+
+    series, rep = features_service.column_preview(
+        df, col, tame_entry=entry, exclude_tickers=_parse_exclude(exclude))
+    off = (rep.offenders[['Date', 'Ticker', 'value', 'z']]
+           if rep is not None and not rep.offenders.empty else pd.DataFrame())
     bt = (rep.by_ticker[['Ticker', 'n_rows', 'n_outliers', 'pct_outliers', 'worst_value']]
-          if not rep.by_ticker.empty else rep.by_ticker)
-    s = pd.to_numeric(df[col], errors='coerce').dropna().to_numpy()
+          if rep is not None and not rep.by_ticker.empty else pd.DataFrame())
+    vals = pd.to_numeric(series, errors='coerce').dropna().to_numpy() if series is not None else np.array([])
     # Bin server-side: send 60 bars, not the full (up to ~12M-row) column to the browser.
-    if s.size:
-        counts, edges = np.histogram(s, bins=60)
+    if vals.size:
+        counts, edges = np.histogram(vals, bins=60)
         centers = (edges[:-1] + edges[1:]) / 2
         fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
     else:
         fig = empty_figure(f'{col}: no numeric values')
-    fig.update_layout(base_chart_layout(title=f'{col} distribution',
-                                        yaxis_title='count', xaxis_title=col))
-    return _table(off, page_size=12), _table(bt, page_size=12), fig
+    title = f'{col} distribution' + (f' (after {action})' if action != 'none' else '')
+    fig.update_layout(base_chart_layout(title=title, yaxis_title='count', xaxis_title=col))
+    return _table(off, page_size=12), _table(bt, page_size=12), fig, action, p
 
 
 # ── tame plan editor ──────────────────────────────────────────────────
@@ -349,7 +359,7 @@ def fe_toggle_tame_p(action):
     Input('fe-tame-add', 'n_clicks'),
     Input('fe-tame-clear', 'n_clicks'),
     Input({'type': 'fe-tame-del', 'index': ALL}, 'n_clicks'),
-    State('fe-tame-col', 'value'),
+    State('fe-col', 'value'),
     State('fe-tame-action', 'value'),
     State('fe-tame-p', 'value'),
     State('fe-tame-store', 'data'),
@@ -364,10 +374,12 @@ def fe_edit_tame(_add, _clear, _dels, col, action, p, plan):
         i = trig['index']
         return [s for j, s in enumerate(plan) if j != i]
     if trig == 'fe-tame-add' and col:
-        step = {'col': col, 'action': action}
-        if action == 'clip':
-            step['p'] = float(p) if p not in (None, '') else 0.01
-        plan = [s for s in plan if s['col'] != col] + [step]   # one action per column
+        plan = [s for s in plan if s['col'] != col]            # one action per column
+        if action and action != 'none':                        # 'none' just clears it
+            step = {'col': col, 'action': action}
+            if action == 'clip':
+                step['p'] = float(p) if p not in (None, '') else 0.01
+            plan = plan + [step]
     return plan
 
 
