@@ -17,7 +17,7 @@ from irp.factors.cache import snapshot as _snapshot
 from irp.factors.registry import all_factors
 from irp.features import engineering as _eng
 from irp.panel.returns import forward_returns_panel as _forward_returns, price_volume_panel as _price_volume
-from irp.query import feature_recipes
+from irp.query import fe_recipes, feature_recipes
 from irp.ui.services import universe_service
 
 logger = logging.getLogger(__name__)
@@ -496,3 +496,21 @@ def save_recipe(name: str, spec: dict) -> None:
 
 def delete_recipe(name: str) -> None:
     feature_recipes.delete_recipe(name)
+
+
+# ── feature-engineering recipe passthroughs ───────────────────────────
+
+def list_fe_recipes() -> pd.DataFrame:
+    return fe_recipes.list_recipes()
+
+
+def load_fe_recipe(name: str) -> dict:
+    return fe_recipes.load_recipe(name)
+
+
+def save_fe_recipe(name: str, spec: dict) -> None:
+    fe_recipes.save_recipe(name, spec)
+
+
+def delete_fe_recipe(name: str) -> None:
+    fe_recipes.delete_recipe(name)
