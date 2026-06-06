@@ -134,13 +134,15 @@ layout = html.Div(className='page', children=[
     ]),
     dcc.Loading(html.Div(id='fe-summary', style={'margin': '8px 0'})),
 
-    # column workspace: ONE dropdown drives both the drill-down and the cleaning
+    # column workspace: select one or MANY columns; the drill-down shows the first
+    # selected, Apply hits every selected column at once.
     html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
-        _field('Column', _dd('fe-col', [], placeholder='column…', width='200px', clearable=True)),
+        _field('Column(s)', _dd('fe-col', [], placeholder='columns…', width='280px',
+                                clearable=True, multi=True)),
         _field('Action', dcc.RadioItems(id='fe-tame-action', options=_TAME_ACTION_OPTIONS,
                                         value='none', inline=True, labelClassName='check-item')),
         _field('Clip p', _num('fe-tame-p', '0.01', 0.01, '90px'), wrap_id='fe-f-tame-p'),
-        html.Button('Apply to column', id='fe-tame-add', className='run-btn', n_clicks=0),
+        html.Button('Apply to selected', id='fe-tame-add', className='run-btn', n_clicks=0),
     ]),
     html.Div(style={'display': 'flex', 'gap': '16px', 'flexWrap': 'wrap'}, children=[
         html.Div(style={'flex': '1 1 380px'}, children=[
@@ -291,7 +293,7 @@ def fe_run_inspect(_n, src, plan, exclude):
                       className='no-data'), None
     summ = rep.summary[['col', 'n', 'median', 'p1', 'p99', 'min', 'max', 'iqr',
                         'tail_ratio', 'n_outliers', 'worst_ticker']]
-    return _table(summ, page_size=15), summ.iloc[0]['col']   # auto-drill the worst column
+    return _table(summ, page_size=15), [summ.iloc[0]['col']]   # auto-drill the worst column
 
 
 def _plan_entry(plan, col):
@@ -310,18 +312,22 @@ def _plan_entry(plan, col):
     State('fe-exclude', 'value'),
     prevent_initial_call=True,
 )
-def fe_workspace(col, plan, src, exclude):
-    """Render ONE column's worst-rows + by-ticker + histogram, reflecting that
-    column's pending action. Updates live on Apply without rebuilding the panel.
-    Also syncs the action/p controls to the column's current plan entry."""
-    if not col or not src or src['token'] not in _SRC_CACHE:
+def fe_workspace(cols, plan, src, exclude):
+    """Drill the FIRST selected column (worst-rows + by-ticker + histogram), reflecting
+    its pending action; updates live on Apply without rebuilding the panel. Syncs the
+    action/p controls to that column's plan entry. Other selected columns share the
+    Apply action but are not individually charted."""
+    cols = cols if isinstance(cols, list) else ([cols] if cols else [])
+    if not cols or not src or src['token'] not in _SRC_CACHE:
         raise PreventUpdate
+    col = cols[0]                                          # the drilled (charted) column
     df = _SRC_CACHE[src['token']]
     entry = _plan_entry(plan, col)
     action = entry['action'] if entry else 'none'
     p = entry.get('p', 0.01) if entry else 0.01
+    suffix = f'  (+{len(cols) - 1} more selected)' if len(cols) > 1 else ''
     if entry and entry.get('action') == 'drop':
-        msg = html.P(f'"{col}" is set to DROP — it will be removed at Prepare.',
+        msg = html.P(f'"{col}" is set to DROP — it will be removed at Prepare.{suffix}',
                      className='no-data')
         return msg, msg, empty_figure(f'{col}: dropped'), action, p
 
@@ -339,7 +345,7 @@ def fe_workspace(col, plan, src, exclude):
         fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
     else:
         fig = empty_figure(f'{col}: no numeric values')
-    title = f'{col} distribution' + (f' (after {action})' if action != 'none' else '')
+    title = f'{col} distribution' + (f' (after {action})' if action != 'none' else '') + suffix
     fig.update_layout(base_chart_layout(title=title, yaxis_title='count', xaxis_title=col))
     return _table(off, page_size=12), _table(bt, page_size=12), fig, action, p
 
@@ -365,7 +371,7 @@ def fe_toggle_tame_p(action):
     State('fe-tame-store', 'data'),
     prevent_initial_call=True,
 )
-def fe_edit_tame(_add, _clear, _dels, col, action, p, plan):
+def fe_edit_tame(_add, _clear, _dels, cols, action, p, plan):
     plan = plan or []
     trig = ctx.triggered_id
     if trig == 'fe-tame-clear':
@@ -373,13 +379,16 @@ def fe_edit_tame(_add, _clear, _dels, col, action, p, plan):
     if isinstance(trig, dict) and trig.get('type') == 'fe-tame-del':
         i = trig['index']
         return [s for j, s in enumerate(plan) if j != i]
-    if trig == 'fe-tame-add' and col:
-        plan = [s for s in plan if s['col'] != col]            # one action per column
-        if action and action != 'none':                        # 'none' just clears it
-            step = {'col': col, 'action': action}
-            if action == 'clip':
-                step['p'] = float(p) if p not in (None, '') else 0.01
-            plan = plan + [step]
+    if trig == 'fe-tame-add' and cols:
+        cols = cols if isinstance(cols, list) else [cols]
+        plan = [s for s in plan if s['col'] not in cols]       # one action per column
+        if action and action != 'none':                        # 'none' just clears them
+            pval = float(p) if p not in (None, '') else 0.01
+            for c in cols:
+                step = {'col': c, 'action': action}
+                if action == 'clip':
+                    step['p'] = pval
+                plan = plan + [step]
     return plan
 
 
