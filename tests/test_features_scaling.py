@@ -164,3 +164,45 @@ def test_detect_heavy_tailed_flags_fat_ignores_bounded_and_constant():
     assert 'fat' in flagged
     assert 'bounded' not in flagged
     assert 'const' not in flagged
+
+
+def _tame_panel():
+    """2 dates × 3 tickers; 'f' has a big outlier on the later (test) date."""
+    rows = []
+    for y, vals in ((2018, [1.0, 2.0, 3.0]), (2020, [4.0, 5.0, 1000.0])):
+        d = datetime.date(y, 12, 31)
+        for tk, v in zip(['A', 'B', 'C'], vals):
+            rows.append({'Date': d, 'Ticker': tk, 'f': v, 'fwd_ret': 0.0, 'label': 0})
+    return pd.DataFrame(rows)
+
+
+def test_tame_clip_fits_on_train_no_leak():
+    df = _tame_panel()
+    train_mask = pd.to_datetime(df['Date']).dt.year <= 2018   # 2018 rows only
+    out = eng.tame_columns(df, ['f'], 'clip', p=0.0, train_mask=train_mask)
+    # train (2018) max is 3.0 -> cap is 3.0; the 1000.0 test outlier clips to 3.0
+    assert out['f'].max() == 3.0
+    # perturbing the test outlier higher must not move the (train-fit) cap
+    df2 = df.copy()
+    df2.loc[df2['f'] == 1000.0, 'f'] = 1e9
+    out2 = eng.tame_columns(df2, ['f'], 'clip', p=0.0, train_mask=train_mask)
+    assert out2['f'].max() == 3.0
+
+
+def test_tame_log_applies_signed_log():
+    df = _tame_panel()
+    out = eng.tame_columns(df, ['f'], 'log')
+    assert np.isclose(out.loc[out['f'].idxmax(), 'f'], np.log1p(1000.0))
+
+
+def test_tame_drop_removes_col_never_reserved():
+    df = _tame_panel()
+    out = eng.tame_columns(df, ['f', 'label'], 'drop')   # 'label' is reserved
+    assert 'f' not in out.columns
+    assert 'label' in out.columns                        # reserved never dropped
+
+
+def test_tame_none_or_empty_is_noop():
+    df = _tame_panel()
+    assert eng.tame_columns(df, [], 'clip').equals(df)
+    assert eng.tame_columns(df, ['f'], 'none').equals(df)
