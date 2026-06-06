@@ -2,11 +2,11 @@ from typing import Literal
 
 import pandas as pd
 
+from irp.checks.edgar import filing_url
+from irp.checks.simfin_reviews import load_reviews, period_str
+from irp.checks.simfin_rules import REGISTRY
 from irp.core.db import db
 from irp.query.simfin import fundamentals
-from irp.checks.edgar import filing_url
-from irp.checks.simfin_reviews import load_reviews, _period_str as period_str
-from irp.checks.simfin_rules import REGISTRY
 
 _KEY = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period']
 
@@ -52,14 +52,14 @@ def _run(
 
     df['Period_str'] = [
         period_str(int(fy), str(fp), str(p))
-        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'], strict=False)
     ]
 
     if skip_reviewed:
         reviewed = load_reviews()
         mask = [
             (t, ps, r) not in reviewed
-            for t, ps, r in zip(df['Ticker'], df['Period_str'], df['Rule'])
+            for t, ps, r in zip(df['Ticker'], df['Period_str'], df['Rule'], strict=False)
         ]
         df = df[mask].reset_index(drop=True)
         if df.empty:
@@ -77,7 +77,7 @@ def _run(
                 rdate.strftime('%Y-%m-%d') if pd.notna(rdate) else None,
                 str(p),
             )
-            for c, rdate, p in zip(df['CIK'], df['Report Date'], df['Period'])
+            for c, rdate, p in zip(df['CIK'], df['Report Date'], df['Period'], strict=False)
         ]
     else:
         df['EDGAR'] = None

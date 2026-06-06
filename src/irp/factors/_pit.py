@@ -16,8 +16,12 @@ import datetime
 import pandas as pd
 
 from irp.factors._cols import (
-    PRICE_CLOSE, PRICE_DATE, PRICE_TICKER,
-    PUBLISH_DATE, REPORT_DATE, TICKER,
+    PRICE_CLOSE,
+    PRICE_DATE,
+    PRICE_TICKER,
+    PUBLISH_DATE,
+    REPORT_DATE,
+    TICKER,
 )
 
 

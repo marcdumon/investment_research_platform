@@ -152,6 +152,7 @@ def refresh(universe_csv: Path | None = None) -> int:
 
 def _main() -> None:
     import time
+
     from irp.core.logging import configure_logging
     configure_logging()
     print('Refreshing universe table...')

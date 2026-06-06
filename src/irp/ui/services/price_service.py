@@ -10,9 +10,7 @@ All getters return well-typed pandas DataFrames; never None.
 import pandas as pd
 
 from irp.query.stooq import prices as _stooq_prices
-from irp.query.yahoo import dividends as _divs
-from irp.query.yahoo import prices as _yahoo_prices
-from irp.query.yahoo import splits as _splits
+from irp.query.yahoo import dividends as _divs, prices as _yahoo_prices, splits as _splits
 
 PRICE_COLS = ('Date', 'Open', 'High', 'Low', 'Close', 'Volume')
 

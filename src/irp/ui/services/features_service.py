@@ -15,8 +15,7 @@ from irp.core.config import config
 from irp.factors.cache import snapshot as _snapshot
 from irp.factors.registry import all_factors
 from irp.features import engineering as _eng
-from irp.panel.returns import forward_returns_panel as _forward_returns
-from irp.panel.returns import price_volume_panel as _price_volume
+from irp.panel.returns import forward_returns_panel as _forward_returns, price_volume_panel as _price_volume
 from irp.ui.services import universe_service
 
 logger = logging.getLogger(__name__)

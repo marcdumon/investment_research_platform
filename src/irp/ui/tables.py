@@ -4,8 +4,8 @@ Centralises numeric column formatting (currency, percent, fixed) used by
 both `/factors` and `/screener`, plus the html.Table boilerplate that
 `/ticker` uses for income/balance/cashflow statements.
 """
+from collections.abc import Sequence
 from math import isfinite
-from typing import Sequence
 
 import pandas as pd
 from dash import html

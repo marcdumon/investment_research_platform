@@ -7,8 +7,7 @@ from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
 from irp.core import cancel as _cancel
-from irp.core.logging import LEVEL_COLORS_HEX as _LEVEL_COLORS
-from irp.core.logging import LOG_DATEFMT, LOG_FMT
+from irp.core.logging import LEVEL_COLORS_HEX as _LEVEL_COLORS, LOG_DATEFMT, LOG_FMT
 from irp.ui import log_handler as lh
 
 logger = logging.getLogger(__name__)
@@ -316,8 +315,9 @@ def _run_pipeline(
         logger.info(f'factor cache cleared ({n} snapshot{"s" if n != 1 else ""} removed)')
 
     if 'rebuild-factor-cache' in steps and not cancelled():
-        from irp.factors.cache import precompute_all
         import datetime as _dt
+
+        from irp.factors.cache import precompute_all
         logger.info('-- rebuild factor cache --')
         n = precompute_all(
             start_date=_dt.date(1991, 1, 1),

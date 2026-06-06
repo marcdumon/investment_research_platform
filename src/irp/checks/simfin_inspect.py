@@ -2,8 +2,8 @@ from typing import Literal, cast
 
 import pandas as pd
 
-from irp.query.simfin import fundamentals, SimFinStatement
 from irp.checks.simfin_rules import REGISTRY
+from irp.query.simfin import SimFinStatement, fundamentals
 
 _BASE = ['Ticker', 'Fiscal Year', 'Fiscal Period', 'Period', 'Report Date']
 

@@ -5,14 +5,14 @@ All inputs must already be PIT-aligned (one row per ticker). No DB access.
 import pandas as pd
 
 from irp.factors._cols import (
-    TICKER,
-    OPERATING_INCOME,
-    INTEREST_EXPENSE,
-    TOTAL_EQUITY,
     CASH_AND_ST_INVESTMENTS,
-    SHORT_TERM_DEBT,
-    LONG_TERM_DEBT,
     DA,
+    INTEREST_EXPENSE,
+    LONG_TERM_DEBT,
+    OPERATING_INCOME,
+    SHORT_TERM_DEBT,
+    TICKER,
+    TOTAL_EQUITY,
 )
 from irp.factors._utils import safe_div
 from irp.factors.registry import register

@@ -1,9 +1,9 @@
 """Stooq anomaly runner. Mirrors irp.checks.simfin_runner."""
 import pandas as pd
 
-from irp.core.db import db
 from irp.checks.stooq_reviews import load_reviews
 from irp.checks.stooq_rules import REGISTRY
+from irp.core.db import db
 
 
 def _run(skip_reviewed: bool = True) -> pd.DataFrame:
@@ -41,7 +41,7 @@ def _run(skip_reviewed: bool = True) -> pd.DataFrame:
         if reviewed:
             mask = [
                 (t, p, r) not in reviewed
-                for t, p, r in zip(df['Ticker'], df['Period_str'], df['Rule'])
+                for t, p, r in zip(df['Ticker'], df['Period_str'], df['Rule'], strict=False)
             ]
             df = df[mask]
     return df.sort_values('count', ascending=False).reset_index(drop=True)

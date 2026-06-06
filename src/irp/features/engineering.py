@@ -320,7 +320,7 @@ def normalize_step(
     for _, idx in out.groupby('Date', sort=False).groups.items():
         block = out.loc[idx]
         normed = _apply(block)
-        for src, dst in zip(cols, new_cols):
+        for src, dst in zip(cols, new_cols, strict=False):
             out.loc[idx, dst] = normed[src].to_numpy()
     return out
 

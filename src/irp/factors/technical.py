@@ -11,8 +11,8 @@ TaSpec.fn is the canonical implementation (TA-Lib). It is used by:
   - _ta_snapshots() fallback when ta_panel.parquet is missing.
 """
 import datetime
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -20,7 +20,6 @@ import talib
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
 from irp.factors.registry import register
-
 
 # ---------------------------------------------------------------------------
 # TaSpec

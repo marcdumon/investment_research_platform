@@ -8,8 +8,8 @@ Year is the calendar year of the offending bars; count is the number of
 bad bars in that year; sample_dates lists the first ~5 offending dates
 (YYYYMMDD ints) for the inspector chart.
 """
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import duckdb
 import pandas as pd

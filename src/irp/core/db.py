@@ -9,10 +9,10 @@ access.
 write_session() clears the gate (so db() callers block), then retries
 duckdb.connect until in-flight read-only connections have been released.
 """
-import time
 import threading
+import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 import duckdb
 
@@ -35,7 +35,7 @@ def _db_close() -> None:
 
 
 @contextmanager
-def write_session() -> Generator[duckdb.DuckDBPyConnection, None, None]:
+def write_session() -> Generator[duckdb.DuckDBPyConnection]:
     """Exclusive write connection.
 
     Blocks new db() callers, then retries until all in-flight read-only
@@ -56,6 +56,7 @@ def write_session() -> Generator[duckdb.DuckDBPyConnection, None, None]:
                     raise
                 log.debug('write_session: waiting for read locks to release (attempt %d)', attempt + 1)
                 time.sleep(0.25)
+        assert con is not None  # loop either set con via break or re-raised on the last attempt
         try:
             yield con
         finally:

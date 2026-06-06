@@ -12,8 +12,7 @@ from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
 from irp.factors.registry import all_factors
-from irp.ui.charts import corr_heatmap_figure as _heatmap_figure
-from irp.ui.charts import empty_figure
+from irp.ui.charts import corr_heatmap_figure as _heatmap_figure, empty_figure
 from irp.ui.services import factors_service, universe_service, watchlist_service
 from irp.ui.theme import ACCENT
 

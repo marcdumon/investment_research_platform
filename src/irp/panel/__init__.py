@@ -11,14 +11,14 @@ Public API:
     cross_section_panel(...)          # factor cross-section at a date
 """
 from irp.panel.build import build_panels
+from irp.panel.cross_section import cross_section_panel
 from irp.panel.load import (
-    load_prices_wide,
-    load_fundamentals,
-    panel_root,
     clear_cache,
+    load_fundamentals,
+    load_prices_wide,
+    panel_root,
 )
 from irp.panel.returns import forward_returns_panel
-from irp.panel.cross_section import cross_section_panel
 
 __all__ = [
     'build_panels',

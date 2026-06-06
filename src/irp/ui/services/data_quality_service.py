@@ -1,12 +1,14 @@
 """Thin wrappers over irp.checks.* for the data quality UI page."""
 import pandas as pd
 
-from irp.checks import simfin_annotations as _sfr
-from irp.checks import stooq_reviews as _str
-from irp.checks import simfin_runner as _sf_run
-from irp.checks import stooq_runner as _stq_run
-from irp.checks import stooq_inspect as _stq_inspect
-from irp.checks import simfin_inspect as _sf_inspect
+from irp.checks import (
+    simfin_annotations as _sfr,
+    simfin_inspect as _sf_inspect,
+    simfin_runner as _sf_run,
+    stooq_inspect as _stq_inspect,
+    stooq_reviews as _str,
+    stooq_runner as _stq_run,
+)
 from irp.ui.services import universe_service
 
 
@@ -40,7 +42,6 @@ def _fetch_edgar_url(cik: int | None, report_date: str | None, period: str) -> s
 
 
 def _inspect_simfin(rule: str, ticker: str, fy: int, fp: str, period: str) -> pd.DataFrame:
-    from typing import Literal
     return _sf_inspect._inspect(rule, ticker, fy, fp, period)  # type: ignore[arg-type]
 
 
@@ -50,7 +51,6 @@ def _flagged_bars(ticker: str, sample_dates: list) -> pd.DataFrame:
 
 def _stooq_figure(rule: str, ticker: str, period_str: str, sample_dates: list):
     """Plotly figure from stooq_inspect.inspect, or None."""
-    import plotly.graph_objects as go
     fig = _stq_inspect._inspect(rule, ticker, period_str, [int(d) for d in sample_dates])
     return fig
 

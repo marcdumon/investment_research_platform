@@ -20,8 +20,8 @@ import pandas as pd
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from irp.panel.load import load_prices_wide, load_fundamentals, load_ta_panel
-from irp.panel.pit import _pit_latest, _pit_ttm, _pit_price_row, _pit_price_at_offset
+from irp.panel.load import load_fundamentals, load_prices_wide, load_ta_panel
+from irp.panel.pit import _pit_latest, _pit_price_at_offset, _pit_price_row, _pit_ttm
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,7 @@ def _window_stats(
     with np.errstate(invalid='ignore', divide='ignore'):
         ma200 = np.where(counts >= 200, sums / counts, np.nan)
 
-    return dict(zip(panel.tickers, vol)), dict(zip(panel.tickers, ma200))
+    return dict(zip(panel.tickers, vol, strict=False)), dict(zip(panel.tickers, ma200, strict=False))
 
 
 def _ta_snapshots(as_of: datetime.date) -> dict[str, dict[str, float]]:
