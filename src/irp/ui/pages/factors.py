@@ -8,16 +8,13 @@ from typing import Any, Literal
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
-from dash import dash_table as _dt
+from dash import Input, Output, State, callback, dash_table as _dt, dcc, html
 from dash.exceptions import PreventUpdate
 
-from irp.ui.charts import base_chart_layout
-from irp.ui.charts import empty_figure
+from irp.ui.charts import base_chart_layout, empty_figure
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import factors_service, universe_service, watchlist_service
-from irp.ui.tables import column_format as _col_fmt
-from irp.ui.tables import format_factor_value as _fmt
+from irp.ui.tables import column_format as _col_fmt, format_factor_value as _fmt
 from irp.ui.theme import ACCENT, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')

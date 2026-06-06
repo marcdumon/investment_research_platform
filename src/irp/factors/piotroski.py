@@ -30,7 +30,7 @@ from irp.factors._cols import (
     TOTAL_CURRENT_ASSETS,
     TOTAL_CURRENT_LIABILITIES,
 )
-from irp.factors._pit import pit_latest, _pit_ttm
+from irp.factors._pit import _pit_ttm, pit_latest
 from irp.factors._utils import safe_div
 from irp.factors.registry import register
 

@@ -110,8 +110,5 @@ def fmt_price_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def date_range_for_preset(preset: str) -> tuple[str, str]:
     today = date.today()
-    if preset in _PRESET_DAYS:
-        start = today - timedelta(days=_PRESET_DAYS[preset])
-    else:
-        start = date(1900, 1, 1)
+    start = today - timedelta(days=_PRESET_DAYS[preset]) if preset in _PRESET_DAYS else date(1900, 1, 1)
     return start.isoformat(), today.isoformat()

@@ -10,8 +10,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from irp.factors import cross_section as _cross_section
-from irp.factors import ticker_factor_history as _ticker_factor_history
+from irp.factors import cross_section as _cross_section, ticker_factor_history as _ticker_factor_history
 from irp.panel.load import load_prices_wide
 from irp.ui.services import universe_service
 

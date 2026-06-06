@@ -8,7 +8,6 @@ Logic:
 """
 import datetime
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 def forward_returns_panel(
     rebalance_dates: list[datetime.date],
     horizon_days: int,
-    tickers: Optional[list[str]] = None,
+    tickers: list[str] | None = None,
 ) -> pd.DataFrame:
     """Compute per-ticker forward log returns at each rebalance date.
 
@@ -73,7 +72,7 @@ def forward_returns_panel(
 
 def price_volume_panel(
     rebalance_dates: list[datetime.date],
-    tickers: Optional[list[str]] = None,
+    tickers: list[str] | None = None,
 ) -> pd.DataFrame:
     """PIT close + volume per ticker at each rebalance date.
 
@@ -87,10 +86,7 @@ def price_volume_panel(
     close = load_prices_wide('Close')
     vol = load_prices_wide('Volume')
 
-    if tickers is not None:
-        tick_arr = np.array([t for t in tickers if t in close.ticker_to_idx])
-    else:
-        tick_arr = close.tickers
+    tick_arr = np.array([t for t in tickers if t in close.ticker_to_idx]) if tickers is not None else close.tickers
     if len(tick_arr) == 0:
         return pd.DataFrame(columns=['Date', 'Ticker', 'close', 'volume'])
 

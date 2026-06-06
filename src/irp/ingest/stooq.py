@@ -2,10 +2,10 @@ import csv
 import logging
 import shutil
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Literal
 
 import duckdb
 import pandas as pd

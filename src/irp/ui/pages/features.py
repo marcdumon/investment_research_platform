@@ -13,8 +13,7 @@ from typing import Any
 
 import dash
 import pandas as pd
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html
-from dash import dash_table as _dt
+from dash import ALL, Input, Output, State, callback, ctx, dash_table as _dt, dcc, html
 from dash.exceptions import PreventUpdate
 
 from irp.factors.registry import all_factors
@@ -522,7 +521,7 @@ def mutate_steps(add_n, pack_n, clear_n, del_clicks, recipe_name, op, col_a, col
         try:
             spec = features_service.load_recipe(recipe_name)
         except KeyError:
-            raise PreventUpdate
+            raise PreventUpdate from None
         return spec.get('steps', [])
 
     if trig == 'feat-clear-steps':
@@ -819,7 +818,7 @@ def load_recipe_controls(name):
     try:
         s = features_service.load_recipe(name)
     except KeyError:
-        raise PreventUpdate
+        raise PreventUpdate from None
     lbl = s.get('label', {})
     f = s.get('filters', {})
     sc = s.get('scale', {})

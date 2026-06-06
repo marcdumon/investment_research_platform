@@ -1,16 +1,16 @@
+import contextlib
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any, Callable
+from typing import Any
 
 import dash
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from dash import ALL, Input, Output, State, callback, dcc, html
-from dash import dash_table as _dt
+from dash import ALL, Input, Output, State, callback, dash_table as _dt, dcc, html
 from dash.exceptions import PreventUpdate
-from plotly.basedatatypes import BaseTraceType
 from plotly.subplots import make_subplots
 
 from irp.ui.services import price_service, universe_service
@@ -29,8 +29,8 @@ from irp.ui.ticker_fmt import (
     fmt_cell,
     fmt_price_table,
     fmt_statement,
-    is_per_share,
     is_pct_item,
+    is_per_share,
 )
 
 logger = logging.getLogger(__name__)
@@ -963,10 +963,8 @@ def _edgar_period_strip(ticker: str, name: str, period_cols: list) -> html.Div:
         variant = 'A' if (p_str.endswith('FY') or p_str.endswith('Q4')) else 'Q'
         url = None
         if cik and rd:
-            try:
+            with contextlib.suppress(Exception):
                 url = filing_url(cik, rd, variant)
-            except Exception:
-                pass
         chips.append(
             html.A(p_str, href=url or '#', target='_blank',
                    style={'pointerEvents': 'none' if not url else 'auto',
@@ -1081,7 +1079,7 @@ def _raw_filings(ticker: str, stmt_kind: str, variant: str) -> pd.DataFrame:
     df.loc[df['Period'] == 'A', 'Fiscal Period'] = 'FY'
     df['_period'] = [
         f'{int(fy)}FY' if p == 'A' else f'{int(fy)}{fp}'
-        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'], strict=False)
     ]
     return df
 
@@ -1274,7 +1272,7 @@ def store_restatement_period(_n: list) -> str | None:
     try:
         return _json.loads(triggered_id)['index']
     except (ValueError, KeyError):
-        raise PreventUpdate
+        raise PreventUpdate from None
 
 
 @callback(

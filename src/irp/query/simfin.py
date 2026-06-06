@@ -86,7 +86,7 @@ def statement(
         keys = {(fy, fp, v) for fy, fp, v in parsed}
         mask = [
             (int(fy), str(fp), str(p)) in keys
-            for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+            for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'], strict=False)
         ]
         df = df[mask]
     if df.empty:
@@ -95,11 +95,11 @@ def statement(
     df = df.copy()
     df['_period'] = [
         f'{int(fy)}FY' if p == 'A' else f'{int(fy)}{fp}'
-        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'], strict=False)
     ]
     df['_sort'] = [
         (-int(fy), _FP_ORDER.get(str(fp), 99))
-        for fy, fp in zip(df['Fiscal Year'], df['Fiscal Period'])
+        for fy, fp in zip(df['Fiscal Year'], df['Fiscal Period'], strict=False)
     ]
     df = df.sort_values('_sort').drop(columns=['_sort'])
     df = df.drop_duplicates('_period', keep='first')

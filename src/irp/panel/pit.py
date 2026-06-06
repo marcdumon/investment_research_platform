@@ -3,7 +3,7 @@
 Mirrors the semantics of `irp.factors._pit` but operates on the panel parquets.
 """
 import datetime
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import polars as pl
@@ -51,7 +51,7 @@ def _pit_price_row(panel: PricePanel, as_of: datetime.date) -> dict[str, float]:
     if i < 0:
         return {}
     row = panel.values[i]
-    return {t: float(v) for t, v in zip(panel.tickers, row) if np.isfinite(v)}
+    return {t: float(v) for t, v in zip(panel.tickers, row, strict=False) if np.isfinite(v)}
 
 
 def _pit_price_at_offset(

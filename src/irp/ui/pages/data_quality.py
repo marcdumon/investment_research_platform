@@ -1,4 +1,5 @@
 """Data quality review page: fundamental + price anomaly triage."""
+import contextlib
 import logging
 import re
 
@@ -11,8 +12,7 @@ from dash.exceptions import PreventUpdate
 import irp.checks.simfin_rules as _simfin_rules
 import irp.checks.stooq_rules as _stooq_rules
 from irp.ui.charts import base_chart_layout as _chart_layout, empty_figure
-from irp.ui.services import data_quality_service as dq
-from irp.ui.services import universe_service as _uv
+from irp.ui.services import data_quality_service as dq, universe_service as _uv
 from irp.ui.theme import ACCENT, MUTED
 
 dash.register_page(__name__, path='/data-quality', name='Data Quality')
@@ -764,7 +764,7 @@ def run_simfin(n: int, variant: str, inc_reviewed: list):
     skip = 'yes' not in (inc_reviewed or [])
     try:
         df = dq._run_simfin(skip_reviewed=skip, variant=variant or 'A')
-    except Exception as exc:
+    except Exception:
         logger.exception('simfin run error')
         return None
     return [] if df.empty else df.to_dict('records')
@@ -945,7 +945,7 @@ def save_edgar_annotations(n, sel, kind, rule, status, review_note,
     edgar_values: dict[str, float] = {}
     simfin_values: dict[str, float] = {}
     line_notes: dict[str, str] = {}
-    for item, raw, note_raw in zip(items, input_values or [], note_values or []):
+    for item, raw, note_raw in zip(items, input_values or [], note_values or [], strict=False):
         if raw and str(raw).strip():
             try:
                 edgar_values[item] = float(str(raw).replace(',', '').strip()) * unit
@@ -953,10 +953,8 @@ def save_edgar_annotations(n, sel, kind, rule, status, review_note,
                 continue
         sf = (corrections_store or {}).get(item)
         if sf is not None:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 simfin_values[item] = float(sf)
-            except (TypeError, ValueError):
-                pass
         if note_raw and str(note_raw).strip():
             line_notes[item] = str(note_raw).strip()
     try:
@@ -1081,7 +1079,7 @@ def run_stooq(n: int, inc_reviewed: list):
     skip = 'yes' not in (inc_reviewed or [])
     try:
         df = dq._run_stooq(skip_reviewed=skip)
-    except Exception as exc:
+    except Exception:
         logger.exception('stooq run error')
         return None
     return [] if df.empty else df.to_dict('records')
@@ -1539,7 +1537,7 @@ def save_manual_annotations(n, sel, kind, corrections_store, input_values, note_
     edgar_values: dict[str, float] = {}
     simfin_values: dict[str, float] = {}
     notes: dict[str, str] = {}
-    for item, raw, note_raw in zip(items, input_values, note_values or []):
+    for item, raw, note_raw in zip(items, input_values, note_values or [], strict=False):
         if raw and str(raw).strip():
             try:
                 edgar_values[item] = float(str(raw).replace(',', '').strip()) * unit
@@ -1547,10 +1545,8 @@ def save_manual_annotations(n, sel, kind, corrections_store, input_values, note_
                 continue
         sf = corrections_store.get(item)
         if sf is not None:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 simfin_values[item] = float(sf)
-            except (TypeError, ValueError):
-                pass
         if note_raw and str(note_raw).strip():
             notes[item] = str(note_raw).strip()
     if not edgar_values:

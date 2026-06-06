@@ -13,8 +13,7 @@ from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
 from irp.features.composite import PRESETS
-from irp.ui.charts import base_chart_layout as _chart_layout
-from irp.ui.charts import empty_figure
+from irp.ui.charts import base_chart_layout as _chart_layout, empty_figure
 from irp.ui.factor_meta import FACTOR_OPTIONS
 from irp.ui.services import backtest_service, universe_service, watchlist_service
 from irp.ui.theme import ACCENT, MUTED
@@ -572,7 +571,7 @@ def run_bt(
                         'date': pd.Timestamp(d).isoformat(),
                         'v': None if (isinstance(v, float) and isnan(v)) else float(v),
                     }
-                    for d, v in zip(ser_or_df.index, ser_or_df.values)
+                    for d, v in zip(ser_or_df.index, ser_or_df.values, strict=False)
                 ]
             df = ser_or_df.reset_index()
             df.columns = ['date'] + list(df.columns[1:])
@@ -614,7 +613,7 @@ def run_bt(
         ls = result.get('ls_cumret', pd.Series(dtype=float))
         ls_records = []
         if not ls.empty:
-            for d, v in zip(ls.index, ls.values):
+            for d, v in zip(ls.index, ls.values, strict=False):
                 ls_records.append({'date': pd.Timestamp(d).isoformat(), 'v': _safe(v)})
 
         # Annualized L/S return from Q1 and Q5 annualized returns
@@ -627,7 +626,7 @@ def run_bt(
         return {
             'ic': [
                 {'date': d.isoformat(), 'ic': _safe(v)}
-                for d, v in zip(ic.index, ic.values)
+                for d, v in zip(ic.index, ic.values, strict=False)
             ],
             'qcr': _ser_cumret(result['quintile_cumret']),
             'qcr_net': _ser_cumret(result.get('quintile_cumret_net')),
@@ -635,7 +634,7 @@ def run_bt(
                 {'date': pd.Timestamp(d).isoformat(), 'ew': _safe(v)}
                 for d, v in zip(
                     result.get('ew_cumret', pd.Series()).index,
-                    result.get('ew_cumret', pd.Series()).values,
+                    result.get('ew_cumret', pd.Series()).values, strict=False,
                 )
             ],
             'ls': ls_records,

@@ -9,9 +9,7 @@ from typing import Literal
 
 import pandas as pd
 
-from irp.query.simfin import companies as _companies
-from irp.query.simfin import sector_map as _sector_map
-from irp.query.simfin import statement as _statement
+from irp.query.simfin import companies as _companies, sector_map as _sector_map, statement as _statement
 from irp.query.universe import universe as _universe
 from irp.ui.services.watchlist_service import load_watchlist
 
@@ -60,7 +58,7 @@ def _get_period_report_dates(ticker: str, kind: Literal['income', 'balance', 'ca
     df.loc[df['Period'] == 'A', 'Fiscal Period'] = 'FY'
     df['_period'] = [
         f'{int(fy)}FY' if p == 'A' else f'{int(fy)}{fp}'
-        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'])
+        for fy, fp, p in zip(df['Fiscal Year'], df['Fiscal Period'], df['Period'], strict=False)
     ]
     df = df.drop_duplicates('_period', keep='first')
     return {

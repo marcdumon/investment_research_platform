@@ -61,7 +61,7 @@ def _load_yahoo_tickers() -> dict[str, str]:
             'uv run irp -> Steps -> seed-universe, universe'
         )
         raise
-    return dict(zip(df['Ticker'], df['yahoo_ticker']))
+    return dict(zip(df['Ticker'], df['yahoo_ticker'], strict=False))
 
 
 def _load_last_prices_dates() -> dict[str, date]:

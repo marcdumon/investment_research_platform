@@ -19,15 +19,15 @@ import pandas as pd
 
 from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE
-from irp.factors._pit import pit_latest, pit_price, _pit_ttm
+from irp.factors._pit import _pit_ttm, pit_latest, pit_price
 from irp.factors.momentum import compute_momentum
-from irp.factors.technical import compute_technical
 from irp.factors.orchestrate import (
     run_backtest,
     run_composite_backtest,
     run_factor_decay,
 )
 from irp.factors.profitability import compute_profitability
+from irp.factors.technical import compute_technical
 from irp.factors.valuation import compute_valuation
 from irp.panel import cross_section_panel
 from irp.query.simfin import fundamentals

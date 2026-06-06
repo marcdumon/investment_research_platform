@@ -206,6 +206,7 @@ def refresh() -> int:
 
 def _main() -> None:
     import time
+
     from irp.core.logging import configure_logging
     configure_logging()
     print('Refreshing data catalog...')

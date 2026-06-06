@@ -109,7 +109,7 @@ def _search_submissions(cik: int, target, forms: set[str], tol_days: int) -> tup
         recent.get('form', []),
         recent.get('accessionNumber', []),
         recent.get('primaryDocument', []),
-        recent.get('reportDate', []),
+        recent.get('reportDate', []), strict=False,
     ))
     best = None
     best_delta = tol_days + 1

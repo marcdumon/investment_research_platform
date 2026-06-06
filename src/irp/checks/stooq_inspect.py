@@ -118,7 +118,7 @@ def _staleness_scan(
         stooq_df = _stooq_close_at(trade_date, lower_pats)
         if stooq_df.empty:
             continue
-        stooq_map = dict(zip(stooq_df['Ticker'], stooq_df['Stooq_C']))
+        stooq_map = dict(zip(stooq_df['Ticker'], stooq_df['Stooq_C'], strict=False))
         batch_tickers = [
             t for t in stooq_df['Ticker'].tolist()
             if t not in known_errors and (t, yr) not in checked
@@ -163,7 +163,7 @@ def _load_checked_pairs(results_file: Path, skip_scanned: bool) -> tuple[set[tup
     if not skip_scanned:
         return set(), True
     return (
-        {(t, int(y)) for t, y in zip(existing['Ticker'], existing['Years_back'])},
+        {(t, int(y)) for t, y in zip(existing['Ticker'], existing['Years_back'], strict=False)},
         True,
     )
 

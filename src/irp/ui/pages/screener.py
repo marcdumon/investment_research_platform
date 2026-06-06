@@ -2,6 +2,7 @@
 and inline per-ticker detail panel (prices, fundamentals, factor history).
 """
 
+import contextlib
 import datetime
 import logging
 from math import isfinite
@@ -12,17 +13,18 @@ import numpy as np
 import pandas as pd
 import plotly.colors as pc
 import plotly.graph_objects as go
-from dash import ALL, Input, Output, State, callback, ctx, dcc, html
-from dash import dash_table as _dt
+from dash import ALL, Input, Output, State, callback, ctx, dash_table as _dt, dcc, html
 from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
 from irp.factors.registry import all_factors
-from irp.ui.charts import base_chart_layout as _chart_layout
-from irp.ui.charts import corr_heatmap_figure as _corr_heatmap
-from irp.ui.charts import empty_figure
-from irp.ui.charts import scatter_chart_layout as _base_layout
+from irp.ui.charts import (
+    base_chart_layout as _chart_layout,
+    corr_heatmap_figure as _corr_heatmap,
+    empty_figure,
+    scatter_chart_layout as _base_layout,
+)
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import (
     factors_service,
@@ -31,7 +33,6 @@ from irp.ui.services import (
     watchlist_service,
 )
 from irp.ui.tables import column_format as _col_fmt
-from irp.ui.ticker_fmt import date_range_for_preset, fmt_statement
 from irp.ui.theme import (
     ACCENT,
     DIV_COLOR,
@@ -41,6 +42,7 @@ from irp.ui.theme import (
     SPLIT_COLOR,
     TABLE_STYLE,
 )
+from irp.ui.ticker_fmt import date_range_for_preset, fmt_statement
 
 dash.register_page(__name__, path='/screener', name='Screener')
 
@@ -1040,7 +1042,7 @@ def mutate_steps(
         try:
             tickers = watchlist_service.load_watchlist(name)
         except KeyError:
-            raise PreventUpdate
+            raise PreventUpdate from None
         return [
             {
                 'type': 'keep',
@@ -1235,7 +1237,7 @@ def render_scatter(
                 mode='markers',
                 name='',
                 showlegend=False,
-                customdata=list(zip(cd, color_vals.tolist())),
+                customdata=list(zip(cd, color_vals.tolist(), strict=False)),
                 hovertemplate=(
                     f'<b>%{{customdata[0][0]}}</b> %{{customdata[0][1]}}<br>'
                     f'{x_label}: %{{x:.3f}}<br>{y_label}: %{{y:.3f}}<br>'
@@ -1762,7 +1764,7 @@ def render_detail_prices(
             xanchor='right',
         ),
         shapes=shapes,
-        xaxis=dict(**common_axis, showticklabels=False if vol_col else True),
+        xaxis=dict(**common_axis, showticklabels=not vol_col),
         yaxis=dict(**common_axis, title='Price'),
     )
     if vol_col:
@@ -2043,10 +2045,8 @@ def delete_watchlist_action(
         return name, trigger or 0
 
     if btn_type == 'wl-confirm-btn' and any(confirm_clicks) and pending:
-        try:
+        with contextlib.suppress(Exception):
             watchlist_service.delete_watchlist(pending)
-        except Exception:
-            pass
         return None, (trigger or 0) + 1
 
     raise PreventUpdate
