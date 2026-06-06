@@ -8,7 +8,9 @@ Data path reuses the `/features` builder (`features_service.build_panel`), so th
 notebook trains on exactly the panel the UI exports.
 """
 import datetime
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -41,7 +43,7 @@ _NON_FEATURE = {'Date', 'Ticker', 'fwd_ret', 'label'}
 
 
 def _export_dir():
-    from irp.ui.services import features_service
+    from irp.ui.services import features_service  # deferred: avoid pulling UI deps into model module
     return features_service._EXPORT_DIR
 
 
@@ -68,8 +70,6 @@ def load_export(
     Date/Ticker/fwd_ret/label. The export must carry the `target` column — build
     it with a label (Return / Up-Down / Quantile) on the /features page.
     """
-    from pathlib import Path
-
     if path is None:
         files = list(_export_dir().glob('*.parquet')) + list(_export_dir().glob('*.csv'))
         if not files:
@@ -199,8 +199,6 @@ def summary(res: BaselineResult) -> pd.DataFrame:
 
 def nb_template() -> str:
     """Plotly template matching the VS Code theme (dark by default)."""
-    import json
-    from pathlib import Path
     try:
         cfg = json.loads(Path.home().joinpath('.config/Code/User/settings.json').read_text())
         return 'plotly_white' if 'light' in str(cfg.get('workbench.colorTheme', '')).lower() else 'plotly_dark'
