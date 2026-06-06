@@ -240,10 +240,14 @@ def test_heavy_tail_report_flags_col_and_points_to_bad_ticker():
     assert 'bounded' not in set(rep.summary['col'])          # well-behaved ignored
     roe_row = rep.summary[rep.summary['col'] == 'roe'].iloc[0]
     assert roe_row['worst_ticker'] == 'BAD'
+    assert roe_row['min'] < 0 < roe_row['max']               # signed extremes, not abs
+    assert roe_row['max'] == 2e6                             # the real max (BAD's 2020 value)
     assert rep.offenders.sort_values('z', key=lambda s: s.abs(), ascending=False)\
         .iloc[0]['Ticker'] == 'BAD'                          # worst offender is BAD
     bt = rep.by_ticker[(rep.by_ticker['col'] == 'roe') & (rep.by_ticker['Ticker'] == 'BAD')]
-    assert len(bt) == 1 and bt.iloc[0]['max_abs_z'] > 100
+    assert len(bt) == 1
+    assert bt.iloc[0]['pct_outliers'] == 1.0                 # all of BAD's rows are outliers
+    assert bt.iloc[0]['worst_value'] == 2e6                  # the actual extreme value
 
 
 def test_apply_tame_plan_mixed_actions_clip_train_fit():

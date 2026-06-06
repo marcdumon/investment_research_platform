@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Server-side caches (avoid shipping big frames through dcc.Store).
 _SRC_CACHE: dict[str, pd.DataFrame] = {}     # loaded raw datasets, by token
+_CUR_CACHE: dict[str, pd.DataFrame] = {}     # current cleaned (exclude+tame) frames
 _PREP_CACHE: dict[str, pd.DataFrame] = {}    # prepared (tamed/scaled/split) frames
 _CACHE_CAP = 4
 
@@ -227,6 +228,21 @@ def _numeric_cols(df):
             if c not in _RESERVED and pd.api.types.is_numeric_dtype(df[c])]
 
 
+def _cur_frame(src, plan, exclude):
+    """The dataset AS CURRENTLY CLEANED (source → exclude tickers → tame plan), with
+    no scaling/splitting. Inspect runs on this so the loop is iterative: clean a
+    column, re-inspect, see whether the problem is gone. Cached per (source, plan,
+    exclude) so a drill-down doesn't re-clean."""
+    df = _SRC_CACHE[src['token']]
+    key = str(abs(hash((src['token'], repr(plan), repr(exclude)))))
+    if key not in _CUR_CACHE:
+        cur, _ = features_service.prepare_features(
+            df, tame_plan=plan or [], exclude_tickers=_parse_exclude(exclude),
+            scale_cfg=None, split_cfg=None)
+        _cache_put(_CUR_CACHE, key, cur)
+    return _CUR_CACHE[key]
+
+
 @callback(
     Output('fe-source-store', 'data'),
     Output('fe-source-status', 'children'),
@@ -266,17 +282,20 @@ def fe_load_source(_last, _load, dataset):
     Output('fe-inspect-col', 'value'),
     Input('fe-inspect', 'n_clicks'),
     State('fe-source-store', 'data'),
+    State('fe-tame-store', 'data'),
+    State('fe-exclude', 'value'),
     prevent_initial_call=True,
 )
-def fe_run_inspect(_n, src):
+def fe_run_inspect(_n, src, plan, exclude):
     if not src or src['token'] not in _SRC_CACHE:
         return html.P('Load a dataset first.', className='no-data'), None
-    df = _SRC_CACHE[src['token']]
-    rep = features_service.inspect_dataset(df, with_detail=False)   # overview pass
+    cur = _cur_frame(src, plan, exclude)   # inspect the CURRENTLY-cleaned dataset
+    rep = features_service.inspect_dataset(cur, with_detail=False)   # overview pass
     if rep.summary.empty:
-        return html.P('No heavy-tailed columns detected.', className='no-data'), None
-    summ = rep.summary[['col', 'n', 'median', 'p99', 'max', 'iqr', 'tail_ratio',
-                        'n_outliers', 'worst_ticker']]
+        return html.P('No heavy-tailed columns remain — the dataset looks clean.',
+                      className='no-data'), None
+    summ = rep.summary[['col', 'n', 'median', 'p1', 'p99', 'min', 'max', 'iqr',
+                        'tail_ratio', 'n_outliers', 'worst_ticker']]
     first = summ.iloc[0]['col']
     return _table(summ, page_size=15), first
 
@@ -287,15 +306,21 @@ def fe_run_inspect(_n, src):
     Output('fe-hist', 'figure'),
     Input('fe-inspect-col', 'value'),
     State('fe-source-store', 'data'),
+    State('fe-tame-store', 'data'),
+    State('fe-exclude', 'value'),
     prevent_initial_call=True,
 )
-def fe_drilldown(col, src):
+def fe_drilldown(col, src, plan, exclude):
     if not col or not src or src['token'] not in _SRC_CACHE:
         raise PreventUpdate
-    df = _SRC_CACHE[src['token']]
+    df = _cur_frame(src, plan, exclude)
+    if col not in df.columns:
+        msg = html.P(f'"{col}" was dropped by the current plan.', className='no-data')
+        return msg, msg, empty_figure(f'{col} dropped')
     rep = features_service.inspect_dataset(df, cols=[col])
     off = rep.offenders[['Date', 'Ticker', 'value', 'z']] if not rep.offenders.empty else rep.offenders
-    bt = rep.by_ticker[['Ticker', 'n_outliers', 'max_abs_z']] if not rep.by_ticker.empty else rep.by_ticker
+    bt = (rep.by_ticker[['Ticker', 'n_rows', 'n_outliers', 'pct_outliers', 'worst_value']]
+          if not rep.by_ticker.empty else rep.by_ticker)
     s = pd.to_numeric(df[col], errors='coerce').dropna().to_numpy()
     # Bin server-side: send 60 bars, not the full (up to ~12M-row) column to the browser.
     if s.size:
