@@ -272,10 +272,12 @@ class HeavyTailReport:
 
 def heavy_tail_report(
     df: pd.DataFrame, cols: list[str] | None = None,
-    thresh: float = 20.0, top_n: int = 20,
+    thresh: float = 20.0, top_n: int = 20, with_detail: bool = True,
 ) -> HeavyTailReport:
     """Inspect heavy-tailed columns. When `cols` is None, auto-picks the flagged
-    columns via `detect_heavy_tailed` (same tail-ratio metric)."""
+    columns via `detect_heavy_tailed` (same tail-ratio metric). `with_detail=False`
+    returns only the summary (skips the per-column top_n sort + by-ticker group —
+    use it for the overview pass on huge panels; drill into one column for detail)."""
     if cols is None:
         candidates = [c for c in df.columns if c not in _TAME_RESERVED]
         cols = detect_heavy_tailed(df, candidates, thresh)
@@ -289,9 +291,6 @@ def heavy_tail_report(
         z = (s - med) / iqr if iqr else pd.Series(0.0, index=s.index)
         absz = z.abs()
         out_mask = absz > _OUTLIER_Z
-        sub = pd.DataFrame({'col': c, 'Date': df['Date'], 'Ticker': df['Ticker'],
-                            'value': s, 'z': z})
-        off.append(sub.reindex(absz.sort_values(ascending=False).index).head(top_n))
         worst_ticker = df.loc[absz.idxmax(), 'Ticker'] if len(absz) and absz.notna().any() else None
         tail = s.quantile(0.999) - s.quantile(0.001)
         summ.append({
@@ -300,6 +299,11 @@ def heavy_tail_report(
             'iqr': float(iqr), 'tail_ratio': float(tail / iqr) if iqr else np.nan,
             'n_outliers': int(out_mask.sum()), 'worst_ticker': worst_ticker,
         })
+        if not with_detail:
+            continue
+        sub = pd.DataFrame({'col': c, 'Date': df['Date'], 'Ticker': df['Ticker'],
+                            'value': s, 'z': z})
+        off.append(sub.reindex(absz.sort_values(ascending=False).index).head(top_n))
         if out_mask.any():
             g = pd.DataFrame({'Ticker': df['Ticker'][out_mask], 'absz': absz[out_mask]})
             agg = g.groupby('Ticker', sort=False)['absz'].agg(['count', 'max']).reset_index()
