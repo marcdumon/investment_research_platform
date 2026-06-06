@@ -6,8 +6,9 @@ named-recipe store. Pages import only from here.
 """
 import datetime
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 
 import pandas as pd
 
@@ -20,6 +21,29 @@ from irp.query import feature_recipes
 from irp.ui.services import universe_service
 
 logger = logging.getLogger(__name__)
+
+class LabelCfg(TypedDict, total=False):
+    """Forward-return label spec passed to build_panel."""
+    mode: str            # none|continuous|binary|quantile
+    horizon_days: int    # 21|63|126|252
+    n_buckets: int       # quantile bucket count
+
+
+class ScaleCfg(TypedDict, total=False):
+    """Model-preprocessing scaling spec."""
+    method: str          # none|minmax|robust
+    scope: str           # date|global|ticker
+    train_cutoff: int    # fit-year cutoff for global/ticker scope
+
+
+class SplitCfg(TypedDict, total=False):
+    """Train/valid/test split spec."""
+    method: str          # none|date|ticker
+    train: float
+    valid: float
+    test: float
+    seed: int            # ticker split only
+
 
 _FREQ_MAP = {'Q': 'QE', 'A': 'YE', 'M': 'ME', 'W': 'W-FRI', 'D': 'B'}
 _DENSE_FREQS = frozenset({'M', 'W', 'D'})  # carry-forward path (price sequences)
@@ -68,7 +92,7 @@ def _date_grid(start_year: int, end_year: int, freq: str) -> list[datetime.date]
     return [ts.date() for ts in pd.date_range(start, end, freq=pd_freq)]
 
 
-def _apply_steps(panel: pd.DataFrame, steps: list[dict]) -> tuple[pd.DataFrame, list[str]]:
+def _apply_steps(panel: pd.DataFrame, steps: list[_eng.StepDict]) -> tuple[pd.DataFrame, list[str]]:
     """Apply steps, pruning output to produced columns.
 
     Steps whose input columns aren't in the panel (e.g. a price-ratio factor
@@ -101,7 +125,7 @@ _RESERVED_COLS = frozenset({'Date', 'Ticker', 'fwd_ret', 'label', 'split'})
 
 
 def _split_and_scale(
-    panel: pd.DataFrame, scale_cfg: dict | None, split_cfg: dict | None,
+    panel: pd.DataFrame, scale_cfg: ScaleCfg | None, split_cfg: SplitCfg | None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Assign a train/valid/test split and scale feature columns in place.
 
@@ -144,7 +168,7 @@ def _split_and_scale(
     return panel, notes
 
 
-def _load_snapshots_long(start_year, end_year, variant, cols) -> pd.DataFrame:
+def _load_snapshots_long(start_year: int, end_year: int, variant: str, cols: list[str]) -> pd.DataFrame:
     """Stack all cached snapshots in [start, end] into a long (Date, Ticker, cols) frame.
 
     Lower bound reaches 2 years before `start_year` so early grid dates inherit the
@@ -172,7 +196,7 @@ def _load_snapshots_long(start_year, end_year, variant, cols) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
-def _dense_ta(grid: list[datetime.date], tickers) -> pd.DataFrame:
+def _dense_ta(grid: list[datetime.date], tickers: Iterable[str] | None) -> pd.DataFrame:
     """PIT (backward as-of) TA snapshot from ta_panel at each grid date, per ticker."""
     import polars as pl
 
@@ -195,7 +219,7 @@ def _dense_ta(grid: list[datetime.date], tickers) -> pd.DataFrame:
     return out
 
 
-def _build_dense(start_year, end_year, freq, variant, steps, label_cfg,
+def _build_dense(start_year: int, end_year: int, freq: str, variant: str, steps: list[_eng.StepDict], label_cfg: LabelCfg,
                  tickers, scale_cfg=None, split_cfg=None) -> tuple[pd.DataFrame, list[str]]:
     """Dense price-sequence build: dense close/volume/TA + carry-forward fundamentals."""
     grid = _date_grid(start_year, end_year, freq)
@@ -242,13 +266,13 @@ def build_panel(
     end_year: int,
     freq: Literal['Q', 'A'],
     variant: Literal['A', 'Q'],
-    steps: list[dict],
-    label_cfg: dict,
+    steps: list[_eng.StepDict],
+    label_cfg: LabelCfg,
     market: str | None = None,
     sector: str | None = None,
     watchlist: str | None = None,
-    scale_cfg: dict | None = None,
-    split_cfg: dict | None = None,
+    scale_cfg: ScaleCfg | None = None,
+    split_cfg: SplitCfg | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Build the long (Date, Ticker) feature panel.
 
