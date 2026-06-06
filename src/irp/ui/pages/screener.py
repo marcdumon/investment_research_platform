@@ -32,6 +32,7 @@ from irp.ui.services import (
     universe_service,
     watchlist_service,
 )
+from irp.ui.services.screener_service import apply_step, apply_steps, auto_name, build_summary
 from irp.ui.tables import column_format as _col_fmt
 from irp.ui.theme import (
     ACCENT,
@@ -67,38 +68,6 @@ _CORR_WINDOW_OPTIONS = [
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
-
-
-def _apply_step(df: pd.DataFrame, step: dict) -> pd.DataFrame:
-    if step['type'] == 'range':
-        col, lo, hi = step['col'], step.get('min'), step.get('max')
-        if col in df.columns:
-            if lo is not None:
-                df = df[df[col] >= lo]
-            if hi is not None:
-                df = df[df[col] <= hi]
-    elif step['type'] == 'keep':
-        df = df[df['Ticker'].isin(step['tickers'])]
-    elif step['type'] == 'remove':
-        df = df[~df['Ticker'].isin(step['tickers'])]
-    return df
-
-
-def _apply_steps(df: pd.DataFrame, steps: list[dict]) -> pd.DataFrame:
-    for step in steps:
-        df = _apply_step(df, step)
-    return df
-
-
-def _auto_name(steps: list[dict], as_of_date: str | None) -> str:
-    range_parts = [
-        s['label'].replace(' ', '').replace('≥', 'ge').replace('≤', 'le')
-        for s in (steps or [])
-        if s.get('type') == 'range'
-    ]
-    suffix = (as_of_date or '')[:10]
-    parts = range_parts + ([suffix] if suffix else [])
-    return '_'.join(parts) if parts else f'screener_{suffix}'
 
 
 # ── Layout ────────────────────────────────────────────────────────────
@@ -866,7 +835,7 @@ def apply_steps_callback(
         return {}, ''
     df = pd.DataFrame(base['records'])
     base_n = len(df)
-    df = _apply_steps(df, steps or [])
+    df = apply_steps(df, steps or [])
     result_n = len(df)
     meta = base.get('meta', {})
     parts = [f'Base: {base_n:,} stocks']
@@ -897,7 +866,7 @@ def render_step_stack(base: dict | None, steps: list | None) -> Any:
     rows = []
     for i, step in enumerate(steps):
         before_n = current_n
-        df = _apply_step(df, step)
+        df = apply_step(df, step)
         after_n = len(df)
         current_n = after_n
         rows.append(
@@ -1953,29 +1922,13 @@ def render_detail_factors(ticker: str | None, variant: Literal['A', 'Q']) -> Any
     return html.Div(charts_out)
 
 
-def _build_summary(steps: list) -> str:
-    parts = []
-    for s in steps:
-        label = s.get('label', '')
-        if not label:
-            continue
-        t = s.get('type', '')
-        if t == 'range':
-            parts.append(label)
-        elif t == 'keep':
-            parts.append(f'+{label}')
-        elif t == 'remove':
-            parts.append(f'-{label}')
-    return '; '.join(parts)
-
-
 @callback(
     Output('screener-watchlist-name', 'value'),
     Input('screener-steps-store', 'data'),
     State('screener-date', 'date'),
 )
-def auto_name(steps: list | None, date_str: str | None) -> str:
-    return _auto_name(steps or [], date_str)
+def suggest_watchlist_name(steps: list | None, date_str: str | None) -> str:
+    return auto_name(steps or [], date_str)
 
 
 @callback(
@@ -1983,7 +1936,7 @@ def auto_name(steps: list | None, date_str: str | None) -> str:
     Input('screener-steps-store', 'data'),
 )
 def auto_description(steps: list | None) -> str:
-    return _build_summary(steps or [])
+    return build_summary(steps or [])
 
 
 @callback(
@@ -2009,7 +1962,7 @@ def save_watchlist_action(
     if not name:
         return 'Enter a name first.', trigger or 0
     tickers = [r['Ticker'] for r in result['records'] if r.get('Ticker')]
-    summary = _build_summary(steps or [])
+    summary = build_summary(steps or [])
     try:
         watchlist_service.save_watchlist(name, tickers, summary)
     except Exception as exc:
