@@ -162,10 +162,17 @@ def _split_and_scale(
             elif scope in ('global', 'ticker') and cutoff is None:
                 notes.append(f'scaling ({scope}/{method}) fit on full sample — set a '
                              f'train cutoff year or a split to avoid look-ahead')
-            # clip shares the scaler's train rows (split mask, else cutoff year)
-            tame_mask = train_mask
-            if tame_mask is None and cutoff is not None:
+            # Clip quantiles must fit on the train rows regardless of scale scope
+            # (the scaler's own train_mask is set only for global/ticker). Derive the
+            # clip's train rows from the split if present, else the cutoff year, else
+            # the full sample — and warn when it falls back to the full sample so a
+            # leaky clip is never silent.
+            if split_series is not None:
+                tame_mask = (split_series == 'train')
+            elif cutoff is not None:
                 tame_mask = pd.to_datetime(panel['Date']).dt.year <= int(cutoff)
+            else:
+                tame_mask = None
 
             heavy = _eng.detect_heavy_tailed(panel, feat_cols)
             if heavy:
@@ -175,6 +182,9 @@ def _split_and_scale(
             tame_action = scale_cfg.get('tame_action', 'none')
             tame_cols = scale_cfg.get('tame_cols') or []
             if tame_action and tame_action != 'none' and tame_cols:
+                if tame_action == 'clip' and tame_mask is None:
+                    notes.append('clip fit on full sample — set a train cutoff year or '
+                                 'a split so clip caps come from the train rows')
                 panel = _eng.tame_columns(panel, tame_cols, tame_action,
                                           p=float(scale_cfg.get('tame_p', 0.01)),
                                           train_mask=tame_mask)
