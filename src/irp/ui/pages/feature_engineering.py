@@ -238,7 +238,6 @@ def _cur_frame(src, plan, exclude):
 @callback(
     Output('fe-source-store', 'data'),
     Output('fe-source-status', 'children'),
-    Output('fe-col', 'options'),
     Input('fe-use-last', 'n_clicks'),
     Input('fe-load', 'n_clicks'),
     State('fe-dataset', 'value'),
@@ -250,21 +249,40 @@ def fe_load_source(_last, _load, dataset):
         if trig == 'fe-use-last':
             last = features_service.get_last_build()
             if not last:
-                return None, 'No in-memory build — build one on the Dataset Builder first.', []
+                return None, 'No in-memory build — build one on the Dataset Builder first.'
             df, name = last['df'], 'last build'
         else:
             if not dataset:
-                return None, 'Pick a dataset to load.', []
+                return None, 'Pick a dataset to load.'
             df, name = features_service.load_dataset(dataset), dataset
     except Exception as exc:
         logger.exception('fe load source failed')
-        return None, f'Load failed: {exc}', []
+        return None, f'Load failed: {exc}'
 
     token = str(abs(hash((name, df.shape[0], df.shape[1]))))
     _cache_put(_SRC_CACHE, token, df)
-    opts = [{'label': c, 'value': c} for c in _numeric_cols(df)]
     msg = f'Loaded "{name}": {len(df):,} rows × {df.shape[1]} cols, {df["Ticker"].nunique():,} tickers.'
-    return {'token': token, 'n_rows': len(df), 'n_cols': df.shape[1], 'name': name}, msg, opts
+    return {'token': token, 'n_rows': len(df), 'n_cols': df.shape[1], 'name': name}, msg
+
+
+@callback(
+    Output('fe-col', 'options'),
+    Output('fe-col', 'value', allow_duplicate=True),
+    Input('fe-source-store', 'data'),
+    Input('fe-tame-store', 'data'),
+    State('fe-col', 'value'),
+    prevent_initial_call=True,
+)
+def fe_col_options(src, plan, current):
+    """Columns already carrying an action drop out of the picker (and out of the
+    current selection) — once handled, a column shouldn't be re-selectable."""
+    if not src or src['token'] not in _SRC_CACHE:
+        return [], []
+    planned = {s['col'] for s in (plan or [])}
+    opts = [{'label': c, 'value': c} for c in _numeric_cols(_SRC_CACHE[src['token']])
+            if c not in planned]
+    cur = [c for c in (current or []) if c not in planned]
+    return opts, cur
 
 
 @callback(
@@ -328,8 +346,10 @@ def fe_histograms(cols, action, p, src, exclude):
     exactly what Apply will do. Computed per column via `column_preview` — no panel
     rebuild. (Tables removed; the charts carry the signal.)"""
     cols = cols if isinstance(cols, list) else ([cols] if cols else [])
-    if not cols or not src or src['token'] not in _SRC_CACHE:
+    if not src or src['token'] not in _SRC_CACHE:
         raise PreventUpdate
+    if not cols:                       # selection emptied (e.g. all applied) → clear
+        return []
     df = _SRC_CACHE[src['token']]
     excl = _parse_exclude(exclude)
     pf = float(p) if p not in (None, '') else 0.01
