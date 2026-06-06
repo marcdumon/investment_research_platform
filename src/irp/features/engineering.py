@@ -234,6 +234,21 @@ def tame_columns(
     raise ValueError(f'unknown tame action {action!r}')
 
 
+def residual_scale_flags(
+    df: pd.DataFrame, cols: list[str], thresh: float = 10.0
+) -> dict[str, float]:
+    """Post-scale check: {col: p99_abs} for feature columns whose 99th-percentile
+    absolute value still exceeds `thresh` (scaling failed to tame them)."""
+    flags = {}
+    for c in cols:
+        if c not in df.columns or c in _TAME_RESERVED:
+            continue
+        p99 = df[c].astype('float64').abs().quantile(0.99)
+        if pd.notna(p99) and p99 > thresh:
+            flags[c] = float(p99)
+    return flags
+
+
 # ── feature scaling (whole-matrix, model preprocessing) ───────────────
 
 _SCALE_METHODS = ('minmax', 'robust')

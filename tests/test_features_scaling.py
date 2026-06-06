@@ -206,3 +206,16 @@ def test_tame_none_or_empty_is_noop():
     df = _tame_panel()
     assert eng.tame_columns(df, [], 'clip').equals(df)
     assert eng.tame_columns(df, ['f'], 'none').equals(df)
+
+
+def test_residual_scale_flags_fires_on_large_silent_on_small():
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 1, 1)] * 100,
+        'Ticker': [f'T{i}' for i in range(100)],
+        'huge': np.linspace(-500.0, 1000.0, 100),
+        'small': np.linspace(-1.0, 1.0, 100),
+    })
+    flags = eng.residual_scale_flags(df, ['huge', 'small'])
+    assert 'huge' in flags and flags['huge'] > 10
+    assert 'small' not in flags
+    assert eng.residual_scale_flags(df, ['Ticker']) == {}   # reserved never flagged
