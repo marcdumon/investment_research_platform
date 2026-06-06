@@ -295,7 +295,8 @@ def heavy_tail_report(
         tail = s.quantile(0.999) - s.quantile(0.001)
         summ.append({
             'col': c, 'n': int(s.notna().sum()), 'median': float(med),
-            'p99': float(s.abs().quantile(0.99)), 'max': float(s.abs().max()),
+            'p1': float(s.quantile(0.01)), 'p99': float(s.quantile(0.99)),
+            'min': float(s.min()), 'max': float(s.max()),
             'iqr': float(iqr), 'tail_ratio': float(tail / iqr) if iqr else np.nan,
             'n_outliers': int(out_mask.sum()), 'worst_ticker': worst_ticker,
         })
@@ -305,18 +306,26 @@ def heavy_tail_report(
                             'value': s, 'z': z})
         off.append(sub.reindex(absz.sort_values(ascending=False).index).head(top_n))
         if out_mask.any():
-            g = pd.DataFrame({'Ticker': df['Ticker'][out_mask], 'absz': absz[out_mask]})
-            agg = g.groupby('Ticker', sort=False)['absz'].agg(['count', 'max']).reset_index()
-            agg.columns = ['Ticker', 'n_outliers', 'max_abs_z']
+            tick = df['Ticker']
+            g = pd.DataFrame({'Ticker': tick[out_mask], 'absz': absz[out_mask], 'value': s[out_mask]})
+            # worst row per ticker = the actual value at its largest |z| (signed, real)
+            worst_val = g.loc[g.groupby('Ticker')['absz'].idxmax()].set_index('Ticker')['value']
+            totals = tick[s.notna()].value_counts()         # ticker's non-null rows in this col
+            agg = g.groupby('Ticker', sort=False).size().rename('n_outliers').reset_index()
+            agg['n_rows'] = agg['Ticker'].map(totals).astype(int)
+            agg['pct_outliers'] = (agg['n_outliers'] / agg['n_rows']).round(4)
+            agg['worst_value'] = agg['Ticker'].map(worst_val)
             agg.insert(0, 'col', c)
-            byt.append(agg.sort_values('n_outliers', ascending=False))
+            byt.append(agg.sort_values('pct_outliers', ascending=False)[
+                ['col', 'Ticker', 'n_rows', 'n_outliers', 'pct_outliers', 'worst_value']])
     summary = (pd.DataFrame(summ) if summ else
-               pd.DataFrame(columns=['col', 'n', 'median', 'p99', 'max', 'iqr',
+               pd.DataFrame(columns=['col', 'n', 'median', 'p1', 'p99', 'min', 'max', 'iqr',
                                      'tail_ratio', 'n_outliers', 'worst_ticker']))
     offenders = (pd.concat(off, ignore_index=True) if off else
                  pd.DataFrame(columns=['col', 'Date', 'Ticker', 'value', 'z']))
     by_ticker = (pd.concat(byt, ignore_index=True) if byt else
-                 pd.DataFrame(columns=['col', 'Ticker', 'n_outliers', 'max_abs_z']))
+                 pd.DataFrame(columns=['col', 'Ticker', 'n_rows', 'n_outliers',
+                                       'pct_outliers', 'worst_value']))
     return HeavyTailReport(summary, offenders, by_ticker)
 
 
