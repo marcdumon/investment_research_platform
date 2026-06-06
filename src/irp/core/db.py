@@ -9,6 +9,7 @@ access.
 write_session() clears the gate (so db() callers block), then retries
 duckdb.connect until in-flight read-only connections have been released.
 """
+import logging
 import threading
 import time
 from collections.abc import Generator
@@ -42,7 +43,6 @@ def write_session() -> Generator[duckdb.DuckDBPyConnection]:
     connections have been released (CPython drops them quickly after each
     db().execute().df() expression completes).
     """
-    import logging
     log = logging.getLogger(__name__)
     _write_gate.clear()
     try:
