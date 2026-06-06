@@ -385,3 +385,26 @@ def test_split_and_scale_clip_fits_train_split_not_full_date_scope():
     huge = out[out['Date'] == datetime.date(2019, 12, 31)]
     assert len(huge) == 10 and (huge['split'] == 'test').all()   # sanity: it is the test split
     assert np.allclose(huge['roe'].to_numpy(), 0.0)        # train-fit clip -> constant -> 0
+
+
+def test_prepare_features_excludes_tames_scales_splits():
+    rows = []
+    for yr in range(2012, 2020):
+        d = datetime.date(yr, 12, 31)
+        for i in range(20):
+            rows.append({'Date': d, 'Ticker': f'T{i}', 'roe': float(i),
+                         'fwd_ret': 0.0, 'label': 0})
+        rows.append({'Date': d, 'Ticker': 'BAD', 'roe': 1e9,   # one junk ticker
+                     'fwd_ret': 0.0, 'label': 0})
+    df = pd.DataFrame(rows)
+    out, notes = svc.prepare_features(
+        df,
+        tame_plan=[{'col': 'roe', 'action': 'clip', 'p': 0.01}],
+        exclude_tickers=['BAD'],
+        scale_cfg={'method': 'minmax', 'scope': 'date'},
+        split_cfg={'method': 'date', 'train': 0.7, 'valid': 0.15, 'test': 0.15},
+    )
+    assert 'BAD' not in set(out['Ticker'])                 # excluded
+    assert 'split' in out.columns                          # split applied
+    assert out['roe'].abs().max() <= 1.0 + 1e-9            # clipped + minmax-bounded
+    assert any('excluded' in n for n in notes)
