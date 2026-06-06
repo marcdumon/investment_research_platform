@@ -155,19 +155,19 @@ def _main() -> None:
 
     from irp.core.logging import configure_logging
     configure_logging()
-    print('Refreshing universe table...')
+    logger.info('Refreshing universe table...')
     t0 = time.perf_counter()
     n = refresh()
     elapsed = time.perf_counter() - t0
-    print(f'Done — {n:,} tickers in {elapsed:.1f}s')
+    logger.info('Done — %s tickers in %.1fs', f'{n:,}', elapsed)
     df = universe()
     null_stooq = df['stooq_ticker'].isna().sum()
     null_yahoo = df['yahoo_ticker'].isna().sum()
     if null_stooq:
-        print(f'  stooq_ticker NULL: {null_stooq}')
+        logger.info('stooq_ticker NULL: %s', null_stooq)
     if null_yahoo:
-        print('\nNULL yahoo_ticker by market (no Yahoo equivalent):')
-        print(df[df['yahoo_ticker'].isna()].groupby('Market').size().to_string())
+        logger.info('NULL yahoo_ticker by market (no Yahoo equivalent):\n%s',
+                    df[df['yahoo_ticker'].isna()].groupby('Market').size().to_string())
 
 
 if __name__ == '__main__':

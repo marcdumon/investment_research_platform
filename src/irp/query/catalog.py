@@ -209,10 +209,10 @@ def _main() -> None:
 
     from irp.core.logging import configure_logging
     configure_logging()
-    print('Refreshing data catalog...')
+    logger.info('Refreshing data catalog...')
     t0 = time.perf_counter()
     n = refresh()
-    print(f'Done — {n:,} tickers in {time.perf_counter() - t0:.1f}s')
+    logger.info('Done — %s tickers in %.1fs', f'{n:,}', time.perf_counter() - t0)
 
 
 if __name__ == '__main__':
