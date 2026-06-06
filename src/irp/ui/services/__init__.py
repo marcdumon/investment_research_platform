@@ -10,6 +10,7 @@ from irp.ui.services import (
     factors_service,
     features_service,
     price_service,
+    screener_service,
     universe_service,
     watchlist_service,
 )
@@ -19,6 +20,7 @@ __all__ = [
     'factors_service',
     'features_service',
     'price_service',
+    'screener_service',
     'universe_service',
     'watchlist_service',
 ]
