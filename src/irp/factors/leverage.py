@@ -14,8 +14,8 @@ from irp.factors._cols import (
     LONG_TERM_DEBT,
     DA,
 )
-from irp.factors._utils import _safe_div
-from irp.factors.registry import _register as register
+from irp.factors._utils import safe_div
+from irp.factors.registry import register
 
 register('debt_equity',      'Debt/Equity',      group='leverage')
 register('net_debt_ebitda',  'Net Debt/EBITDA',  group='leverage')
@@ -42,7 +42,7 @@ def compute_leverage(
 
     Interest Expense is stored as a negative value in SimFin income statements;
     abs() is applied before dividing so coverage is positive for profitable firms.
-    Negative EBITDA or zero interest expense yield NA via _safe_div.
+    Negative EBITDA or zero interest expense yield NA via safe_div.
     """
     inc_cols = [TICKER, OPERATING_INCOME]
     if INTEREST_EXPENSE in income.columns:
@@ -70,12 +70,12 @@ def compute_leverage(
     ebitda     = w[OPERATING_INCOME] + w[DA].fillna(0)
 
     out = pd.DataFrame(index=w.index)
-    out['debt_equity']     = _safe_div(total_debt, w[TOTAL_EQUITY])
-    out['net_debt_ebitda'] = _safe_div(net_debt, ebitda)
+    out['debt_equity']     = safe_div(total_debt, w[TOTAL_EQUITY])
+    out['net_debt_ebitda'] = safe_div(net_debt, ebitda)
 
     if INTEREST_EXPENSE in w.columns:
         interest_paid = w[INTEREST_EXPENSE].abs()
-        out['interest_coverage'] = _safe_div(w[OPERATING_INCOME], interest_paid)
+        out['interest_coverage'] = safe_div(w[OPERATING_INCOME], interest_paid)
     else:
         out['interest_coverage'] = pd.NA
 

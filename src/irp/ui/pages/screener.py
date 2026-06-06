@@ -18,11 +18,11 @@ from dash.exceptions import PreventUpdate
 from plotly.subplots import make_subplots
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
-from irp.factors.registry import _all_factors as all_factors
-from irp.ui.charts import _base_chart_layout as _chart_layout
-from irp.ui.charts import _corr_heatmap_figure as _corr_heatmap
-from irp.ui.charts import _empty_figure
-from irp.ui.charts import _scatter_chart_layout as _base_layout
+from irp.factors.registry import all_factors
+from irp.ui.charts import base_chart_layout as _chart_layout
+from irp.ui.charts import corr_heatmap_figure as _corr_heatmap
+from irp.ui.charts import empty_figure
+from irp.ui.charts import scatter_chart_layout as _base_layout
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import (
     factors_service,
@@ -30,8 +30,8 @@ from irp.ui.services import (
     universe_service,
     watchlist_service,
 )
-from irp.ui.tables import _column_format as _col_fmt
-from irp.ui.ticker_fmt import _date_range_for_preset as date_range_for_preset, _fmt_statement as fmt_statement
+from irp.ui.tables import column_format as _col_fmt
+from irp.ui.ticker_fmt import date_range_for_preset, fmt_statement
 from irp.ui.theme import (
     ACCENT,
     DIV_COLOR,
@@ -467,7 +467,7 @@ layout = html.Div(
                         dcc.Loading(
                             dcc.Graph(
                                 id='screener-corr-chart',
-                                figure=_empty_figure(
+                                figure=empty_figure(
                                     'Select filters and click Run Correlation'
                                 ),
                                 config={'displayModeBar': False},
@@ -1126,20 +1126,20 @@ def render_scatter(
     color_scale: str,
 ) -> go.Figure:
     if not result or not result.get('records'):
-        return _empty_figure('Run screener to see data.')
+        return empty_figure('Run screener to see data.')
     if not x_factor or not y_factor:
-        return _empty_figure()
+        return empty_figure()
 
     df = pd.DataFrame(result['records'])
     if x_factor not in df.columns or y_factor not in df.columns:
-        return _empty_figure(f'Factor "{x_factor}" or "{y_factor}" not in data.')
+        return empty_figure(f'Factor "{x_factor}" or "{y_factor}" not in data.')
 
     df = df.dropna(subset=[x_factor, y_factor])
     df = df[df[x_factor].apply(lambda v: isfinite(float(v)) if pd.notna(v) else False)]
     df = df[df[y_factor].apply(lambda v: isfinite(float(v)) if pd.notna(v) else False)]
 
     if df.empty:
-        return _empty_figure('No valid data for selected factors.')
+        return empty_figure('No valid data for selected factors.')
 
     x_label = FACTOR_LABELS.get(x_factor, x_factor)
     y_label = FACTOR_LABELS.get(y_factor, y_factor)
@@ -1305,16 +1305,16 @@ def render_scatter(
 )
 def render_histogram(result: dict | None, factor: str | None) -> go.Figure:
     if not result or not result.get('records') or not factor:
-        return _empty_figure('Run screener to see data.')
+        return empty_figure('Run screener to see data.')
 
     df = pd.DataFrame(result['records'])
     if factor not in df.columns:
-        return _empty_figure(f'Factor "{factor}" not in data.')
+        return empty_figure(f'Factor "{factor}" not in data.')
 
     vals = df[factor].dropna()
     vals = vals[vals.apply(lambda v: isfinite(float(v)))]
     if vals.empty:
-        return _empty_figure('No valid data.')
+        return empty_figure('No valid data.')
 
     label = FACTOR_LABELS.get(factor, factor)
     fig = go.Figure(
@@ -1376,14 +1376,14 @@ def load_prices(n_clicks: int, result: dict | None) -> go.Figure:
 
     tickers = [r['Ticker'] for r in result['records'] if r.get('Ticker')]
     if not tickers or len(tickers) > _MAX_PRICE_TICKERS:
-        return _empty_figure(f'Narrow to ≤ {_MAX_PRICE_TICKERS} stocks first.')
+        return empty_figure(f'Narrow to ≤ {_MAX_PRICE_TICKERS} stocks first.')
 
     from irp.query.yahoo import prices as yahoo_prices
 
     start = (datetime.date.today() - datetime.timedelta(days=365)).isoformat()
     px_df = yahoo_prices(tickers, start=start)
     if px_df.empty:
-        return _empty_figure('No price data available.')
+        return empty_figure('No price data available.')
 
     px_df = px_df.sort_values([PRICE_TICKER, PRICE_DATE])
     px_df['norm'] = px_df.groupby(PRICE_TICKER)[PRICE_CLOSE].transform(
@@ -1502,7 +1502,7 @@ def run_correlation(
 
     if n > _MAX_CORR_TICKERS:
         return (
-            _empty_figure(
+            empty_figure(
                 f'{n:,} tickers — narrow to ≤{_MAX_CORR_TICKERS} before running correlation'
             ),
             f'{n:,} tickers (too many)',
@@ -1515,10 +1515,10 @@ def run_correlation(
         )
     except Exception as exc:
         logger.exception('screener correlation error')
-        return _empty_figure(f'Error: {exc}'), ''
+        return empty_figure(f'Error: {exc}'), ''
 
     if corr.empty:
-        return _empty_figure(warning or 'No data'), warning or ''
+        return empty_figure(warning or 'No data'), warning or ''
 
     w_label = next(
         (o['label'] for o in _CORR_WINDOW_OPTIONS if o['value'] == window), str(window)
@@ -1604,7 +1604,7 @@ def render_detail_prices(
     ma_overlays: list | None,
 ) -> go.Figure:
     if not ticker:
-        return _empty_figure('Click a row to load price chart')
+        return empty_figure('Click a row to load price chart')
 
     preset = preset or '1Y'
     start, end = date_range_for_preset(preset)
@@ -1619,12 +1619,12 @@ def render_detail_prices(
             df = price_service._get_prices(ticker, source='stooq', start=start, end=end)
             close_col = 'C' if 'C' in df.columns else 'Close'
         except Exception:
-            return _empty_figure(f'No price data for {ticker}')
+            return empty_figure(f'No price data for {ticker}')
     else:
         close_col = 'Close'
 
     if df.empty or close_col not in df.columns:
-        return _empty_figure(f'No price data for {ticker}')
+        return empty_figure(f'No price data for {ticker}')
 
     df = df.sort_values('Date').copy()
     df['_date_str'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')

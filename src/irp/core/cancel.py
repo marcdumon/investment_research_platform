@@ -3,7 +3,7 @@ import threading
 _event: threading.Event = threading.Event()
 
 
-def _is_cancelled() -> bool:
+def is_cancelled() -> bool:
     return _event.is_set()
 
 

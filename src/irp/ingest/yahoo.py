@@ -8,8 +8,8 @@ import duckdb
 import pandas as pd
 
 from irp.core.config import config
-from irp.core.duckdb_merge import _merge_csv as merge_csv
-from irp.core.freshness import _is_fresh as is_fresh
+from irp.core.duckdb_merge import merge_csv
+from irp.core.freshness import is_fresh
 from irp.core.jsonset import JsonSet
 from irp.runner import Feed
 
@@ -135,7 +135,7 @@ def _fetch_actions_per_ticker(
     new_errors: set[str],
     has_header: bool,
 ) -> bool:
-    from irp.core.cancel import _is_cancelled as is_cancelled
+    from irp.core.cancel import is_cancelled
 
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo actions: {len(todo)} tickers')
@@ -171,7 +171,7 @@ def _fetch_prices_per_ticker(
     has_header: bool,
     last_dates: dict[str, date] | None = None,
 ) -> bool:
-    from irp.core.cancel import _is_cancelled as is_cancelled
+    from irp.core.cancel import is_cancelled
 
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
@@ -224,7 +224,7 @@ def _fetch_prices_batched(
     When `last_dates` is provided, each batch uses the minimum last_date of
     the group as the shared start date (incremental update). Batches containing
     any ticker absent from `last_dates` fall back to `period='max'`."""
-    from irp.core.cancel import _is_cancelled as is_cancelled
+    from irp.core.cancel import is_cancelled
 
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     bsize = yahoo_cfg.prices_batch_size
@@ -552,7 +552,7 @@ class YahooSource:
         if self.markers.is_fresh(f'stored_{feed}', f'transformed_{feed}'):
             logger.info(f'store({feed}): already up to date, skipping')
             return
-        from irp.core.db import _write_session as write_session
+        from irp.core.db import write_session
         with write_session() as con:
             _store_dividends(con)
             _store_splits(con)

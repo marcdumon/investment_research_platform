@@ -24,13 +24,13 @@ from irp.ui.theme import (
     TABLE_STYLE,
 )
 from irp.ui.ticker_fmt import (
-    _date_range_for_preset as date_range_for_preset,
-    _detect_scale as detect_scale,
-    _fmt_cell as fmt_cell,
-    _fmt_price_table as fmt_price_table,
-    _fmt_statement as fmt_statement,
-    _is_per_share as is_per_share,
-    _is_pct_item as is_pct_item,
+    date_range_for_preset,
+    detect_scale,
+    fmt_cell,
+    fmt_price_table,
+    fmt_statement,
+    is_per_share,
+    is_pct_item,
 )
 
 logger = logging.getLogger(__name__)

@@ -21,8 +21,8 @@ from irp.factors._cols import (
     TICKER,
     TOTAL_EQUITY,
 )
-from irp.factors._utils import _safe_div
-from irp.factors.registry import _register as register
+from irp.factors._utils import safe_div
+from irp.factors.registry import register
 
 register('mktcap',          'Mkt Cap ($B)',         group='size')
 register('revenue',         'Revenue ($B)',         group='fundamentals')
@@ -111,13 +111,13 @@ def compute_valuation(
 
     out = pd.DataFrame(index=w.index)
     out['mktcap'] = w['mktcap']
-    out['pe'] = _safe_div(w['mktcap'], w[NET_INCOME])
-    out['pb'] = _safe_div(w['mktcap'], w[TOTAL_EQUITY])
-    out['ps'] = _safe_div(w['mktcap'], w[REVENUE])
-    out['ev_ebitda'] = _safe_div(w['ev'], w['ebitda'])
-    out['ev_ebit'] = _safe_div(w['ev'], w[OPERATING_INCOME])
-    out['ev_sales'] = _safe_div(w['ev'], w[REVENUE])
-    out['fcf_yield'] = _safe_div(w['fcf'], w['mktcap'])
+    out['pe'] = safe_div(w['mktcap'], w[NET_INCOME])
+    out['pb'] = safe_div(w['mktcap'], w[TOTAL_EQUITY])
+    out['ps'] = safe_div(w['mktcap'], w[REVENUE])
+    out['ev_ebitda'] = safe_div(w['ev'], w['ebitda'])
+    out['ev_ebit'] = safe_div(w['ev'], w[OPERATING_INCOME])
+    out['ev_sales'] = safe_div(w['ev'], w[REVENUE])
+    out['fcf_yield'] = safe_div(w['fcf'], w['mktcap'])
     out['rand'] = np.random.rand(out.shape[0])
 
     out.index.name = TICKER

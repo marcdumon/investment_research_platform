@@ -10,7 +10,7 @@ from dash.exceptions import PreventUpdate
 
 import irp.checks.simfin_rules as _simfin_rules
 import irp.checks.stooq_rules as _stooq_rules
-from irp.ui.charts import _base_chart_layout as _chart_layout, _empty_figure
+from irp.ui.charts import base_chart_layout as _chart_layout, empty_figure
 from irp.ui.services import data_quality_service as dq
 from irp.ui.services import universe_service as _uv
 from irp.ui.theme import ACCENT, MUTED
@@ -334,7 +334,7 @@ _prices_tab = html.Div(children=[
             ]),
         ]),
         dcc.Graph(id='dq-stq-chart', config={'displayModeBar': False},
-                  figure=_empty_figure('Select a row'), style={'minHeight': '300px'}),
+                  figure=empty_figure('Select a row'), style={'minHeight': '300px'}),
         html.Div(id='dq-stq-bars-table'),
         _review_form('dq-stq'),
     ]),
@@ -1122,14 +1122,14 @@ def show_stooq_detail(cell, close_n, results):
     _show = {'display': 'block'}
 
     if ctx.triggered_id == 'dq-stq-close' or not cell or not results:
-        return _hide, '', '#', _empty_figure('Select a row'), html.Div(), 'to_check', None
+        return _hide, '', '#', empty_figure('Select a row'), html.Div(), 'to_check', None
 
     row = results[cell['row']]
     title = f'{row["Ticker"]} — {row["Period_str"]} — {row["Rule"]}'
     yahoo = dq._yahoo_url(row['Ticker'], row.get('Period_str'))
 
     sample_dates = row.get('sample_dates') or []
-    fig = _empty_figure('No price data')
+    fig = empty_figure('No price data')
     try:
         raw_fig = dq._stooq_figure(row['Rule'], row['Ticker'], row['Period_str'], sample_dates)
         if raw_fig is not None:
@@ -1206,7 +1206,7 @@ def update_dashboard(tab, sf_results, stq_results):
                              _chip('to check', n_chk, '#f39c12'),
                          ])
 
-        bar_fig = _empty_figure('No data — run checks first')
+        bar_fig = empty_figure('No data — run checks first')
         if results:
             try:
                 df = pd.DataFrame(results)

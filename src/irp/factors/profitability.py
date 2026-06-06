@@ -17,8 +17,8 @@ from irp.factors._cols import (
     LONG_TERM_DEBT,
     CFO,
 )
-from irp.factors._utils import _safe_div
-from irp.factors.registry import _register as register
+from irp.factors._utils import safe_div
+from irp.factors.registry import register
 
 register('gross_margin',   'Gross Margin',   pct=True, group='profitability')
 register('op_margin',      'Op. Margin',     pct=True, group='profitability')
@@ -81,15 +81,15 @@ def compute_profitability(
     w['ic']       = w[TOTAL_EQUITY] + w['net_debt']
 
     out = pd.DataFrame(index=w.index)
-    out['gross_margin']   = _safe_div(w[GROSS_PROFIT],              w[REVENUE])
-    out['op_margin']      = _safe_div(w[OPERATING_INCOME],         w[REVENUE])
-    out['net_margin']     = _safe_div(w[NET_INCOME],               w[REVENUE])
-    out['roe']            = _safe_div(w[NET_INCOME],               w[TOTAL_EQUITY])
-    out['roa']            = _safe_div(w[NET_INCOME],               w[TOTAL_ASSETS])
-    out['roic']           = _safe_div(w[OPERATING_INCOME],         w['ic'])
-    out['fcf_margin']     = _safe_div(w[CFO],                      w[REVENUE])
-    out['asset_turnover'] = _safe_div(w[REVENUE],                  w[TOTAL_ASSETS])
-    out['cfo_ni_ratio']   = _safe_div(w[CFO],                      w[NET_INCOME])
-    out['accruals']       = _safe_div(w[NET_INCOME] - w[CFO],      w[TOTAL_ASSETS])
+    out['gross_margin']   = safe_div(w[GROSS_PROFIT],              w[REVENUE])
+    out['op_margin']      = safe_div(w[OPERATING_INCOME],         w[REVENUE])
+    out['net_margin']     = safe_div(w[NET_INCOME],               w[REVENUE])
+    out['roe']            = safe_div(w[NET_INCOME],               w[TOTAL_EQUITY])
+    out['roa']            = safe_div(w[NET_INCOME],               w[TOTAL_ASSETS])
+    out['roic']           = safe_div(w[OPERATING_INCOME],         w['ic'])
+    out['fcf_margin']     = safe_div(w[CFO],                      w[REVENUE])
+    out['asset_turnover'] = safe_div(w[REVENUE],                  w[TOTAL_ASSETS])
+    out['cfo_ni_ratio']   = safe_div(w[CFO],                      w[NET_INCOME])
+    out['accruals']       = safe_div(w[NET_INCOME] - w[CFO],      w[TOTAL_ASSETS])
     out.index.name        = TICKER
     return out

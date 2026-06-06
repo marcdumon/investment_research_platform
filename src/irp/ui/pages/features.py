@@ -17,10 +17,10 @@ from dash import ALL, Input, Output, State, callback, ctx, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
-from irp.factors.registry import _all_factors as _all_factors
+from irp.factors.registry import all_factors
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS
 from irp.ui.services import features_service, watchlist_service
-from irp.ui.tables import _column_format as _col_fmt
+from irp.ui.tables import column_format as _col_fmt
 from irp.ui.theme import ACCENT, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/features', name='Feature Engineering')
@@ -140,9 +140,9 @@ _OP_HINT: dict[str, str] = {
 _FIELD_IDS = ('col', 'colb', 'k', 'window', 'fn', 'method', 'p')
 
 # Preset packs: base-include every factor in a registry group (or all).
-_ALL_BASE_COLS = [f.name for f in _all_factors()]
+_ALL_BASE_COLS = [f.name for f in all_factors()]
 _GROUP_COLS: dict[str, list[str]] = {}
-for _f in _all_factors():
+for _f in all_factors():
     if _f.group:
         _GROUP_COLS.setdefault(_f.group, []).append(_f.name)
 _PACK_OPTIONS = [{'label': 'All base columns', 'value': '__all__'}] + [

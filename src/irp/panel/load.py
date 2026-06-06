@@ -109,7 +109,7 @@ def _load_fundamentals_restated(
 
 
 @lru_cache(maxsize=1)
-def _load_ta_panel() -> pl.DataFrame:
+def load_ta_panel() -> pl.DataFrame:
     """Long-format TA panel: (Ticker, Date, indicator...). Sorted by Date for PIT lookup.
 
     Returns an empty DataFrame if ta_panel.parquet does not exist (build_ta_panel() not yet run).
@@ -128,4 +128,4 @@ def clear_cache() -> None:
     load_prices_wide.cache_clear()
     load_fundamentals.cache_clear()
     _load_fundamentals_restated.cache_clear()
-    _load_ta_panel.cache_clear()
+    load_ta_panel.cache_clear()

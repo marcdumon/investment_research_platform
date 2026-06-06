@@ -248,19 +248,19 @@ def _run_pipeline(
     steps: list[str],
     force: bool,
 ) -> None:
-    from irp.cli import _delete_markers, _make_source
+    from irp.cli import delete_markers, make_source
 
     def cancelled() -> bool:
         return _cancel._is_cancelled()
 
     if force:
         for name in providers:
-            _delete_markers(name, feed)
+            delete_markers(name, feed)
 
     for name in providers:
         if cancelled():
             break
-        src = _make_source(name, yahoo_content=yahoo_content, yahoo_prices_mode=yahoo_prices_mode)
+        src = make_source(name, yahoo_content=yahoo_content, yahoo_prices_mode=yahoo_prices_mode)
         logger.info(f'-- {name} --')
         effective_feed = feed
         if feed not in src.SUPPORTED_FEEDS:
@@ -284,19 +284,19 @@ def _run_pipeline(
             src.cleanup()
 
     if 'seed-universe' in steps and not cancelled():
-        from irp.query.universe import _seed as _seed_universe
+        from irp.query.universe import seed as _seed_universe
         logger.info('-- seed-universe --')
         n = _seed_universe()
         logger.info(f'{n:,} tickers written to universe.csv')
 
     if 'universe' in steps and not cancelled():
-        from irp.query.universe import _refresh as _refresh_universe
+        from irp.query.universe import refresh as _refresh_universe
         logger.info('-- universe --')
         n = _refresh_universe()
         logger.info(f'{n:,} tickers')
 
     if 'catalog' in steps and not cancelled():
-        from irp.query.catalog import _refresh as _refresh_catalog
+        from irp.query.catalog import refresh as _refresh_catalog
         logger.info('-- catalog --')
         n = _refresh_catalog()
         logger.info(f'{n:,} tickers')

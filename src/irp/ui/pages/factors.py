@@ -12,12 +12,12 @@ from dash import Input, Output, State, callback, dcc, html
 from dash import dash_table as _dt
 from dash.exceptions import PreventUpdate
 
-from irp.ui.charts import _base_chart_layout
-from irp.ui.charts import _empty_figure
+from irp.ui.charts import base_chart_layout
+from irp.ui.charts import empty_figure
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
 from irp.ui.services import factors_service, universe_service, watchlist_service
-from irp.ui.tables import _column_format as _col_fmt
-from irp.ui.tables import _format_factor_value as _fmt
+from irp.ui.tables import column_format as _col_fmt
+from irp.ui.tables import format_factor_value as _fmt
 from irp.ui.theme import ACCENT, HOVER_LABEL, MUTED, TABLE_STYLE
 
 dash.register_page(__name__, path='/factors', name='Factors')
@@ -338,7 +338,7 @@ def compute_xsection(
 def render_ranking_chart(store: dict | None) -> go.Figure:
     """Horizontal bar chart of tickers ranked by selected factor."""
     if not store or not store.get('records'):
-        return _empty_figure('Select date and click Run')
+        return empty_figure('Select date and click Run')
 
     data = store['records']
     factor: str = store.get('factor', 'pe')
@@ -346,12 +346,12 @@ def render_ranking_chart(store: dict | None) -> go.Figure:
 
     df = pd.DataFrame(data)
     if factor not in df.columns:
-        return _empty_figure(f'Factor "{factor}" not in data')
+        return empty_figure(f'Factor "{factor}" not in data')
 
     df = df.dropna(subset=[factor])
     df = df[df[factor].apply(lambda v: isfinite(float(v)) if v is not None else False)]
     if df.empty:
-        return _empty_figure(
+        return empty_figure(
             'No tickers with valid data — try a different date or filter'
         )
 
@@ -376,7 +376,7 @@ def render_ranking_chart(store: dict | None) -> go.Figure:
             hoverinfo='text',
             hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
         ),
-        layout=_base_chart_layout(
+        layout=base_chart_layout(
             title=dict(
                 text=f'{label} — cross-section',
                 font=dict(color=MUTED, size=12),
@@ -493,18 +493,18 @@ def compute_history(
 def render_history_chart(store: dict | None) -> go.Figure:
     """Line chart of selected factor over filing dates."""
     if not store or not store.get('records'):
-        return _empty_figure('Select a ticker and click Run.')
+        return empty_figure('Select a ticker and click Run.')
 
     factor: str = store.get('factor', 'pe')
     df = pd.DataFrame(store['records'])
     from irp.factors._cols import REPORT_DATE
 
     if REPORT_DATE not in df.columns or factor not in df.columns:
-        return _empty_figure(f'Factor "{factor}" not available for this ticker')
+        return empty_figure(f'Factor "{factor}" not available for this ticker')
 
     df = df.dropna(subset=[factor]).sort_values(REPORT_DATE)
     if df.empty:
-        return _empty_figure('No data for this factor.')
+        return empty_figure('No data for this factor.')
 
     label = FACTOR_LABELS.get(factor, factor)
     hover = [
@@ -523,7 +523,7 @@ def render_history_chart(store: dict | None) -> go.Figure:
             hoverinfo='text',
             hoverlabel=dict(**HOVER_LABEL, bordercolor=ACCENT),
         ),
-        layout=_base_chart_layout(
+        layout=base_chart_layout(
             yaxis_title=label,
             xaxis_title='Filing Date',
         ),

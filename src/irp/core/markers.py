@@ -18,7 +18,7 @@ import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
-from irp.core.freshness import _is_fresh as _is_fresh_func
+from irp.core.freshness import is_fresh as _is_fresh_func
 
 
 @dataclass(frozen=True)

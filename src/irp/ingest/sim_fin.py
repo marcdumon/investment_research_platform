@@ -331,7 +331,7 @@ class SimFinSource:
         if self.markers.is_fresh('stored_bulk', 'transformed_bulk'):
             logger.info('store(bulk): already up to date, skipping')
             return
-        from irp.core.db import _write_session as write_session
+        from irp.core.db import write_session
         with write_session() as con:
             for suffix in ('', '_restated'):
                 for statement in _STATEMENTS:

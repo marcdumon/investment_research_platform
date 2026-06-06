@@ -3,7 +3,7 @@ from pathlib import Path
 import dash
 from dash import html
 
-from irp.ui.components import _navbar as navbar
+from irp.ui.components import navbar
 
 _HERE = Path(__file__).parent
 

@@ -11,9 +11,9 @@ from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
-from irp.factors.registry import _all_factors as all_factors
-from irp.ui.charts import _corr_heatmap_figure as _heatmap_figure
-from irp.ui.charts import _empty_figure
+from irp.factors.registry import all_factors
+from irp.ui.charts import corr_heatmap_figure as _heatmap_figure
+from irp.ui.charts import empty_figure
 from irp.ui.services import factors_service, universe_service, watchlist_service
 from irp.ui.theme import ACCENT
 
@@ -206,7 +206,7 @@ layout = html.Div(
             color=ACCENT,
             children=dcc.Graph(
                 id='corr-heatmap',
-                figure=_empty_figure('Select filters and click Run'),
+                figure=empty_figure('Select filters and click Run'),
                 config={'displayModeBar': False},
                 style={'minHeight': '400px'},
             ),
@@ -300,10 +300,10 @@ def _run(
             title = f'Return correlation — {w_label} ending {date_str[:10]}'
 
         if corr.empty:
-            return _empty_figure(err or 'No data')
+            return empty_figure(err or 'No data')
 
         return _heatmap_figure(corr, labels, title, warning=err)
 
     except Exception as exc:
         logger.exception('correlation callback error')
-        return _empty_figure(f'Error: {exc}')
+        return empty_figure(f'Error: {exc}')

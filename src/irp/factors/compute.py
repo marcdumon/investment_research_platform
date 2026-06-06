@@ -21,7 +21,7 @@ from irp.factors import cache as _cache
 from irp.factors._cols import REPORT_DATE
 from irp.factors._pit import pit_latest, pit_price, _pit_ttm
 from irp.factors.momentum import compute_momentum
-from irp.factors.technical import _compute_technical as compute_technical
+from irp.factors.technical import compute_technical
 from irp.factors.orchestrate import (
     run_backtest,
     run_composite_backtest,

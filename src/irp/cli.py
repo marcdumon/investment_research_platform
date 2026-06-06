@@ -2,7 +2,7 @@ import questionary
 from questionary import Choice, Style
 
 from irp.core.config import config
-from irp.core.logging import _configure_logging as configure_logging
+from irp.core.logging import configure_logging
 from irp.runner import DataProvider
 
 STYLE = Style([
@@ -82,11 +82,11 @@ def main() -> None:
 
     if force:
         for name in providers:
-            _delete_markers(name, feed)
+            delete_markers(name, feed)
         print()
 
     for name in providers:
-        src = _make_source(name, yahoo_content=yahoo_content, yahoo_prices_mode=yahoo_prices_mode)
+        src = make_source(name, yahoo_content=yahoo_content, yahoo_prices_mode=yahoo_prices_mode)
         print(f'── {name} ──')
         if feed not in src.SUPPORTED_FEEDS:
             print(f'  feed {feed!r} not supported by {name}, skipping')
@@ -101,25 +101,25 @@ def main() -> None:
             src.cleanup()
 
     if 'seed-universe' in steps:
-        from irp.query.universe import _seed as _seed_universe
+        from irp.query.universe import seed as _seed_universe
         print('── seed-universe ──')
         n = _seed_universe()
         print(f'  {n:,} tickers written to universe.csv')
 
     if 'universe' in steps:
-        from irp.query.universe import _refresh as _refresh_universe
+        from irp.query.universe import refresh as _refresh_universe
         print('── universe ──')
         n = _refresh_universe()
         print(f'  {n:,} tickers')
 
     if 'catalog' in steps:
-        from irp.query.catalog import _refresh as _refresh_catalog
+        from irp.query.catalog import refresh as _refresh_catalog
         print('── catalog ──')
         n = _refresh_catalog()
         print(f'  {n:,} tickers')
 
 
-def _delete_markers(name: str, feed: str) -> None:
+def delete_markers(name: str, feed: str) -> None:
     from irp.core.markers import MarkerSet
     cfg = getattr(config.providers, name)
     raw_dir = config.data.root_dir / cfg.raw_dir
@@ -128,7 +128,7 @@ def _delete_markers(name: str, feed: str) -> None:
         print(f'  deleted {n} {name}/{feed} marker{"s" if n != 1 else ""}')
 
 
-def _make_source(
+def make_source(
     name: str,
     yahoo_content: list[str] | None = None,
     yahoo_prices_mode: str = 'batch',

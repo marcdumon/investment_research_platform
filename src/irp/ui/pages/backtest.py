@@ -13,8 +13,8 @@ from dash.exceptions import PreventUpdate
 
 from irp.core.config import config
 from irp.features.composite import PRESETS
-from irp.ui.charts import _base_chart_layout as _chart_layout
-from irp.ui.charts import _empty_figure
+from irp.ui.charts import base_chart_layout as _chart_layout
+from irp.ui.charts import empty_figure
 from irp.ui.factor_meta import FACTOR_OPTIONS
 from irp.ui.services import backtest_service, universe_service, watchlist_service
 from irp.ui.theme import ACCENT, MUTED
@@ -347,7 +347,7 @@ layout = html.Div(
                 html.H3('Information Coefficient (Spearman)', className='chart-title'),
                 dcc.Graph(
                     id='bt-ic-chart',
-                    figure=_empty_figure('Run backtest to see results'),
+                    figure=empty_figure('Run backtest to see results'),
                     config={'displayModeBar': False},
                 ),
             ],
@@ -359,7 +359,7 @@ layout = html.Div(
                 html.H3('Quintile Cumulative Log Returns', className='chart-title'),
                 dcc.Graph(
                     id='bt-quintile-chart',
-                    figure=_empty_figure('Run backtest to see results'),
+                    figure=empty_figure('Run backtest to see results'),
                     config={'displayModeBar': False},
                 ),
             ],
@@ -371,7 +371,7 @@ layout = html.Div(
                 html.H3('Quintile Excess Return vs EW', className='chart-title'),
                 dcc.Graph(
                     id='bt-spread-chart',
-                    figure=_empty_figure('Run backtest to see results'),
+                    figure=empty_figure('Run backtest to see results'),
                     config={'displayModeBar': False},
                 ),
             ],
@@ -417,7 +417,7 @@ layout = html.Div(
                     color=ACCENT,
                     children=dcc.Graph(
                         id='bt-decay-chart',
-                        figure=_empty_figure('Run decay analysis to see results'),
+                        figure=empty_figure('Run decay analysis to see results'),
                         config={'displayModeBar': False},
                     ),
                 ),
@@ -668,7 +668,7 @@ def run_bt(
 def render_ic(data):
     if not data or 'error' in (data or {}):
         msg = data.get('error', 'No data') if data else 'No data'
-        return html.Span(msg, style={'color': 'red'}), _empty_figure(msg)
+        return html.Span(msg, style={'color': 'red'}), empty_figure(msg)
 
     ic_records = data.get('ic', [])
     mean_ic = data.get('mean_ic')
@@ -772,7 +772,7 @@ def render_ic(data):
     )
 
     if not ic_records:
-        return chips, _empty_figure('No IC data')
+        return chips, empty_figure('No IC data')
 
     dates = [r['date'] for r in ic_records]
     ic_vals = [r['ic'] for r in ic_records]
@@ -838,7 +838,7 @@ def render_ic(data):
 )
 def render_quintiles(data):
     if not data or 'error' in (data or {}) or not data.get('qcr'):
-        return _empty_figure('No quintile data')
+        return empty_figure('No quintile data')
 
     qcr_records = data['qcr']
     df = pd.DataFrame(qcr_records)
@@ -940,14 +940,14 @@ def render_quintiles(data):
 )
 def render_spread(data):
     if not data or 'error' in (data or {}) or not data.get('qcr'):
-        return _empty_figure('No quintile data')
+        return empty_figure('No quintile data')
 
     df = pd.DataFrame(data['qcr'])
     df['date'] = pd.to_datetime(df['date'])
 
     ew_cols = [c for c in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'] if c in df.columns]
     if not ew_cols:
-        return _empty_figure('No quintile data')
+        return empty_figure('No quintile data')
 
     ew_vals = df[ew_cols].mean(axis=1)
     fig = go.Figure(layout=_chart_layout())
@@ -1054,12 +1054,12 @@ def run_decay_analysis(
 )
 def render_decay(data):
     if not data:
-        return _empty_figure('Run decay analysis to see results')
+        return empty_figure('Run decay analysis to see results')
     if isinstance(data, dict) and 'error' in data:
-        return _empty_figure(data['error'])
+        return empty_figure(data['error'])
     df = pd.DataFrame(data)
     if df.empty:
-        return _empty_figure('No data')
+        return empty_figure('No data')
 
     valid_icir = df['icir'].dropna()
 

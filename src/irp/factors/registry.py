@@ -17,7 +17,7 @@ class FactorDef:
     )
 
 
-def _register(
+def register(
     name: str,
     label: str,
     *,
@@ -35,7 +35,7 @@ def _register(
 
 
 def _populate() -> None:
-    """Import all factor modules to trigger their _register() calls."""
+    """Import all factor modules to trigger their register() calls."""
     global _populated
     if _populated:
         return
@@ -50,7 +50,7 @@ def _populate() -> None:
     _populated = True
 
 
-def _all_factors() -> list[FactorDef]:
+def all_factors() -> list[FactorDef]:
     """All registered factors in registration order."""
     _populate()
     return list(_REGISTRY.values())

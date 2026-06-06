@@ -35,7 +35,7 @@ class _ColorFormatter(logging.Formatter):
         return f'{color}{super().format(record)}{_RESET}'
 
 
-def _configure_logging(level: int | str = config.log_level) -> None:
+def configure_logging(level: int | str = config.log_level) -> None:
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers.clear()

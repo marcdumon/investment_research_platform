@@ -1,6 +1,6 @@
 """Shared Plotly chart helpers for UI pages.
 
-Every page used to define its own `_empty_figure` and `_chart_layout`;
+Every page used to define its own `empty_figure` and `_chart_layout`;
 this module consolidates the layout dicts + a couple of high-level
 chart factories so behaviour stays consistent across pages.
 """
@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 from irp.ui.theme import GRID, MUTED
 
 
-def _empty_figure(message: str = 'No data') -> go.Figure:
+def empty_figure(message: str = 'No data') -> go.Figure:
     """Blank figure displaying a centered muted-text annotation."""
     fig = go.Figure()
     fig.update_layout(
@@ -37,7 +37,7 @@ def _empty_figure(message: str = 'No data') -> go.Figure:
     return fig
 
 
-def _base_chart_layout(**extra: Any) -> go.Layout:
+def base_chart_layout(**extra: Any) -> go.Layout:
     """Standard themed Plotly Layout. Extra kwargs override defaults."""
     defaults: dict[str, Any] = dict(
         paper_bgcolor='rgba(0,0,0,0)',
@@ -65,13 +65,13 @@ def _base_chart_layout(**extra: Any) -> go.Layout:
     return go.Layout(**defaults)
 
 
-def _scatter_chart_layout(**extra: Any) -> go.Layout:
+def scatter_chart_layout(**extra: Any) -> go.Layout:
     """Like `base_chart_layout` but with `hovermode='closest'` for scatter-style plots."""
     extra.setdefault('hovermode', 'closest')
-    return _base_chart_layout(**extra)
+    return base_chart_layout(**extra)
 
 
-def _corr_heatmap_figure(
+def corr_heatmap_figure(
     corr: pd.DataFrame,
     labels: list[str],
     title: str,
