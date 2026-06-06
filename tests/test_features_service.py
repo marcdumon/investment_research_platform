@@ -359,3 +359,29 @@ def test_split_and_scale_tames_then_scales_with_notes():
     # clip + minmax-per-date bounds the column to [0, 1] — no residual warning
     assert not any('still large' in n for n in notes)
     assert out['roe'].abs().quantile(0.99) < 10
+
+
+def test_split_and_scale_clip_fits_train_split_not_full_date_scope():
+    """Default date scope + by-date split + Clip: clip caps MUST come from the train
+    rows, never the full sample (the user's train-only rule). The latest date lands in
+    the test split with large varying roe; a train-fit clip cap collapses it to a
+    constant -> minmax-per-date yields all zeros. A leaky full-sample clip leaves it
+    varying."""
+    rows = []
+    for yr in range(2010, 2018):          # train-ish dates, small roe
+        d = datetime.date(yr, 12, 31)
+        for i in range(10):
+            rows.append({'Date': d, 'Ticker': f'T{i}', 'roe': float(i),
+                         'fwd_ret': 0.0, 'label': 0})
+    dt = datetime.date(2019, 12, 31)      # most-recent date -> test split; huge, varying
+    for i in range(10):
+        rows.append({'Date': dt, 'Ticker': f'T{i}', 'roe': 1000.0 * (i + 1),
+                     'fwd_ret': 0.0, 'label': 0})
+    panel = pd.DataFrame(rows)
+    cfg = {'method': 'minmax', 'scope': 'date',
+           'tame_action': 'clip', 'tame_cols': ['roe'], 'tame_p': 0.0}
+    split = {'method': 'date', 'train': 0.7, 'valid': 0.15, 'test': 0.15}
+    out, _ = svc._split_and_scale(panel, cfg, split)
+    huge = out[out['Date'] == datetime.date(2019, 12, 31)]
+    assert len(huge) == 10 and (huge['split'] == 'test').all()   # sanity: it is the test split
+    assert np.allclose(huge['roe'].to_numpy(), 0.0)        # train-fit clip -> constant -> 0
