@@ -272,3 +272,14 @@ def test_heavy_tail_report_summary_only_skips_detail():
     rep = eng.heavy_tail_report(_report_panel(), with_detail=False)
     assert not rep.summary.empty and 'roe' in set(rep.summary['col'])
     assert rep.offenders.empty and rep.by_ticker.empty
+
+
+def test_tame_clip_p_out_of_range_is_clamped():
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 12, 31)] * 5, 'Ticker': list('ABCDE'),
+        'f': [1.0, 2, 3, 4, 5], 'fwd_ret': 0.0, 'label': 0,
+    })
+    out = eng.tame_columns(df, ['f'], 'clip', p=2.0)   # invalid p must not raise
+    assert out['f'].notna().all()
+    out2 = eng.tame_columns(df, ['f'], 'clip', p=-1.0)  # negative too
+    assert out2['f'].notna().all()
