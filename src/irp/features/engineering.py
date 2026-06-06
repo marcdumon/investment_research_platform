@@ -216,6 +216,10 @@ def scale_features(
     if not cols:
         return df
     out = df.copy()
+    # Scaled values are continuous float64; upcast the targets first so partial-row
+    # .loc assignment never hits pandas' float64→float32 LossySetitemError (dense
+    # panels carry float32 columns).
+    out[cols] = out[cols].astype('float64')
 
     if scope == 'date':
         for _, idx in out.groupby('Date', sort=False).groups.items():
