@@ -322,6 +322,26 @@ layout = html.Div(
             _field('Train cutoff year', _num('feat-scale-cutoff', '2020', None, '110px'),
                    wrap_id='feat-f-scale-cutoff'),
         ]),
+        html.P('Heavy-tailed columns (named in build notes after a build) stay huge '
+               'after robust/minmax. Pick them here to clip / log before scaling, or '
+               'drop them. Clip & Log fit on the train rows.',
+               style={'color': MUTED, 'fontSize': '12px', 'margin': '6px 0 4px'}),
+        html.Div(className='control-row', style={'alignItems': 'flex-end'},
+                 id='feat-tame-row', children=[
+            _field('Heavy tails',
+                   dcc.RadioItems(id='feat-scale-tame-action',
+                                  options=[{'label': 'None', 'value': 'none'},
+                                           {'label': 'Clip', 'value': 'clip'},
+                                           {'label': 'Log', 'value': 'log'},
+                                           {'label': 'Drop', 'value': 'drop'}],
+                                  value='none', inline=True, labelClassName='check-item')),
+            _field('Columns',
+                   dcc.Dropdown(id='feat-scale-tame-cols', options=[], value=[],
+                                multi=True, placeholder='columns to tame…',
+                                style={'width': '320px'})),
+            _field('Clip p', _num('feat-scale-tame-p', '0.01', 0.01, '90px'),
+                   wrap_id='feat-f-tame-p'),
+        ]),
 
         # ── Step 3c: train / valid / test split ───────────────────────
         html.H4('3c · Train / valid / test split', className='section-title',
@@ -395,6 +415,19 @@ def toggle_scale_cutoff(scope):
 
 
 @callback(
+    Output('feat-tame-row', 'style'),
+    Output('feat-f-tame-p', 'style'),
+    Input('feat-scale-method', 'value'),
+    Input('feat-scale-tame-action', 'value'),
+)
+def toggle_tame_inputs(method, action):
+    """Tame row only when scaling is on; Clip p only for the clip action."""
+    row = dict(_HIDE) if method in (None, 'none') else {'display': 'flex'}
+    p = dict(_SHOW) if action == 'clip' else dict(_HIDE)
+    return row, p
+
+
+@callback(
     Output('feat-f-split-train', 'style'), Output('feat-f-split-valid', 'style'),
     Output('feat-f-split-test', 'style'), Output('feat-f-split-seed', 'style'),
     Input('feat-split-method', 'value'),
@@ -409,12 +442,13 @@ def toggle_split_inputs(method):
 
 @callback(
     Output('feat-col-a', 'options'), Output('feat-col-b', 'options'),
+    Output('feat-scale-tame-cols', 'options'),
     Input('feat-freq', 'value'),
 )
 def update_col_options(freq):
     """Dense frequencies expose the fundamentals-only + price/volume palette."""
     opts = _COL_OPTIONS_DENSE if freq in _DENSE_FREQS else _COL_OPTIONS
-    return opts, opts
+    return opts, opts, opts
 
 
 @callback(
@@ -591,7 +625,8 @@ def render_step_stack(steps):
 
 def _spec(start, end, freq, variant, steps, horizon, mode, buckets,
           market, sector, watchlist, scale_method='none', scale_scope='date',
-          scale_cutoff=None, split_method='none', split_train=0.7, split_valid=0.15,
+          scale_cutoff=None, tame_action='none', tame_cols=None, tame_p=0.01,
+          split_method='none', split_train=0.7, split_valid=0.15,
           split_test=0.15, split_seed=0) -> dict:
     return {
         'start': int(start or 2015), 'end': int(end or 2025),
@@ -599,7 +634,9 @@ def _spec(start, end, freq, variant, steps, horizon, mode, buckets,
         'label': {'mode': mode, 'horizon_days': int(horizon or 252),
                   'n_buckets': int(buckets or 5)},
         'scale': {'method': scale_method or 'none', 'scope': scale_scope or 'date',
-                  'train_cutoff': int(scale_cutoff) if scale_cutoff not in (None, '') else None},
+                  'train_cutoff': int(scale_cutoff) if scale_cutoff not in (None, '') else None,
+                  'tame_action': tame_action or 'none', 'tame_cols': tame_cols or [],
+                  'tame_p': float(tame_p) if tame_p not in (None, '') else 0.01},
         'split': {'method': split_method or 'none',
                   'train': float(split_train or 0.7), 'valid': float(split_valid or 0.15),
                   'test': float(split_test or 0.15), 'seed': int(split_seed or 0)},
@@ -658,6 +695,8 @@ def precompute_cache(n, start, end, variant):
     State('feat-watchlist', 'value'),
     State('feat-scale-method', 'value'), State('feat-scale-scope', 'value'),
     State('feat-scale-cutoff', 'value'),
+    State('feat-scale-tame-action', 'value'), State('feat-scale-tame-cols', 'value'),
+    State('feat-scale-tame-p', 'value'),
     State('feat-split-method', 'value'), State('feat-split-train', 'value'),
     State('feat-split-valid', 'value'), State('feat-split-test', 'value'),
     State('feat-split-seed', 'value'),
@@ -667,9 +706,11 @@ def precompute_cache(n, start, end, variant):
 )
 def run_build(n, start, end, freq, variant, steps, horizon, mode, buckets,
               market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
+              tame_action, tame_cols, tame_p,
               split_method, split_train, split_valid, split_test, split_seed):
     spec = _spec(start, end, freq, variant, steps, horizon, mode, buckets,
                  market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
+                 tame_action, tame_cols, tame_p,
                  split_method, split_train, split_valid, split_test, split_seed)
     try:
         df, missing = _run_spec(spec)
@@ -782,6 +823,8 @@ def export(parquet_n, csv_n, store, name):
     State('feat-watchlist', 'value'),
     State('feat-scale-method', 'value'), State('feat-scale-scope', 'value'),
     State('feat-scale-cutoff', 'value'),
+    State('feat-scale-tame-action', 'value'), State('feat-scale-tame-cols', 'value'),
+    State('feat-scale-tame-p', 'value'),
     State('feat-split-method', 'value'), State('feat-split-train', 'value'),
     State('feat-split-valid', 'value'), State('feat-split-test', 'value'),
     State('feat-split-seed', 'value'),
@@ -790,11 +833,13 @@ def export(parquet_n, csv_n, store, name):
 )
 def save_recipe(n, name, start, end, freq, variant, steps, horizon, mode, buckets,
                 market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
+                tame_action, tame_cols, tame_p,
                 split_method, split_train, split_valid, split_test, split_seed, trigger):
     if not name:
         return trigger, 'Enter a recipe name to save.'
     spec = _spec(start, end, freq, variant, steps, horizon, mode, buckets,
                  market, sector, watchlist, scale_method, scale_scope, scale_cutoff,
+                 tame_action, tame_cols, tame_p,
                  split_method, split_train, split_valid, split_test, split_seed)
     features_service.save_recipe(name, spec)
     return (trigger or 0) + 1, f'Saved recipe "{name}".'
@@ -809,6 +854,8 @@ def save_recipe(n, name, start, end, freq, variant, steps, horizon, mode, bucket
     Output('feat-watchlist', 'value'),
     Output('feat-scale-method', 'value'), Output('feat-scale-scope', 'value'),
     Output('feat-scale-cutoff', 'value'),
+    Output('feat-scale-tame-action', 'value'), Output('feat-scale-tame-cols', 'value'),
+    Output('feat-scale-tame-p', 'value'),
     Output('feat-split-method', 'value'), Output('feat-split-train', 'value'),
     Output('feat-split-valid', 'value'), Output('feat-split-test', 'value'),
     Output('feat-split-seed', 'value'),
@@ -830,5 +877,6 @@ def load_recipe_controls(name):
             s.get('variant', 'A'), lbl.get('horizon_days', 252), lbl.get('mode', 'continuous'),
             lbl.get('n_buckets', 5), f.get('market'), f.get('sector'), f.get('watchlist'),
             sc.get('method', 'none'), sc.get('scope', 'date'), sc.get('train_cutoff'),
+            sc.get('tame_action', 'none'), sc.get('tame_cols', []), sc.get('tame_p', 0.01),
             sp.get('method', 'none'), sp.get('train', 0.7), sp.get('valid', 0.15),
             sp.get('test', 0.15), sp.get('seed', 0))
