@@ -2,7 +2,7 @@
 import pandas as pd
 
 from irp.core.db import db
-from irp.checks.stooq_reviews import _load_reviews as load_reviews
+from irp.checks.stooq_reviews import load_reviews
 from irp.checks.stooq_rules import REGISTRY
 
 

@@ -28,7 +28,7 @@ def _valid(r: dict) -> bool:
     return all(k in r for k in _REQUIRED)
 
 
-def _load_reviews() -> set[tuple[str, str, str]]:
+def load_reviews() -> set[tuple[str, str, str]]:
     """Set of (ticker, period, rule) keys to suppress in future runs."""
     return {(r['ticker'], str(r['period']), r['rule']) for r in _load_raw() if _valid(r)}
 

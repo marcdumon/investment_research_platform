@@ -20,7 +20,7 @@ import pandas as pd
 import polars as pl
 from dateutil.relativedelta import relativedelta
 
-from irp.panel.load import load_prices_wide, load_fundamentals, _load_ta_panel
+from irp.panel.load import load_prices_wide, load_fundamentals, load_ta_panel
 from irp.panel.pit import _pit_latest, _pit_ttm, _pit_price_row, _pit_price_at_offset
 
 logger = logging.getLogger(__name__)
@@ -209,7 +209,7 @@ def _ta_snapshots(as_of: datetime.date) -> dict[str, dict[str, float]]:
     ta_names = [s.name for s in _TA_SPECS]
     result: dict[str, dict[str, float]] = {n: {} for n in ta_names}
 
-    ta_df = _load_ta_panel()
+    ta_df = load_ta_panel()
 
     if not ta_df.is_empty():
         # Panel lookup: last value per ticker with Date <= as_of (sort already done at load)

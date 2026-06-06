@@ -57,7 +57,7 @@ def _empty_cte(cols: str) -> str:
     return f'SELECT {cols} WHERE FALSE'
 
 
-def _refresh() -> int:
+def refresh() -> int:
     """Rebuild the `catalog` table from current DB state + Yahoo JSON files.
 
     Reads queried_prices.json, queried_actions.json, and error_tickers.json
@@ -79,7 +79,7 @@ def _refresh() -> int:
         f'ya_queried={len(ya_queried)}'
     )
 
-    from irp.core.db import _write_session as write_session
+    from irp.core.db import write_session
     with write_session() as con:
         for view, items, col in [
             ('_yp_q', yp_queried, 'yp_q'),
@@ -206,11 +206,11 @@ def _refresh() -> int:
 
 def _main() -> None:
     import time
-    from irp.core.logging import _configure_logging as configure_logging
+    from irp.core.logging import configure_logging
     configure_logging()
     print('Refreshing data catalog...')
     t0 = time.perf_counter()
-    n = _refresh()
+    n = refresh()
     print(f'Done — {n:,} tickers in {time.perf_counter() - t0:.1f}s')
 
 

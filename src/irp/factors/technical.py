@@ -19,7 +19,7 @@ import pandas as pd
 import talib
 
 from irp.factors._cols import PRICE_CLOSE, PRICE_DATE, PRICE_TICKER
-from irp.factors.registry import _register as register
+from irp.factors.registry import register
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ def _compute_ta_snapshot(close: pd.Series) -> dict[str, float]:
     return result
 
 
-def _compute_technical(
+def compute_technical(
     prices: pd.DataFrame,
     as_of_date: datetime.date,
 ) -> pd.DataFrame:

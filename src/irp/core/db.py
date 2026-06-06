@@ -35,7 +35,7 @@ def _db_close() -> None:
 
 
 @contextmanager
-def _write_session() -> Generator[duckdb.DuckDBPyConnection, None, None]:
+def write_session() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """Exclusive write connection.
 
     Blocks new db() callers, then retries until all in-flight read-only

@@ -13,7 +13,7 @@ import pandas as pd
 
 from irp.core.config import config
 from irp.factors.cache import snapshot as _snapshot
-from irp.factors.registry import _all_factors as _all_factors
+from irp.factors.registry import all_factors
 from irp.features import engineering as _eng
 from irp.panel.returns import forward_returns_panel as _forward_returns
 from irp.panel.returns import price_volume_panel as _price_volume
@@ -44,7 +44,7 @@ def available_columns(freq: str = 'A') -> list[str]:
     fundamentals-only carried factors + dense close/volume/TA (price-dependent
     factors dropped; users derive price ratios from dense close).
     """
-    factors = [f.name for f in _all_factors()]
+    factors = [f.name for f in all_factors()]
     if freq in _DENSE_FREQS:
         keep = [c for c in factors if c not in _PRICE_DEP_COLS]
         return keep + PRICE_COLS
@@ -176,8 +176,8 @@ def _dense_ta(grid: list[datetime.date], tickers) -> pd.DataFrame:
     """PIT (backward as-of) TA snapshot from ta_panel at each grid date, per ticker."""
     import polars as pl
 
-    from irp.panel.load import _load_ta_panel
-    ta = _load_ta_panel()
+    from irp.panel.load import load_ta_panel
+    ta = load_ta_panel()
     if ta.is_empty():
         return pd.DataFrame(columns=['Date', 'Ticker'] + _DENSE_TA_COLS)
     hi = pl.lit(pd.Timestamp(max(grid))).cast(pl.Datetime('ns'))

@@ -31,8 +31,8 @@ from irp.factors._cols import (
     TOTAL_CURRENT_LIABILITIES,
 )
 from irp.factors._pit import pit_latest, _pit_ttm
-from irp.factors._utils import _safe_div
-from irp.factors.registry import _register as register
+from irp.factors._utils import safe_div
+from irp.factors.registry import register
 
 register('piotroski_fscore', 'Piotroski F', group='quality')
 
@@ -119,22 +119,22 @@ def compute_piotroski(
     sh_p  = _get(pb, SHARES_DILUTED_BAL)
 
     # Derived ratios
-    roa   = _safe_div(ni,   ta)
-    roa_p = _safe_div(ni_p, ta_p)
-    lev   = _safe_div(ltd,  ta)
-    lev_p = _safe_div(ltd_p, ta_p)
-    cr    = _safe_div(ca,   cl)
-    cr_p  = _safe_div(ca_p, cl_p)
-    gm    = _safe_div(gp,   rev)
-    gm_p  = _safe_div(gp_p, rev_p)
-    at    = _safe_div(rev,  ta)
-    at_p  = _safe_div(rev_p, ta_p)
+    roa   = safe_div(ni,   ta)
+    roa_p = safe_div(ni_p, ta_p)
+    lev   = safe_div(ltd,  ta)
+    lev_p = safe_div(ltd_p, ta_p)
+    cr    = safe_div(ca,   cl)
+    cr_p  = safe_div(ca_p, cl_p)
+    gm    = safe_div(gp,   rev)
+    gm_p  = safe_div(gp_p, rev_p)
+    at    = safe_div(rev,  ta)
+    at_p  = safe_div(rev_p, ta_p)
 
     signals = pd.DataFrame({
         'f1': _gt0(roa),
         'f2': _gt0(cfo),
         'f3': _improved(roa, roa_p),
-        'f4': _gt0(_safe_div(cfo, ta) - roa),   # accruals: CFO/Assets > ROA
+        'f4': _gt0(safe_div(cfo, ta) - roa),   # accruals: CFO/Assets > ROA
         'f5': _gt0(lev_p - lev),                 # leverage decreased
         'f6': _improved(cr, cr_p),
         'f7': _gt0(sh_p - sh),                   # no new shares (prior >= current)

@@ -20,7 +20,7 @@ from irp.panel import cross_section_panel
 logger = logging.getLogger(__name__)
 
 
-def _compute_and_cache(
+def compute_and_cache(
     dates: list[datetime.date],
     variant: Literal['A','Q'],
     tickers: list[str] | None,
@@ -57,7 +57,7 @@ def _compute_and_cache(
     return result
 
 
-def _load_cross_sections(
+def load_cross_sections(
     dates: list[datetime.date],
     variant: Literal['A','Q'],
     tickers: list[str] | None,
@@ -80,7 +80,7 @@ def _load_cross_sections(
 
     if to_compute:
         # Always compute full universe so the cache stays useful across filters.
-        result.update(_compute_and_cache(to_compute, variant, tickers=None))
+        result.update(compute_and_cache(to_compute, variant, tickers=None))
 
     if tickers is not None:
         ticker_set = set(tickers)

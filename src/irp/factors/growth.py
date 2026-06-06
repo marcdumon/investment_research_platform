@@ -10,8 +10,8 @@ import pandas as pd
 
 from irp.factors._cols import NET_INCOME, REVENUE, TICKER
 from irp.factors._pit import pit_latest, _pit_ttm
-from irp.factors._utils import _safe_div
-from irp.factors.registry import _register as register
+from irp.factors._utils import safe_div
+from irp.factors.registry import register
 
 register('rev_growth_1y',  'Rev Growth 1Y',  pct=True, group='growth')
 register('earn_growth_1y', 'Earn Growth 1Y', pct=True, group='growth')
@@ -60,7 +60,7 @@ def compute_growth(
     w = curr.merge(prior, on=TICKER, how='inner').set_index(TICKER)
 
     out = pd.DataFrame(index=w.index)
-    out['rev_growth_1y']  = _safe_div(w['_rev_c'] - w['_rev_p'], w['_rev_p'].abs())
-    out['earn_growth_1y'] = _safe_div(w['_ni_c']  - w['_ni_p'],  w['_ni_p'].abs())
+    out['rev_growth_1y']  = safe_div(w['_rev_c'] - w['_rev_p'], w['_rev_p'].abs())
+    out['earn_growth_1y'] = safe_div(w['_ni_c']  - w['_ni_p'],  w['_ni_p'].abs())
     out.index.name = TICKER
     return out
