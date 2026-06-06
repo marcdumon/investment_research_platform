@@ -219,3 +219,45 @@ def test_residual_scale_flags_fires_on_large_silent_on_small():
     assert 'huge' in flags and flags['huge'] > 10
     assert 'small' not in flags
     assert eng.residual_scale_flags(df, ['Ticker']) == {}   # reserved never flagged
+
+
+def _report_panel():
+    """200 well-behaved tickers + one 'BAD' ticker owning extreme roe values."""
+    rng = np.random.default_rng(7)
+    d = datetime.date(2020, 12, 31)
+    rows = [{'Date': d, 'Ticker': f'T{i}', 'roe': float(rng.normal()),
+             'bounded': float(rng.uniform(-1, 1)), 'fwd_ret': 0.0, 'label': 0}
+            for i in range(200)]
+    for j, dd in enumerate([datetime.date(2019, 12, 31), datetime.date(2020, 12, 31)]):
+        rows.append({'Date': dd, 'Ticker': 'BAD', 'roe': 1e6 * (j + 1),
+                     'bounded': 0.0, 'fwd_ret': 0.0, 'label': 0})
+    return pd.DataFrame(rows)
+
+
+def test_heavy_tail_report_flags_col_and_points_to_bad_ticker():
+    rep = eng.heavy_tail_report(_report_panel())
+    assert 'roe' in set(rep.summary['col'])
+    assert 'bounded' not in set(rep.summary['col'])          # well-behaved ignored
+    roe_row = rep.summary[rep.summary['col'] == 'roe'].iloc[0]
+    assert roe_row['worst_ticker'] == 'BAD'
+    assert rep.offenders.sort_values('z', key=lambda s: s.abs(), ascending=False)\
+        .iloc[0]['Ticker'] == 'BAD'                          # worst offender is BAD
+    bt = rep.by_ticker[(rep.by_ticker['col'] == 'roe') & (rep.by_ticker['Ticker'] == 'BAD')]
+    assert len(bt) == 1 and bt.iloc[0]['max_abs_z'] > 100
+
+
+def test_apply_tame_plan_mixed_actions_clip_train_fit():
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 12, 31)] * 5, 'Ticker': list('ABCDE'),
+        'dropme': [1.0, 2, 3, 4, 5], 'logme': [0.0, 10, 100, 1000, 10000],
+        'clipme': [1.0, 2, 3, 4, 1000.0], 'fwd_ret': 0.0, 'label': 0,
+    })
+    plan = [{'col': 'dropme', 'action': 'drop'},
+            {'col': 'logme', 'action': 'log'},
+            {'col': 'clipme', 'action': 'clip', 'p': 0.0}]
+    mask = df['Ticker'] != 'E'                               # clip caps fit on A-D only
+    out = eng.apply_tame_plan(df, plan, train_mask=mask)
+    assert 'dropme' not in out.columns
+    assert np.isclose(out['logme'].max(), np.log1p(10000.0))
+    assert out['clipme'].max() == 4.0                        # E's 1000 clipped to train max 4
+    assert 'label' in out.columns and 'Ticker' in out.columns

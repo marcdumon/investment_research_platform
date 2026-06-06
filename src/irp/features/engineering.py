@@ -17,6 +17,7 @@ registry factors already in the base palette (`rev_growth_1y`,
 `earn_growth_1y`, `mom_*`).
 """
 import datetime
+from dataclasses import dataclass
 from typing import TypedDict
 
 import numpy as np
@@ -247,6 +248,93 @@ def residual_scale_flags(
         if pd.notna(p99) and p99 > thresh:
             flags[c] = float(p99)
     return flags
+
+
+# ── heavy-tail inspection + per-column tame plan ──────────────────────
+
+_OUTLIER_Z = 3.5  # robust-z magnitude above which a row counts as an outlier
+
+
+@dataclass
+class HeavyTailReport:
+    """Three views of the heavy-tailed columns, so a human can choose drop/log/clip.
+
+    summary  — one row per flagged column: col, n, median, p99, max, iqr, tail_ratio,
+               n_outliers, worst_ticker (ticker owning the single most-extreme row).
+    offenders — long: col, Date, Ticker, value, z (robust z = (x-median)/IQR), the
+               top_n rows per column by |z|.
+    by_ticker — col, Ticker, n_outliers, max_abs_z: spot a single bad ticker.
+    """
+    summary: pd.DataFrame
+    offenders: pd.DataFrame
+    by_ticker: pd.DataFrame
+
+
+def heavy_tail_report(
+    df: pd.DataFrame, cols: list[str] | None = None,
+    thresh: float = 20.0, top_n: int = 20,
+) -> HeavyTailReport:
+    """Inspect heavy-tailed columns. When `cols` is None, auto-picks the flagged
+    columns via `detect_heavy_tailed` (same tail-ratio metric)."""
+    if cols is None:
+        candidates = [c for c in df.columns if c not in _TAME_RESERVED]
+        cols = detect_heavy_tailed(df, candidates, thresh)
+    summ, off, byt = [], [], []
+    for c in cols:
+        if c not in df.columns:
+            continue
+        s = df[c].astype('float64')
+        med = s.median()
+        iqr = s.quantile(0.75) - s.quantile(0.25)
+        z = (s - med) / iqr if iqr else pd.Series(0.0, index=s.index)
+        absz = z.abs()
+        out_mask = absz > _OUTLIER_Z
+        sub = pd.DataFrame({'col': c, 'Date': df['Date'], 'Ticker': df['Ticker'],
+                            'value': s, 'z': z})
+        off.append(sub.reindex(absz.sort_values(ascending=False).index).head(top_n))
+        worst_ticker = df.loc[absz.idxmax(), 'Ticker'] if len(absz) and absz.notna().any() else None
+        tail = s.quantile(0.999) - s.quantile(0.001)
+        summ.append({
+            'col': c, 'n': int(s.notna().sum()), 'median': float(med),
+            'p99': float(s.abs().quantile(0.99)), 'max': float(s.abs().max()),
+            'iqr': float(iqr), 'tail_ratio': float(tail / iqr) if iqr else np.nan,
+            'n_outliers': int(out_mask.sum()), 'worst_ticker': worst_ticker,
+        })
+        if out_mask.any():
+            g = pd.DataFrame({'Ticker': df['Ticker'][out_mask], 'absz': absz[out_mask]})
+            agg = g.groupby('Ticker', sort=False)['absz'].agg(['count', 'max']).reset_index()
+            agg.columns = ['Ticker', 'n_outliers', 'max_abs_z']
+            agg.insert(0, 'col', c)
+            byt.append(agg.sort_values('n_outliers', ascending=False))
+    summary = (pd.DataFrame(summ) if summ else
+               pd.DataFrame(columns=['col', 'n', 'median', 'p99', 'max', 'iqr',
+                                     'tail_ratio', 'n_outliers', 'worst_ticker']))
+    offenders = (pd.concat(off, ignore_index=True) if off else
+                 pd.DataFrame(columns=['col', 'Date', 'Ticker', 'value', 'z']))
+    by_ticker = (pd.concat(byt, ignore_index=True) if byt else
+                 pd.DataFrame(columns=['col', 'Ticker', 'n_outliers', 'max_abs_z']))
+    return HeavyTailReport(summary, offenders, by_ticker)
+
+
+def apply_tame_plan(
+    df: pd.DataFrame, plan: list[dict], train_mask: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Apply a per-column tame plan before scaling. `plan` = list of
+    `{col, action, p}` with action in {drop, log, clip}; different columns may take
+    different actions in one pass. Delegates to `tame_columns` (clip fits on
+    `train_mask` rows, per-column `p`). Reserved columns are never touched."""
+    out = df
+    drops = [s['col'] for s in plan if s.get('action') == 'drop']
+    logs = [s['col'] for s in plan if s.get('action') == 'log']
+    if drops:
+        out = tame_columns(out, drops, 'drop')
+    if logs:
+        out = tame_columns(out, logs, 'log')
+    for s in plan:
+        if s.get('action') == 'clip':
+            out = tame_columns(out, [s['col']], 'clip',
+                               p=float(s.get('p', 0.01)), train_mask=train_mask)
+    return out
 
 
 # ── feature scaling (whole-matrix, model preprocessing) ───────────────
