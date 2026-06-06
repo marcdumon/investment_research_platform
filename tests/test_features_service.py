@@ -1,5 +1,6 @@
 import datetime
 
+import numpy as np
 import pandas as pd
 
 from irp.ui.services import features_service as svc
@@ -282,8 +283,6 @@ def test_available_columns_dense_drops_price_factors():
 
 def test_dense_build_dispatch_and_carry_forward(monkeypatch):
     """Dense freq → dense path: dense close + carried (PIT) fundamentals."""
-    import datetime as _dt
-
     def _fake_pv(grid, tickers=None):
         rows = [(d, 'AAA', 10.0 + i, 100.0) for i, d in enumerate(grid)]
         return pd.DataFrame(rows, columns=['Date', 'Ticker', 'close', 'volume'])
@@ -336,3 +335,27 @@ def snapshots_dates_panel():
             {'roe': [0.1, 0.2]}, index=pd.Index(tickers, name='Ticker')
         )
     }
+
+
+def _panel_with_fat_col():
+    rng = np.random.default_rng(2)
+    rows = []
+    for y in (2018, 2020):
+        d = datetime.date(y, 12, 31)
+        for i in range(200):
+            rows.append({'Date': d, 'Ticker': f'T{i}',
+                         'roe': rng.standard_cauchy() * 1e6,
+                         'fwd_ret': 0.0, 'label': 0})
+    return pd.DataFrame(rows)
+
+
+def test_split_and_scale_tames_then_scales_with_notes():
+    panel = _panel_with_fat_col()
+    scale_cfg = {'method': 'minmax', 'scope': 'date',
+                 'tame_action': 'clip', 'tame_cols': ['roe'], 'tame_p': 0.01}
+    out, notes = svc._split_and_scale(panel, scale_cfg, None)
+    # detection named the fat column up front
+    assert any('roe' in n for n in notes)
+    # clip + minmax-per-date bounds the column to [0, 1] — no residual warning
+    assert not any('still large' in n for n in notes)
+    assert out['roe'].abs().quantile(0.99) < 10
