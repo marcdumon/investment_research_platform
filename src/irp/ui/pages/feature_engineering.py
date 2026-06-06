@@ -144,18 +144,11 @@ layout = html.Div(className='page', children=[
         _field('Clip p', _num('fe-tame-p', '0.01', 0.01, '90px'), wrap_id='fe-f-tame-p'),
         html.Button('Apply to selected', id='fe-tame-add', className='run-btn', n_clicks=0),
     ]),
-    html.Div(style={'display': 'flex', 'gap': '16px', 'flexWrap': 'wrap'}, children=[
-        html.Div(style={'flex': '1 1 380px'}, children=[
-            html.Label('Worst rows', style={'color': MUTED, 'fontSize': '11px'}),
-            dcc.Loading(html.Div(id='fe-offenders')),
-        ]),
-        html.Div(style={'flex': '1 1 280px'}, children=[
-            html.Label('Outliers by ticker', style={'color': MUTED, 'fontSize': '11px'}),
-            dcc.Loading(html.Div(id='fe-by-ticker')),
-        ]),
-    ]),
-    dcc.Loading(dcc.Graph(id='fe-hist', figure=empty_figure('Pick a column'),
-                          config={'displayModeBar': False})),
+    html.P('One histogram per selected column. For Clip, dashed lines mark the '
+           '[p, 1−p] cut points; for Log, the curve is the signed-log result.',
+           style={'color': MUTED, 'fontSize': '11px', 'margin': '4px 0'}),
+    dcc.Loading(html.Div(id='fe-hist-container',
+                         style={'display': 'flex', 'gap': '16px', 'flexWrap': 'wrap'})),
 
     # cleaning plan (queued actions) + exclude tickers
     html.Div(className='control-row', style={'alignItems': 'flex-end', 'marginTop': '8px'}, children=[
@@ -296,58 +289,65 @@ def fe_run_inspect(_n, src, plan, exclude):
     return _table(summ, page_size=15), [summ.iloc[0]['col']]   # auto-drill the worst column
 
 
-def _plan_entry(plan, col):
-    return next((s for s in (plan or []) if s.get('col') == col), None)
+def _hist_figure(col, action, p, series):
+    """Server-side-binned histogram (60 bars) for one column, previewing `action`.
+    Clip → raw distribution with dashed lines at the [p, 1−p] cut points; Log → the
+    signed-log result; None → raw."""
+    vals = pd.to_numeric(series, errors='coerce').dropna().to_numpy() if series is not None else np.array([])
+    if not vals.size:
+        return empty_figure(f'{col}: no numeric values')
+    counts, edges = np.histogram(vals, bins=60)
+    centers = (edges[:-1] + edges[1:]) / 2
+    fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
+    suffix = {'clip': ' (clip bounds)', 'log': ' (after log)'}.get(action, '')
+    fig.update_layout(base_chart_layout(title=f'{col}{suffix}', yaxis_title='count',
+                                        xaxis_title=col))
+    if action == 'clip':
+        lo, hi = np.quantile(vals, p), np.quantile(vals, 1 - p)
+        for x in (lo, hi):
+            fig.add_vline(x=x, line_dash='dash', line_color='#e45756')
+    fig.update_layout(height=300, margin={'l': 40, 'r': 10, 't': 36, 'b': 36})
+    return fig
+
+
+_MAX_HISTS = 12   # cap rendered charts so a huge multi-select can't flood the page
 
 
 @callback(
-    Output('fe-offenders', 'children'),
-    Output('fe-by-ticker', 'children'),
-    Output('fe-hist', 'figure'),
-    Output('fe-tame-action', 'value'),
-    Output('fe-tame-p', 'value'),
+    Output('fe-hist-container', 'children'),
     Input('fe-col', 'value'),
-    Input('fe-tame-store', 'data'),
+    Input('fe-tame-action', 'value'),
+    Input('fe-tame-p', 'value'),
     State('fe-source-store', 'data'),
     State('fe-exclude', 'value'),
     prevent_initial_call=True,
 )
-def fe_workspace(cols, plan, src, exclude):
-    """Drill the FIRST selected column (worst-rows + by-ticker + histogram), reflecting
-    its pending action; updates live on Apply without rebuilding the panel. Syncs the
-    action/p controls to that column's plan entry. Other selected columns share the
-    Apply action but are not individually charted."""
+def fe_histograms(cols, action, p, src, exclude):
+    """One histogram per selected column, previewing the live Action/Clip-p so you see
+    exactly what Apply will do. Computed per column via `column_preview` — no panel
+    rebuild. (Tables removed; the charts carry the signal.)"""
     cols = cols if isinstance(cols, list) else ([cols] if cols else [])
     if not cols or not src or src['token'] not in _SRC_CACHE:
         raise PreventUpdate
-    col = cols[0]                                          # the drilled (charted) column
     df = _SRC_CACHE[src['token']]
-    entry = _plan_entry(plan, col)
-    action = entry['action'] if entry else 'none'
-    p = entry.get('p', 0.01) if entry else 0.01
-    suffix = f'  (+{len(cols) - 1} more selected)' if len(cols) > 1 else ''
-    if entry and entry.get('action') == 'drop':
-        msg = html.P(f'"{col}" is set to DROP — it will be removed at Prepare.{suffix}',
-                     className='no-data')
-        return msg, msg, empty_figure(f'{col}: dropped'), action, p
-
-    series, rep = features_service.column_preview(
-        df, col, tame_entry=entry, exclude_tickers=_parse_exclude(exclude))
-    off = (rep.offenders[['Date', 'Ticker', 'value', 'z']]
-           if rep is not None and not rep.offenders.empty else pd.DataFrame())
-    bt = (rep.by_ticker[['Ticker', 'n_rows', 'n_outliers', 'pct_outliers', 'worst_value']]
-          if rep is not None and not rep.by_ticker.empty else pd.DataFrame())
-    vals = pd.to_numeric(series, errors='coerce').dropna().to_numpy() if series is not None else np.array([])
-    # Bin server-side: send 60 bars, not the full (up to ~12M-row) column to the browser.
-    if vals.size:
-        counts, edges = np.histogram(vals, bins=60)
-        centers = (edges[:-1] + edges[1:]) / 2
-        fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
-    else:
-        fig = empty_figure(f'{col}: no numeric values')
-    title = f'{col} distribution' + (f' (after {action})' if action != 'none' else '') + suffix
-    fig.update_layout(base_chart_layout(title=title, yaxis_title='count', xaxis_title=col))
-    return _table(off, page_size=12), _table(bt, page_size=12), fig, action, p
+    excl = _parse_exclude(exclude)
+    pf = float(p) if p not in (None, '') else 0.01
+    graphs = []
+    for col in cols[:_MAX_HISTS]:
+        if action == 'drop':
+            graphs.append(html.Div(html.P(f'"{col}" → DROP', className='no-data'),
+                                   style={'flex': '1 1 360px'}))
+            continue
+        # Log previews the transformed series; Clip/None show the raw series.
+        entry = {'col': col, 'action': 'log'} if action == 'log' else None
+        series, _ = features_service.column_preview(df, col, tame_entry=entry, exclude_tickers=excl)
+        fig = _hist_figure(col, action, pf, series)
+        graphs.append(dcc.Graph(figure=fig, config={'displayModeBar': False},
+                                style={'flex': '1 1 360px'}))
+    if len(cols) > _MAX_HISTS:
+        graphs.append(html.P(f'… {len(cols) - _MAX_HISTS} more selected (charts capped '
+                             f'at {_MAX_HISTS}).', style={'color': MUTED, 'fontSize': '12px'}))
+    return graphs
 
 
 # ── tame plan editor ──────────────────────────────────────────────────
