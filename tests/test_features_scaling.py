@@ -140,3 +140,82 @@ def test_scale_robust_per_date_median_centered():
     # per date f=[base,base+1,base+2]: median=base+1, IQR=(base+1.5)-(base+0.5)=1
     for _, g in out.groupby('Date'):
         assert np.isclose(sorted(g['f'])[1], 0.0)       # middle value → 0
+
+
+def test_signed_log_monotonic_and_handles_neg_zero():
+    s = pd.Series([-100.0, -1.0, 0.0, 1.0, 100.0])
+    out = eng.signed_log(s)
+    assert out.iloc[2] == 0.0                      # log1p(0) == 0
+    assert (out.iloc[0] < 0) and (out.iloc[4] > 0)  # sign preserved
+    assert out.is_monotonic_increasing              # monotonic
+
+
+def test_detect_heavy_tailed_flags_fat_ignores_bounded_and_constant():
+    rng = np.random.default_rng(0)
+    n = 2000
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 1, 1)] * n,
+        'Ticker': [f'T{i}' for i in range(n)],
+        'fat': rng.standard_cauchy(n) * 1e6,        # heavy tails
+        'bounded': rng.uniform(-1, 1, n),           # well-behaved
+        'const': np.ones(n),                        # zero IQR
+    })
+    flagged = eng.detect_heavy_tailed(df, ['fat', 'bounded', 'const'])
+    assert 'fat' in flagged
+    assert 'bounded' not in flagged
+    assert 'const' not in flagged
+
+
+def _tame_panel():
+    """2 dates × 3 tickers; 'f' has a big outlier on the later (test) date."""
+    rows = []
+    for y, vals in ((2018, [1.0, 2.0, 3.0]), (2020, [4.0, 5.0, 1000.0])):
+        d = datetime.date(y, 12, 31)
+        for tk, v in zip(['A', 'B', 'C'], vals):
+            rows.append({'Date': d, 'Ticker': tk, 'f': v, 'fwd_ret': 0.0, 'label': 0})
+    return pd.DataFrame(rows)
+
+
+def test_tame_clip_fits_on_train_no_leak():
+    df = _tame_panel()
+    train_mask = pd.to_datetime(df['Date']).dt.year <= 2018   # 2018 rows only
+    out = eng.tame_columns(df, ['f'], 'clip', p=0.0, train_mask=train_mask)
+    # train (2018) max is 3.0 -> cap is 3.0; the 1000.0 test outlier clips to 3.0
+    assert out['f'].max() == 3.0
+    # perturbing the test outlier higher must not move the (train-fit) cap
+    df2 = df.copy()
+    df2.loc[df2['f'] == 1000.0, 'f'] = 1e9
+    out2 = eng.tame_columns(df2, ['f'], 'clip', p=0.0, train_mask=train_mask)
+    assert out2['f'].max() == 3.0
+
+
+def test_tame_log_applies_signed_log():
+    df = _tame_panel()
+    out = eng.tame_columns(df, ['f'], 'log')
+    assert np.isclose(out.loc[out['f'].idxmax(), 'f'], np.log1p(1000.0))
+
+
+def test_tame_drop_removes_col_never_reserved():
+    df = _tame_panel()
+    out = eng.tame_columns(df, ['f', 'label'], 'drop')   # 'label' is reserved
+    assert 'f' not in out.columns
+    assert 'label' in out.columns                        # reserved never dropped
+
+
+def test_tame_none_or_empty_is_noop():
+    df = _tame_panel()
+    assert eng.tame_columns(df, [], 'clip').equals(df)
+    assert eng.tame_columns(df, ['f'], 'none').equals(df)
+
+
+def test_residual_scale_flags_fires_on_large_silent_on_small():
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 1, 1)] * 100,
+        'Ticker': [f'T{i}' for i in range(100)],
+        'huge': np.linspace(-500.0, 1000.0, 100),
+        'small': np.linspace(-1.0, 1.0, 100),
+    })
+    flags = eng.residual_scale_flags(df, ['huge', 'small'])
+    assert 'huge' in flags and flags['huge'] > 10
+    assert 'small' not in flags
+    assert eng.residual_scale_flags(df, ['Ticker']) == {}   # reserved never flagged
