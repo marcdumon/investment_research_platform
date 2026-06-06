@@ -162,6 +162,36 @@ def add_winsorize(df: pd.DataFrame, col: str, p: float) -> pd.DataFrame:
     return out
 
 
+def signed_log(s: pd.Series) -> pd.Series:
+    """sign(x) · log1p(|x|). Monotonic, stateless, maps 0 -> 0; tames heavy tails
+    without needing fit params, so it is train/test consistent by construction."""
+    s = s.astype('float64')
+    return np.sign(s) * np.log1p(np.abs(s))
+
+
+def detect_heavy_tailed(
+    df: pd.DataFrame, cols: list[str], thresh: float = 20.0
+) -> list[str]:
+    """Columns whose tail-ratio (q99.9 - q0.1) / IQR exceeds `thresh`.
+
+    Robust/minmax scaling does not clip, so heavy-tailed columns stay huge after
+    scaling. This flags them (drives the pre-scale warning + the user's column
+    pick). Constant columns (zero IQR) are never flagged.
+    """
+    out = []
+    for c in cols:
+        if c not in df.columns:
+            continue
+        s = df[c].astype('float64')
+        iqr = s.quantile(0.75) - s.quantile(0.25)
+        if iqr == 0 or pd.isna(iqr):
+            continue
+        tail = s.quantile(0.999) - s.quantile(0.001)
+        if tail / iqr > thresh:
+            out.append(c)
+    return out
+
+
 # ── feature scaling (whole-matrix, model preprocessing) ───────────────
 
 _SCALE_METHODS = ('minmax', 'robust')

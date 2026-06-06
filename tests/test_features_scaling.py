@@ -140,3 +140,27 @@ def test_scale_robust_per_date_median_centered():
     # per date f=[base,base+1,base+2]: median=base+1, IQR=(base+1.5)-(base+0.5)=1
     for _, g in out.groupby('Date'):
         assert np.isclose(sorted(g['f'])[1], 0.0)       # middle value → 0
+
+
+def test_signed_log_monotonic_and_handles_neg_zero():
+    s = pd.Series([-100.0, -1.0, 0.0, 1.0, 100.0])
+    out = eng.signed_log(s)
+    assert out.iloc[2] == 0.0                      # log1p(0) == 0
+    assert (out.iloc[0] < 0) and (out.iloc[4] > 0)  # sign preserved
+    assert out.is_monotonic_increasing              # monotonic
+
+
+def test_detect_heavy_tailed_flags_fat_ignores_bounded_and_constant():
+    rng = np.random.default_rng(0)
+    n = 2000
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 1, 1)] * n,
+        'Ticker': [f'T{i}' for i in range(n)],
+        'fat': rng.standard_cauchy(n) * 1e6,        # heavy tails
+        'bounded': rng.uniform(-1, 1, n),           # well-behaved
+        'const': np.ones(n),                        # zero IQR
+    })
+    flagged = eng.detect_heavy_tailed(df, ['fat', 'bounded', 'const'])
+    assert 'fat' in flagged
+    assert 'bounded' not in flagged
+    assert 'const' not in flagged
