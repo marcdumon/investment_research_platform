@@ -1217,7 +1217,8 @@ def update_dashboard(tab, sf_results, stq_results):
                     xaxis=dict(title='Unreviewed findings'),
                 ))
             except Exception:
-                pass
+                # Summary bar is optional; an empty/odd result set must not break the page.
+                logger.debug('rule-count bar figure skipped', exc_info=True)
 
         return html.Div(style={'marginBottom': '32px'}, children=[
             html.H4(label, style={'color': MUTED, 'marginBottom': '12px'}),

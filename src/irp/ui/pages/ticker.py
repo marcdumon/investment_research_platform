@@ -728,7 +728,9 @@ def render_prices(
             split_dates = [pd.to_datetime(r['Date']).strftime('%Y-%m-%d')
                            for _, r in spls.iterrows()]
     except Exception:
-        pass
+        # Dividend/split markers are optional chart decoration — never let bad
+        # actions data break the price chart.
+        logger.debug('dividend/split markers skipped', exc_info=True)
 
     # ---- subplot layout ----
     ind = set(indicators or [])
