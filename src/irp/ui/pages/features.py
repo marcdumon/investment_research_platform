@@ -358,7 +358,10 @@ layout = html.Div(
             _dd('feat-recipe-load', [], placeholder='Load recipe…', width='180px', clearable=True),
         ]),
 
-        html.Div(id='feat-status', style={'margin': '8px 0', 'fontSize': '13px', 'color': ACCENT}),
+        dcc.Loading(
+            html.Div(id='feat-status', style={'margin': '8px 0', 'fontSize': '13px', 'color': ACCENT}),
+            type='dot', delay_show=150,
+        ),
         dcc.Loading(html.Div(id='feat-chips', style={'margin': '8px 0'})),
         dcc.Loading(html.Div(id='feat-preview')),
     ],
