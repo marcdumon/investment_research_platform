@@ -247,7 +247,9 @@ def _ta_snapshots(as_of: datetime.date) -> dict[str, dict[str, float]]:
                 if pd.notna(val):
                     result[s.name][ticker] = float(val)
             except Exception:
-                pass
+                # One bad TA spec (TA-Lib on a too-short/degenerate series) must
+                # not kill the whole cross-section; skip just this value.
+                logger.debug('TA spec %s failed for %s', s.name, ticker, exc_info=True)
     return result
 
 

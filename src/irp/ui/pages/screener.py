@@ -1702,7 +1702,8 @@ def render_detail_prices(
                     col=1,
                 )
     except Exception:
-        pass
+        # Dividend markers are optional decoration — never break the price chart.
+        logger.debug('dividend markers skipped', exc_info=True)
 
     # Split lines
     shapes = []
@@ -1725,7 +1726,8 @@ def render_detail_prices(
                         )
                     )
     except Exception:
-        pass
+        # Split lines are optional decoration — never break the price chart.
+        logger.debug('split lines skipped', exc_info=True)
 
     # Volume bars
     if vol_col:
