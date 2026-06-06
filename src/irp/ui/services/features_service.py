@@ -405,6 +405,81 @@ def export_panel(
     return paths
 
 
+# ── dataset source for the Feature-Engineering page ───────────────────
+
+# In-memory handoff: the Dataset-Builder page stashes its last build here so the
+# Feature-Engineering page can pick it up without a round-trip to disk.
+_LAST_BUILD: dict | None = None
+
+
+def set_last_build(df: pd.DataFrame, meta: dict | None = None) -> None:
+    global _LAST_BUILD
+    _LAST_BUILD = {'df': df, 'meta': meta or {}}
+
+
+def get_last_build() -> dict | None:
+    return _LAST_BUILD
+
+
+def list_datasets() -> pd.DataFrame:
+    """Exported datasets in data/feature_exports/, newest first."""
+    d = _EXPORT_DIR
+    files = list(d.glob('*.parquet')) + list(d.glob('*.csv')) if d.exists() else []
+    rows = [{'file': f.name, 'modified': datetime.datetime.fromtimestamp(f.stat().st_mtime),
+             'mb': round(f.stat().st_size / 1e6, 2)} for f in files]
+    if not rows:
+        return pd.DataFrame(columns=['file', 'modified', 'mb'])
+    return pd.DataFrame(rows).sort_values('modified', ascending=False).reset_index(drop=True)
+
+
+def load_dataset(path) -> pd.DataFrame:
+    """Load an exported dataset (parquet/CSV) by file name or absolute path."""
+    p = Path(path)
+    if not p.is_absolute() and not p.exists():
+        p = _EXPORT_DIR / p
+    return pd.read_csv(p) if p.suffix == '.csv' else pd.read_parquet(p)
+
+
+def inspect_dataset(df: pd.DataFrame, cols: list[str] | None = None) -> _eng.HeavyTailReport:
+    """Heavy-tail inspection report for the FE page (thin pass-through)."""
+    return _eng.heavy_tail_report(df, cols=cols)
+
+
+def prepare_features(
+    df: pd.DataFrame,
+    tame_plan: list[dict] | None = None,
+    exclude_tickers: Iterable[str] | None = None,
+    scale_cfg: ScaleCfg | None = None,
+    split_cfg: SplitCfg | None = None,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Feature-Engineering pipeline on a loaded dataset: exclude tickers → apply the
+    per-column tame plan → scale + split. Clip in the tame plan fits on the split's
+    train rows (else the cutoff year), the same train rows the scaler uses."""
+    notes: list[str] = []
+    out = df
+    if exclude_tickers:
+        excl = list(exclude_tickers)
+        n0 = len(out)
+        out = out[~out['Ticker'].isin(excl)].reset_index(drop=True)
+        notes.append(f'excluded {len(excl)} ticker(s); dropped {n0 - len(out)} rows')
+
+    if tame_plan:
+        train_mask = None
+        sp = (split_cfg or {}).get('method', 'none')
+        if sp and sp != 'none':
+            ratios = (float(split_cfg.get('train', 0.7)), float(split_cfg.get('valid', 0.15)),
+                      float(split_cfg.get('test', 0.15)))
+            ss = _eng.assign_split(out, method=sp, ratios=ratios,
+                                   seed=int(split_cfg.get('seed', 0)))
+            train_mask = (ss == 'train')
+        elif (scale_cfg or {}).get('train_cutoff') is not None:
+            train_mask = pd.to_datetime(out['Date']).dt.year <= int(scale_cfg['train_cutoff'])
+        out = _eng.apply_tame_plan(out, tame_plan, train_mask=train_mask)
+
+    out, snotes = _split_and_scale(out, scale_cfg, split_cfg)
+    return out, notes + snotes
+
+
 # ── recipe passthroughs (keep page services-only) ─────────────────────
 
 def list_recipes() -> pd.DataFrame:
