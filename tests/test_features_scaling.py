@@ -261,3 +261,10 @@ def test_apply_tame_plan_mixed_actions_clip_train_fit():
     assert np.isclose(out['logme'].max(), np.log1p(10000.0))
     assert out['clipme'].max() == 4.0                        # E's 1000 clipped to train max 4
     assert 'label' in out.columns and 'Ticker' in out.columns
+
+
+def test_heavy_tail_report_summary_only_skips_detail():
+    # summary-only avoids the per-column top_n sort (cost on huge panels)
+    rep = eng.heavy_tail_report(_report_panel(), with_detail=False)
+    assert not rep.summary.empty and 'roe' in set(rep.summary['col'])
+    assert rep.offenders.empty and rep.by_ticker.empty

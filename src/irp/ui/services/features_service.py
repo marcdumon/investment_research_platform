@@ -440,9 +440,11 @@ def load_dataset(path) -> pd.DataFrame:
     return pd.read_csv(p) if p.suffix == '.csv' else pd.read_parquet(p)
 
 
-def inspect_dataset(df: pd.DataFrame, cols: list[str] | None = None) -> _eng.HeavyTailReport:
-    """Heavy-tail inspection report for the FE page (thin pass-through)."""
-    return _eng.heavy_tail_report(df, cols=cols)
+def inspect_dataset(df: pd.DataFrame, cols: list[str] | None = None,
+                    with_detail: bool = True) -> _eng.HeavyTailReport:
+    """Heavy-tail inspection report for the FE page (thin pass-through).
+    `with_detail=False` = summary only (overview pass on huge panels)."""
+    return _eng.heavy_tail_report(df, cols=cols, with_detail=with_detail)
 
 
 def prepare_features(

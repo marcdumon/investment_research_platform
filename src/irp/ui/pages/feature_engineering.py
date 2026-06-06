@@ -7,6 +7,7 @@ produces the raw dataset.
 import logging
 
 import dash
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, callback, ctx, dash_table as _dt, dcc, html
@@ -271,7 +272,7 @@ def fe_run_inspect(_n, src):
     if not src or src['token'] not in _SRC_CACHE:
         return html.P('Load a dataset first.', className='no-data'), None
     df = _SRC_CACHE[src['token']]
-    rep = features_service.inspect_dataset(df)
+    rep = features_service.inspect_dataset(df, with_detail=False)   # overview pass
     if rep.summary.empty:
         return html.P('No heavy-tailed columns detected.', className='no-data'), None
     summ = rep.summary[['col', 'n', 'median', 'p99', 'max', 'iqr', 'tail_ratio',
@@ -295,8 +296,14 @@ def fe_drilldown(col, src):
     rep = features_service.inspect_dataset(df, cols=[col])
     off = rep.offenders[['Date', 'Ticker', 'value', 'z']] if not rep.offenders.empty else rep.offenders
     bt = rep.by_ticker[['Ticker', 'n_outliers', 'max_abs_z']] if not rep.by_ticker.empty else rep.by_ticker
-    s = pd.to_numeric(df[col], errors='coerce').dropna()
-    fig = go.Figure(go.Histogram(x=s, nbinsx=60, marker_color=ACCENT))
+    s = pd.to_numeric(df[col], errors='coerce').dropna().to_numpy()
+    # Bin server-side: send 60 bars, not the full (up to ~12M-row) column to the browser.
+    if s.size:
+        counts, edges = np.histogram(s, bins=60)
+        centers = (edges[:-1] + edges[1:]) / 2
+        fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
+    else:
+        fig = empty_figure(f'{col}: no numeric values')
     fig.update_layout(base_chart_layout(title=f'{col} distribution',
                                         yaxis_title='count', xaxis_title=col))
     return _table(off, page_size=12), _table(bt, page_size=12), fig
