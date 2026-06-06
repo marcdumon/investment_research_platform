@@ -314,17 +314,29 @@ def _hist_figure(col, action, p, series):
     vals = pd.to_numeric(series, errors='coerce').dropna().to_numpy() if series is not None else np.array([])
     if not vals.size:
         return empty_figure(f'{col}: no numeric values')
-    counts, edges = np.histogram(vals, bins=60)
-    centers = (edges[:-1] + edges[1:]) / 2
-    fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
     suffix = {'clip': ' (clip bounds)', 'log': ' (after log)'}.get(action, '')
-    fig.update_layout(base_chart_layout(title=f'{col}{suffix}', yaxis_title='count',
-                                        xaxis_title=col))
+    lo = hi = view = None
     if action == 'clip':
         pc = min(max(float(p), 0.0), 0.4999)   # clamp to a valid tail fraction
-        lo, hi = np.quantile(vals, pc), np.quantile(vals, 1 - pc)
-        for x in (lo, hi):
-            fig.add_vline(x=x, line_dash='dash', line_color='#e45756')
+        lo, hi = float(np.quantile(vals, pc)), float(np.quantile(vals, 1 - pc))
+        # Bin + zoom to the BULK (a padded window around the two cut points) so a far
+        # outlier can't squash the bars and both lines straddle the centre.
+        span = hi - lo
+        if span > 0:
+            view = (lo - 0.5 * span, hi + 0.5 * span)
+    rng = view if view is not None else (float(vals.min()), float(vals.max()))
+    counts, edges = np.histogram(vals, bins=60, range=rng)
+    centers = (edges[:-1] + edges[1:]) / 2
+    fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
+    fig.update_layout(base_chart_layout(title=f'{col}{suffix}', yaxis_title='count',
+                                        xaxis_title=col))
+    if action == 'clip' and lo is not None:
+        fig.add_vline(x=lo, line_dash='dash', line_color='#e45756',
+                      annotation_text=f'low {lo:.3g}', annotation_position='top left')
+        fig.add_vline(x=hi, line_dash='dash', line_color='#e45756',
+                      annotation_text=f'high {hi:.3g}', annotation_position='top right')
+        if view is not None:
+            fig.update_xaxes(range=list(view))
     fig.update_layout(height=300, margin={'l': 40, 'r': 10, 't': 36, 'b': 36})
     return fig
 
