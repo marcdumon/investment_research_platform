@@ -447,6 +447,28 @@ def inspect_dataset(df: pd.DataFrame, cols: list[str] | None = None,
     return _eng.heavy_tail_report(df, cols=cols, with_detail=with_detail)
 
 
+def column_preview(
+    df: pd.DataFrame, col: str, tame_entry: dict | None = None,
+    exclude_tickers: Iterable[str] | None = None,
+) -> tuple[pd.Series | None, _eng.HeavyTailReport | None]:
+    """Single-column workspace for the FE page: take ONE column, apply the excluded
+    tickers + that column's pending tame action (clip/log; drop → returns (None,
+    None)), and return its cleaned values + a one-column `heavy_tail_report`. Touches
+    only this column, so the inspector updates live without rebuilding the panel.
+    Clip fits on the full sample here (preview only; the leak-free train-fit happens
+    in `prepare_features` at export)."""
+    if col not in df.columns:
+        return None, None
+    sub = df[['Date', 'Ticker', col]]
+    if exclude_tickers:
+        sub = sub[~sub['Ticker'].isin(list(exclude_tickers))]
+    if tame_entry and tame_entry.get('action') == 'drop':
+        return None, None
+    if tame_entry and tame_entry.get('action') in ('clip', 'log'):
+        sub = _eng.apply_tame_plan(sub, [tame_entry])
+    return sub[col], _eng.heavy_tail_report(sub, cols=[col])
+
+
 def prepare_features(
     df: pd.DataFrame,
     tame_plan: list[dict] | None = None,

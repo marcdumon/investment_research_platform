@@ -408,3 +408,25 @@ def test_prepare_features_excludes_tames_scales_splits():
     assert 'split' in out.columns                          # split applied
     assert out['roe'].abs().max() <= 1.0 + 1e-9            # clipped + minmax-bounded
     assert any('excluded' in n for n in notes)
+
+
+def test_column_preview_clip_log_drop_exclude():
+    rows = []
+    for yr in range(2015, 2020):
+        d = datetime.date(yr, 12, 31)
+        for i in range(20):
+            rows.append({'Date': d, 'Ticker': f'T{i}', 'roe': float(i),
+                         'fwd_ret': 0.0, 'label': 0})
+        rows.append({'Date': d, 'Ticker': 'BAD', 'roe': 1e9, 'fwd_ret': 0.0, 'label': 0})
+    df = pd.DataFrame(rows)
+
+    s, rep = svc.column_preview(df, 'roe')                 # no action
+    assert rep is not None and s.max() == 1e9
+    s2, _ = svc.column_preview(df, 'roe', {'col': 'roe', 'action': 'clip', 'p': 0.2})
+    assert s2.max() < 1e9                                  # clipped
+    s3, _ = svc.column_preview(df, 'roe', {'col': 'roe', 'action': 'log'})
+    assert np.isclose(s3.max(), np.log1p(1e9))             # signed-log
+    s4, rep4 = svc.column_preview(df, 'roe', {'col': 'roe', 'action': 'drop'})
+    assert s4 is None and rep4 is None                     # dropped → nothing to show
+    s5, _ = svc.column_preview(df, 'roe', exclude_tickers=['BAD'])
+    assert s5.max() == 19.0                                # BAD rows gone
