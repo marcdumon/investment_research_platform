@@ -303,7 +303,8 @@ def _hist_figure(col, action, p, series):
     fig.update_layout(base_chart_layout(title=f'{col}{suffix}', yaxis_title='count',
                                         xaxis_title=col))
     if action == 'clip':
-        lo, hi = np.quantile(vals, p), np.quantile(vals, 1 - p)
+        pc = min(max(float(p), 0.0), 0.4999)   # clamp to a valid tail fraction
+        lo, hi = np.quantile(vals, pc), np.quantile(vals, 1 - pc)
         for x in (lo, hi):
             fig.add_vline(x=x, line_dash='dash', line_color='#e45756')
     fig.update_layout(height=300, margin={'l': 40, 'r': 10, 't': 36, 'b': 36})

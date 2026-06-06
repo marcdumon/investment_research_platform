@@ -225,6 +225,7 @@ def tame_columns(
             out[c] = signed_log(out[c])
         return out
     if action == 'clip':
+        p = min(max(float(p), 0.0), 0.4999)   # clamp to a valid tail fraction
         out[cols] = out[cols].astype('float64')
         fit = out.loc[train_mask.reindex(out.index).fillna(False).astype(bool)] if train_mask is not None else out
         for c in cols:
