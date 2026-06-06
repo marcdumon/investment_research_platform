@@ -162,6 +162,93 @@ def add_winsorize(df: pd.DataFrame, col: str, p: float) -> pd.DataFrame:
     return out
 
 
+def signed_log(s: pd.Series) -> pd.Series:
+    """sign(x) · log1p(|x|). Monotonic, stateless, maps 0 -> 0; tames heavy tails
+    without needing fit params, so it is train/test consistent by construction."""
+    s = s.astype('float64')
+    return np.sign(s) * np.log1p(np.abs(s))
+
+
+def detect_heavy_tailed(
+    df: pd.DataFrame, cols: list[str], thresh: float = 20.0
+) -> list[str]:
+    """Columns whose tail-ratio (q99.9 - q0.1) / IQR exceeds `thresh`.
+
+    Robust/minmax scaling does not clip, so heavy-tailed columns stay huge after
+    scaling. This flags them (drives the pre-scale warning + the user's column
+    pick). Constant columns (zero IQR) are never flagged.
+    """
+    out = []
+    for c in cols:
+        if c not in df.columns:
+            continue
+        s = df[c].astype('float64')
+        iqr = s.quantile(0.75) - s.quantile(0.25)
+        if iqr == 0 or pd.isna(iqr):
+            continue
+        tail = s.quantile(0.999) - s.quantile(0.001)
+        if tail / iqr > thresh:
+            out.append(c)
+    return out
+
+
+_TAME_RESERVED = frozenset({'Date', 'Ticker', 'fwd_ret', 'label', 'split'})
+
+
+def tame_columns(
+    df: pd.DataFrame,
+    cols: list[str],
+    action: str,
+    p: float = 0.01,
+    train_mask: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Apply one heavy-tail action to `cols` before scaling. Reserved columns are
+    never touched even if passed.
+
+    action:
+        'clip' — winsorize to [p, 1-p] quantiles computed on `train_mask` rows
+                 (full sample if no mask), applied to all rows. Leak-free w.r.t.
+                 the test split.
+        'log'  — signed_log in place (stateless).
+        'drop' — remove the columns.
+        'none' — no-op.
+    """
+    cols = [c for c in cols if c in df.columns and c not in _TAME_RESERVED]
+    if not cols or action in (None, 'none'):
+        return df
+    out = df.copy()
+    if action == 'drop':
+        return out.drop(columns=cols)
+    if action == 'log':
+        for c in cols:
+            out[c] = signed_log(out[c])
+        return out
+    if action == 'clip':
+        out[cols] = out[cols].astype('float64')
+        fit = out.loc[train_mask.reindex(out.index).fillna(False).astype(bool)] if train_mask is not None else out
+        for c in cols:
+            src = fit[c] if not fit[c].dropna().empty else out[c]
+            lo, hi = src.quantile(p), src.quantile(1 - p)
+            out[c] = out[c].clip(lo, hi)
+        return out
+    raise ValueError(f'unknown tame action {action!r}')
+
+
+def residual_scale_flags(
+    df: pd.DataFrame, cols: list[str], thresh: float = 10.0
+) -> dict[str, float]:
+    """Post-scale check: {col: p99_abs} for feature columns whose 99th-percentile
+    absolute value still exceeds `thresh` (scaling failed to tame them)."""
+    flags = {}
+    for c in cols:
+        if c not in df.columns or c in _TAME_RESERVED:
+            continue
+        p99 = df[c].astype('float64').abs().quantile(0.99)
+        if pd.notna(p99) and p99 > thresh:
+            flags[c] = float(p99)
+    return flags
+
+
 # ── feature scaling (whole-matrix, model preprocessing) ───────────────
 
 _SCALE_METHODS = ('minmax', 'robust')
