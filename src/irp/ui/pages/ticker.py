@@ -1354,12 +1354,21 @@ def render_actions(ticker: str | None) -> Any:
     if not spls.empty:
         spls = spls.sort_values('Date', ascending=False).reset_index(drop=True)
         ratio_col = (
-            'Stock Splits' if 'Stock Splits' in spls.columns else spls.columns[-1]
+            'Ratio' if 'Ratio' in spls.columns
+            else 'Stock Splits' if 'Stock Splits' in spls.columns
+            else spls.columns[-1]
         )
+
+        def _fmt_ratio(v):
+            try:
+                return f'{float(v):g}'        # 2.0 -> '2', 1.5 -> '1.5'
+            except (TypeError, ValueError):
+                return str(v)
+
         spl_rows = [
             html.Tr([
                 html.Td(str(row['Date'])[:10], className='stmt-td stmt-td--item'),
-                html.Td(str(row[ratio_col]), className='stmt-td'),
+                html.Td(_fmt_ratio(row[ratio_col]), className='stmt-td'),
             ])
             for _, row in spls.iterrows()
         ]
