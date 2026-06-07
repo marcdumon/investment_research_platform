@@ -415,10 +415,26 @@ def scale_features(
     out[cols] = out[cols].astype('float64')
 
     if scope == 'date':
-        for _, idx in out.groupby('Date', sort=False).groups.items():
-            for c in cols:
-                s = out.loc[idx, c]
-                out.loc[idx, c] = _apply_scale(s, *_scale_params(s, method))
+        # Vectorized per-date fit: one groupby-transform per stat for the whole block,
+        # instead of a dates × cols Python loop with .loc assignment. Same semantics
+        # as `_apply_scale`: constant group (range/IQR 0) → 0 where present, NaN where
+        # absent; input NaN preserved; non-finite → NaN.
+        g = out.groupby('Date', sort=False)[cols]
+        if method == 'minmax':
+            center = g.transform('min')
+            scale = g.transform('max') - center
+        elif method == 'robust':
+            center = g.transform('median')
+            scale = (g.transform(lambda s: s.quantile(0.75))
+                     - g.transform(lambda s: s.quantile(0.25)))
+        else:
+            raise ValueError(f'unknown scale method {method!r}; expected one of {_SCALE_METHODS}')
+        block = out[cols]
+        res = (block - center) / scale
+        res = res.where(~(scale.eq(0) | scale.isna()), 0.0)   # constant group → 0
+        res = res.where(block.notna(), np.nan)                # preserve NaN input
+        res = res.replace([np.inf, -np.inf], np.nan)
+        out[cols] = res
         return out
 
     if train_mask is not None:
