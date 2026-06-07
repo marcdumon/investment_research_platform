@@ -164,8 +164,18 @@ def add_winsorize(df: pd.DataFrame, col: str, p: float) -> pd.DataFrame:
 
 
 def signed_log(s: pd.Series) -> pd.Series:
-    """sign(x) · log1p(|x|). Monotonic, stateless, maps 0 -> 0; tames heavy tails
-    without needing fit params, so it is train/test consistent by construction."""
+    """sign(x) · log1p(|x|)  =  sign(x) · ln(1 + |x|).
+
+    A symmetric log that works across the whole real line, used as the 'log' tame
+    action. Properties:
+      - Defined for negatives and zero (0 -> 0); plain log(x) is not.
+      - Monotonic and sign-preserving: large negatives -> large-negative outputs,
+        large positives -> large-positive. NO collision between small magnitudes and
+        large negatives (that is the failure mode of log(|x|), which the `1+` avoids).
+      - Near zero it is ≈ identity (log1p(x) ≈ x); only the tails compress.
+      - Stateless (no fitted params) -> train/test consistent by construction.
+    Examples: 1e6 -> 13.82, -1e6 -> -13.82, 0.001 -> 0.001, 0 -> 0.
+    """
     s = s.astype('float64')
     return np.sign(s) * np.log1p(np.abs(s))
 

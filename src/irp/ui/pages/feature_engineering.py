@@ -149,9 +149,15 @@ layout = html.Div(className='page', children=[
             value='both', inline=True, labelClassName='check-item'), wrap_id='fe-f-tame-side'),
         html.Button('Apply to selected', id='fe-tame-add', className='run-btn', n_clicks=0),
     ]),
-    html.P('One histogram per selected column. For Clip, dashed lines mark the '
-           '[p, 1−p] cut points; for Log, the curve is the signed-log result.',
-           style={'color': MUTED, 'fontSize': '11px', 'margin': '4px 0'}),
+    html.P([
+        'One histogram per selected column. ',
+        html.B('Clip'), ': cap to the [p, 1−p] quantiles (dashed lines); the side picks '
+        'which tail(s). ',
+        html.B('Log'), ': signed-log ', html.Code('sign(x)·ln(1+|x|)'),
+        ' — compresses heavy tails, keeps the sign, and is safe for negatives and zero '
+        '(0→0); near zero it is ≈ identity, so small values are barely changed. ',
+        html.B('Drop'), ': remove the column.',
+    ], style={'color': MUTED, 'fontSize': '11px', 'margin': '4px 0', 'maxWidth': '900px'}),
     dcc.Loading(html.Div(id='fe-hist-container',
                          style={'display': 'flex', 'gap': '16px', 'flexWrap': 'wrap'})),
 
