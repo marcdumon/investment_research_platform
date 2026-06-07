@@ -430,3 +430,15 @@ def test_column_preview_clip_log_drop_exclude():
     assert s4 is None and rep4 is None                     # dropped → nothing to show
     s5, _ = svc.column_preview(df, 'roe', exclude_tickers=['BAD'])
     assert s5.max() == 19.0                                # BAD rows gone
+
+
+def test_column_series_log_exclude_drop():
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 12, 31)] * 4, 'Ticker': list('ABCD'),
+        'roe': [1.0, 2.0, 3.0, 1e6], 'fwd_ret': 0.0, 'label': 0,
+    })
+    assert svc.column_series(df, 'roe').max() == 1e6                  # raw (clip/none)
+    assert np.isclose(svc.column_series(df, 'roe', {'action': 'log'}).max(),
+                      np.log1p(1e6))                                  # log applied
+    assert svc.column_series(df, 'roe', exclude_tickers=['D']).max() == 3.0  # D excluded
+    assert svc.column_series(df, 'roe', {'action': 'drop'}) is None   # dropped
