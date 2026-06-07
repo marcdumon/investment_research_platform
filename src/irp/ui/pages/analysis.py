@@ -84,8 +84,9 @@ def _section(title):
 
 layout = html.Div(className='page', children=[
     dcc.Store(id='an-init', data=1),
-    dcc.Store(id='an-build'),     # {token}
-    dcc.Store(id='an-fm-build'),  # {token} for the factor model
+    dcc.Store(id='an-build'),       # {token}
+    dcc.Store(id='an-fm-build'),    # {token} for the factor model
+    dcc.Store(id='an-pair-build'),  # {token} for the pair / cointegration
 
     html.H2('Analysis', className='page-title'),
     html.P('Return statistics for one instrument plus its relationship to a benchmark and '
@@ -130,6 +131,25 @@ layout = html.Div(className='page', children=[
     dcc.Loading(html.Div(id='an-fm-warnings', style={'margin': '6px 0', 'fontSize': '12px',
                                                      'color': _RED})),
     dcc.Loading(html.Div(id='an-fm-output'), type='default'),
+
+    # ── Pair / cointegration ─────────────────────────────────────────
+    html.H3('Pair (cointegration)', className='section-title',
+            style={'margin': '24px 0 4px', 'color': ACCENT,
+                   'borderTop': '1px solid var(--border)', 'paddingTop': '16px'}),
+    html.P('Statistical-arbitrage diagnostics for the Instrument above (A) versus a second '
+           'instrument (B) on log prices: cointegration p-value (Engle-Granger), hedge ratio, '
+           'spread z-score, mean-reversion half-life, and lead-lag. Low p (<0.05) + a short '
+           'half-life = a tradeable mean-reverting pair (half-life is greyed out when p≥0.05). '
+           'Descriptive only: hedge ratio + z-score are full-sample fits (look-ahead, not a PIT '
+           'entry signal), and Engle-Granger is direction-dependent (A vs B order matters).',
+           style={'color': MUTED, 'fontSize': '12px', 'maxWidth': '900px'}),
+    html.Div(className='control-row', style={'alignItems': 'flex-end', 'gap': '12px'}, children=[
+        _field('Instrument B', _dd('an-pair-b', placeholder='second instrument', clearable=True)),
+        html.Button('Run pair', id='an-pair-run', className='run-btn', n_clicks=0),
+    ]),
+    dcc.Loading(html.Div(id='an-pair-warnings', style={'margin': '6px 0', 'fontSize': '12px',
+                                                       'color': _RED})),
+    dcc.Loading(html.Div(id='an-pair-output'), type='default'),
 ])
 
 
@@ -138,12 +158,13 @@ layout = html.Div(className='page', children=[
 @callback(
     Output('an-ticker', 'options'), Output('an-bench', 'options'),
     Output('an-peer-sector', 'options'), Output('an-peers', 'options'),
+    Output('an-pair-b', 'options'),
     Input('an-init', 'data'),
 )
 def an_populate(_init):
     instruments = [{'label': t, 'value': t} for t in analysis_service._available_instruments()]
     return (instruments, analysis_service._benchmark_options(),
-            analysis_service._sector_options(), analysis_service._peers_options())
+            analysis_service._sector_options(), analysis_service._peers_options(), instruments)
 
 
 @callback(
@@ -456,3 +477,138 @@ def an_render_fm(store):
     if not store or store.get('token') not in _FM_CACHE:
         return html.P('Pick an instrument above, then Run factor model.', className='no-data')
     return _build_fm_output(_FM_CACHE[store['token']])
+
+
+# ── pair / cointegration ──────────────────────────────────────────────
+
+_PAIR_CACHE: dict[str, analysis_service.PairResult] = {}
+
+
+def _pair_cache_put(key, val):
+    _PAIR_CACHE[key] = val
+    while len(_PAIR_CACHE) > _CACHE_CAP:
+        _PAIR_CACHE.pop(next(iter(_PAIR_CACHE)))
+
+
+def _zscore_fig(res):
+    z = res.zscore.dropna()
+    if z.empty:
+        return empty_figure('Spread z-score: n/a')
+    fig = go.Figure(go.Scatter(x=list(z.index), y=z.to_numpy(), mode='lines',
+                               line={'color': ACCENT}))
+    for lvl, dstyle in ((2, 'dash'), (-2, 'dash'), (0, 'dot')):
+        fig.add_hline(y=lvl, line_dash=dstyle, line_color=MUTED)
+    fig.update_layout(base_chart_layout(title='Spread z-score (±2σ bands)', yaxis_title='z'),
+                      height=300)
+    return fig
+
+
+def _overlay_fig(res):
+    o = res.overlay
+    if o is None or o.empty:
+        return empty_figure('Price overlay: n/a')
+    fig = go.Figure([
+        go.Scatter(x=list(o.index), y=o['a_norm'].to_numpy(), mode='lines', name=res.a,
+                   line={'color': ACCENT}),
+        go.Scatter(x=list(o.index), y=o['b_norm'].to_numpy(), mode='lines', name=res.b,
+                   line={'color': '#e0a040'}),
+    ])
+    fig.update_layout(base_chart_layout(title=f'{res.a} vs {res.b} (rebased to 100)',
+                                        yaxis_title='index'), height=300)
+    return fig
+
+
+def _hedge_scatter_fig(res):
+    la, lb = res.log_a, res.log_b
+    if la is None or la.empty:
+        return empty_figure('Hedge scatter: n/a')
+    eg = res.eg
+    x = lb.to_numpy()
+    y = la.to_numpy()
+    xs = np.array([x.min(), x.max()])
+    line = eg['const'] + eg['hedge_ratio'] * xs
+    fig = go.Figure([
+        go.Scatter(x=x, y=y, mode='markers', marker={'color': ACCENT, 'size': 4, 'opacity': 0.4},
+                   name='obs'),
+        go.Scatter(x=xs, y=line, mode='lines', line={'color': _RED},
+                   name=f"hedge={eg['hedge_ratio']:.2f}"),
+    ])
+    fig.update_layout(scatter_chart_layout(title=f'log {res.a} vs log {res.b} (hedge fit)',
+                                           xaxis_title=f'log {res.b}', yaxis_title=f'log {res.a}',
+                                           showlegend=False), height=300)
+    return fig
+
+
+def _leadlag_fig(res):
+    lags, xcorr, best = res.leadlag
+    if not len(lags):
+        return empty_figure('Lead-lag: n/a')
+    colors = [_GREEN if lg == best else ACCENT for lg in lags]
+    fig = go.Figure(go.Bar(x=list(lags), y=list(xcorr), marker_color=colors))
+    fig.update_layout(base_chart_layout(
+        title=f'Lead-lag cross-correlation (best lag {best:+d})',
+        xaxis_title='lag (B leads A when >0)', yaxis_title='corr', showlegend=False), height=300)
+    return fig
+
+
+def _build_pair_output(res):
+    if res.n < 20 or not res.eg:
+        msg = '  •  '.join(res.warnings) if res.warnings else 'Not enough overlapping history.'
+        return html.P(msg, className='no-data')
+    eg = res.eg
+    hl = res.half_life
+    cointegrated = np.isfinite(eg['pvalue']) and eg['pvalue'] < 0.05
+    # Half-life is only meaningful when the spread is cointegrated (p<0.05); grey it
+    # out otherwise so a non-reverting spread isn't misread as tradeable.
+    hl_txt = '—' if not np.isfinite(hl) else f'{hl:.0f}'
+    chips = _row(
+        _chip('Cointegration p', _fmt_num(eg['pvalue'], 3), _GREEN if cointegrated else _RED),
+        _chip('Hedge ratio', _fmt_num(eg['hedge_ratio'])),
+        _chip('Half-life (days)', hl_txt, ACCENT if cointegrated else MUTED),
+        _chip('Best lead-lag', f"{res.leadlag[2]:+d}"),
+        _chip('Days', str(res.n)),
+    )
+    return [
+        chips,
+        _row(_graph(_zscore_fig(res)), _graph(_overlay_fig(res))),
+        _row(_graph(_hedge_scatter_fig(res)), _graph(_leadlag_fig(res))),
+    ]
+
+
+@callback(
+    Output('an-pair-build', 'data'),
+    Output('an-pair-warnings', 'children'),
+    Input('an-pair-run', 'n_clicks'),
+    State('an-ticker', 'value'), State('an-pair-b', 'value'), State('an-preset', 'value'),
+    running=[(Output('an-pair-run', 'disabled'), True, False),
+             (Output('an-pair-run', 'children'), 'Running…', 'Run pair')],
+    prevent_initial_call=True,
+)
+def an_run_pair(_n, a, b, preset_days):
+    if not a or not b:
+        return None, 'Pick Instrument A (above) and Instrument B.'
+    if a == b:
+        return None, 'Pick two different instruments.'
+    end = datetime.date.today()
+    start = None if not preset_days else end - datetime.timedelta(days=int(preset_days))
+    try:
+        res = analysis_service._pair_analysis(a, b, start, end)
+    except Exception as exc:
+        logger.exception('pair analysis failed')
+        return None, f'Pair analysis failed: {exc}'
+    if res is None:
+        return None, 'No overlapping price history for that pair.'
+    token = str(abs(hash((a, b, preset_days, str(start), str(end)))))
+    _pair_cache_put(token, res)
+    warn = '  •  '.join(res.warnings) if res.warnings else ''
+    return {'token': token}, warn
+
+
+@callback(
+    Output('an-pair-output', 'children'),
+    Input('an-pair-build', 'data'),
+)
+def an_render_pair(store):
+    if not store or store.get('token') not in _PAIR_CACHE:
+        return html.P('Pick Instrument B, then Run pair.', className='no-data')
+    return _build_pair_output(_PAIR_CACHE[store['token']])
