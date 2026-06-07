@@ -84,6 +84,18 @@ def load_prices_wide(metric: Literal['Close', 'Volume'] = 'Close') -> PricePanel
     return panel
 
 
+@lru_cache(maxsize=1)
+def available_tickers() -> list[str]:
+    """Sorted unique tickers in the price panel WITHOUT building the dense matrix.
+
+    Reads only the `Ticker` column (~1s) so callers that just need the instrument
+    list (e.g. the `/analysis` dropdowns) don't pay the ~29s / 1.2GB dense-pivot cost
+    of `load_prices_wide`.
+    """
+    src = panel_root() / 'prices.parquet'
+    return pl.read_parquet(src, columns=['Ticker'])['Ticker'].unique().sort().to_list()
+
+
 @lru_cache(maxsize=12)
 def load_fundamentals(
     stmt: Literal['income', 'balance', 'cashflow'],

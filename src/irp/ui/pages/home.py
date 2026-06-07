@@ -30,6 +30,7 @@ layout = html.Div(className='home-page', children=[
         _card('\U0001f4ca', 'Factors',  'Cross-section screening and factor history.', '/factors'),
         _card('\U0001f4c8', 'Backtest', 'IC and quintile return analysis for any factor.', '/backtest'),
         _card('\U0001f50e', 'Screener', 'Progressive filter stack, scatter/histogram charts, watchlists.', '/screener'),
+        _card('\U0001f4c9', 'Analysis', 'Return stats, QQ, drawdown, beta + residuals vs a benchmark.', '/analysis'),
         _card('\U0001f9f0', 'Dataset Builder', 'Compose ML features from snapshots, attach labels, export raw.', '/features'),
         _card('\U0001f9ea', 'Feature Engineering', 'Inspect heavy tails, clean/scale/split a dataset, export train/valid/test.', '/feature-engineering'),
         _card('\U0001f9ee', 'Correlation', 'Factor collinearity and price-return co-movement heatmaps.', '/correlation'),
