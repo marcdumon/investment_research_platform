@@ -57,6 +57,16 @@ def test_walk_forward_recovers_signal():
     assert abs(res.coefs['f1_z']) > abs(res.coefs['f2_z'])
 
 
+def test_walk_forward_raises_on_nan():
+    """Silent dropna is gone — NaN in features/target makes the model refuse and
+    point to the Feature-Engineering page."""
+    import pytest
+    df, feats = _synthetic(signal=1.0)
+    df.loc[df.sample(frac=0.1, random_state=2).index, 'f1_z'] = np.nan
+    with pytest.raises(ValueError, match='feature-engineering'):
+        bl.walk_forward_linear(df, feats, min_train_dates=5)
+
+
 def test_no_signal_gives_low_ic():
     df, feats = _synthetic(signal=0.0)
     res = bl.walk_forward_linear(df, feats, min_train_dates=5)

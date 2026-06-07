@@ -296,3 +296,48 @@ def test_tame_clip_one_sided():
     up = eng.tame_columns(df, ['f'], 'clip', p=0.2, side='upper')
     assert up['f'].min() == -1000.0         # lower tail untouched
     assert up['f'].max() < 1000.0           # upper tail capped
+
+
+# ── handle_missing (NaN-row handling, explicit on FE page) ─────────────
+
+def _na_panel():
+    """2 dates × 3 tickers; inject NaN in label (row) and feature (row)."""
+    rows = []
+    for y in (2018, 2020):
+        d = datetime.date(y, 12, 31)
+        for i, tk in enumerate(['A', 'B', 'C']):
+            rows.append({'Date': d, 'Ticker': tk, 'f': float(i),
+                         'fwd_ret': 0.01 * i, 'label': float(i)})
+    df = pd.DataFrame(rows)
+    df.loc[0, 'label'] = np.nan      # A@2018 unlabelable
+    df.loc[5, 'f'] = np.nan          # C@2020 missing feature
+    return df
+
+
+def test_handle_missing_drops_label_then_features():
+    df = _na_panel()
+    out, notes = eng.handle_missing(df, ['f'], feature_action='drop')
+    assert out['label'].notna().all()
+    assert out['f'].notna().all()
+    assert len(out) == 4                      # 6 - 1 label - 1 feature
+    assert any('label' in n for n in notes)
+    assert any('feature' in n for n in notes)
+
+
+def test_handle_missing_impute_keeps_rows():
+    df = _na_panel()
+    out, notes = eng.handle_missing(df, ['f'], feature_action='impute')
+    assert out['label'].notna().all()
+    assert out['f'].notna().all()
+    assert len(out) == 5                       # only the NaN-label row dropped
+    # C@2020 imputed to the 2020 per-date median of f ({0,1} present) = 0.5
+    imp = out[(out['Ticker'] == 'C') & (pd.to_datetime(out['Date']).dt.year == 2020)]
+    assert float(imp['f'].iloc[0]) == 0.5
+    assert any('impute' in n for n in notes)
+
+
+def test_handle_missing_no_label_col_ok():
+    df = _na_panel().drop(columns=['label'])
+    out, notes = eng.handle_missing(df, ['f'], feature_action='drop')
+    assert out['f'].notna().all()
+    assert len(out) == 5

@@ -44,6 +44,16 @@ def test_classifier_predictions_out_of_sample():
     assert first_pred > sorted(df['Date'].unique())[4]
 
 
+def test_classifier_raises_on_nan():
+    """NaN in features/label must NOT be silently dropped — the model refuses and
+    points to the Feature-Engineering page (label NaN here)."""
+    import pytest
+    df, feats = _synthetic(signal=1.0)
+    df.loc[df.sample(frac=0.1, random_state=1).index, 'label'] = np.nan
+    with pytest.raises(ValueError, match='feature-engineering'):
+        clf.walk_forward_classifier(df, feats, target='label', min_train_dates=5)
+
+
 def test_missing_target_raises():
     df, feats = _synthetic()
     import pytest

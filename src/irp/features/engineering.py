@@ -711,3 +711,48 @@ def attach_label(
         out['label'] = out.groupby('Date')['fwd_ret'].transform(_bucket)
         return out
     raise ValueError(f'unknown label mode {mode!r}')
+
+
+def handle_missing(
+    df: pd.DataFrame,
+    cols: list[str],
+    feature_action: str = 'drop',
+) -> tuple[pd.DataFrame, list[str]]:
+    """Explicit NaN-row handling for the Feature-Engineering page. Nothing is
+    dropped silently — every action returns a counted note for the build log.
+
+    Rows with a NaN ``label`` are always dropped (a model can't train or score
+    without a target). For NaN in the feature ``cols``:
+      ``'drop'``   — remove rows that have a NaN in any feature column.
+      ``'impute'`` — fill each NaN with the per-Date median of that column
+                     (within the cross-section, so it is leak-free like
+                     per-date scaling), then drop any rows still NaN because
+                     their whole Date×column group was empty.
+
+    The model layer assumes the export it loads is already clean and raises if
+    it is not (see ``models.baseline._require_no_nan``); this is where the user
+    decides how to get there.
+    """
+    notes: list[str] = []
+    out = df
+    if 'label' in out.columns:
+        lab_na = out['label'].isna()
+        if lab_na.any():
+            out = out[~lab_na]
+            notes.append(f'dropped {int(lab_na.sum()):,} rows with a NaN label')
+    cols = [c for c in cols if c in out.columns]
+    if cols:
+        if feature_action == 'impute':
+            n_fill = int(out[cols].isna().sum().sum())
+            if n_fill:
+                med = out.groupby('Date')[cols].transform('median')
+                out = out.copy()
+                out[cols] = out[cols].where(out[cols].notna(), med)
+                notes.append(f'imputed {n_fill:,} NaN feature cell(s) with the '
+                             'per-date median')
+        feat_na = out[cols].isna().any(axis=1)
+        if feat_na.any():
+            out = out[~feat_na]
+            verb = 'residual ' if feature_action == 'impute' else ''
+            notes.append(f'dropped {int(feat_na.sum()):,} rows with a {verb}NaN feature')
+    return out.reset_index(drop=True), notes

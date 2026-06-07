@@ -95,6 +95,24 @@ def load_export(
 
 # ── walk-forward backtest ─────────────────────────────────────────────
 
+def _require_no_nan(df: pd.DataFrame, cols: list[str]) -> None:
+    """Refuse to model a panel with missing values. The model never drops rows
+    silently — NaN handling is an explicit, user-controlled step on the
+    /feature-engineering page (drop rows or impute). Raises with the offending
+    counts so the user knows what to clean."""
+    cols = [c for c in cols if c in df.columns]
+    na = df[cols].isna()
+    n = int(na.any(axis=1).sum())
+    if n:
+        per = na.sum()
+        detail = ', '.join(f'{c}:{int(per[c]):,}' for c in cols if per[c] > 0)
+        raise ValueError(
+            f'{n:,} rows contain NaN in features/target ({detail}). The model does '
+            'not drop rows silently — handle missing values on the '
+            '/feature-engineering page (drop rows or impute) and re-export.'
+        )
+
+
 def walk_forward_linear(
     df: pd.DataFrame,
     feature_cols: list[str],
@@ -110,13 +128,14 @@ def walk_forward_linear(
     model = model or Ridge(alpha=1.0)
     dates = sorted(df['Date'].unique())
     need = list(feature_cols) + ['fwd_ret']
+    _require_no_nan(df, need)
 
     preds, coefs = [], []
     for i, d in enumerate(dates):
         if i < min_train_dates:
             continue
-        train = df[df['Date'] < d].dropna(subset=need)
-        test = df[df['Date'] == d].dropna(subset=feature_cols)
+        train = df[df['Date'] < d]
+        test = df[df['Date'] == d]
         if len(train) < 50 or test.empty:
             continue
         m = clone(model).fit(train[feature_cols].to_numpy(), train['fwd_ret'].to_numpy())

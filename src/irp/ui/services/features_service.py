@@ -462,7 +462,8 @@ def column_series(
         return None
     s = df[col]
     if exclude_tickers:
-        s = s[~df['Ticker'].isin(list(exclude_tickers))]
+        excl = {str(t).strip().upper() for t in exclude_tickers}
+        s = s[~df['Ticker'].astype(str).str.upper().isin(excl)]
     if action == 'log':
         s = _eng.signed_log(s)
     return s
@@ -496,16 +497,26 @@ def prepare_features(
     exclude_tickers: Iterable[str] | None = None,
     scale_cfg: ScaleCfg | None = None,
     split_cfg: SplitCfg | None = None,
+    missing_action: str = 'keep',
 ) -> tuple[pd.DataFrame, list[str]]:
     """Feature-Engineering pipeline on a loaded dataset: exclude tickers → apply the
-    per-column tame plan → scale + split. Clip in the tame plan fits on the split's
-    train rows (else the cutoff year), the same train rows the scaler uses."""
+    per-column tame plan → handle missing values → scale + split. Clip in the tame
+    plan fits on the split's train rows (else the cutoff year), the same train rows
+    the scaler uses.
+
+    `missing_action` ('keep'/'drop'/'impute') is the explicit NaN-row policy: 'keep'
+    is a no-op (used by the inspect path so the raw distribution is untouched);
+    'drop'/'impute' delegate to `engineering.handle_missing` (NaN-label rows always
+    dropped; features dropped or per-date-median imputed). The model layer raises on
+    any remaining NaN, so 'keep' + missing data is caught downstream — never silently
+    dropped."""
     notes: list[str] = []
     out = df
     if exclude_tickers:
         excl = list(exclude_tickers)
+        up = {str(t).strip().upper() for t in excl}
         n0 = len(out)
-        out = out[~out['Ticker'].isin(excl)].reset_index(drop=True)
+        out = out[~out['Ticker'].astype(str).str.upper().isin(up)].reset_index(drop=True)
         notes.append(f'excluded {len(excl)} ticker(s); dropped {n0 - len(out)} rows')
 
     if tame_plan:
@@ -520,6 +531,12 @@ def prepare_features(
         elif (scale_cfg or {}).get('train_cutoff') is not None:
             train_mask = pd.to_datetime(out['Date']).dt.year <= int(scale_cfg['train_cutoff'])
         out = _eng.apply_tame_plan(out, tame_plan, train_mask=train_mask)
+
+    if missing_action in ('drop', 'impute'):
+        feat_cols = [c for c in out.columns
+                     if c not in _eng._TAME_RESERVED and pd.api.types.is_numeric_dtype(out[c])]
+        out, mnotes = _eng.handle_missing(out, feat_cols, feature_action=missing_action)
+        notes += mnotes
 
     out, snotes = _split_and_scale(out, scale_cfg, split_cfg)
     return out, notes + snotes

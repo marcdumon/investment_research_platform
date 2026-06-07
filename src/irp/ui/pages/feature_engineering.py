@@ -164,15 +164,28 @@ layout = html.Div(className='page', children=[
     # cleaning plan (queued actions) + exclude tickers
     html.Div(className='control-row', style={'alignItems': 'flex-end', 'marginTop': '8px'}, children=[
         html.Button('Clear plan', id='fe-tame-clear', className='run-btn', n_clicks=0),
-        _field('Exclude tickers (comma list)',
+        _field('Exclude tickers (comma list, case-insensitive)',
                dcc.Input(id='fe-exclude', type='text', placeholder='e.g. BADCO, XYZ',
-                         debounce=0.8, className='filter-input', style={'width': '320px'})),
+                         debounce=True, className='filter-input', style={'width': '320px'})),
+        html.Button('Apply exclude', id='fe-exclude-apply', className='run-btn', n_clicks=0),
     ]),
     html.Div(id='fe-tame-stack', style={'margin': '8px 0', 'maxWidth': '700px'}),
 
     # ── 4 · Scale + split ────────────────────────────────────────────
-    html.H4('4 · Scale & split', className='section-title',
+    html.H4('4 · Missing values, scale & split', className='section-title',
             style={'margin': '16px 0 4px', 'color': ACCENT}),
+    html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
+        _field('Missing features', dcc.RadioItems(
+            id='fe-missing',
+            options=[{'label': ' Drop rows', 'value': 'drop'},
+                     {'label': ' Impute (median/date)', 'value': 'impute'}],
+            value='drop', inline=True, labelClassName='check-item')),
+    ]),
+    html.P('Rows with a NaN label are always dropped (a model needs a target). '
+           'For NaN feature cells: Drop removes those rows; Impute fills the per-date '
+           'median (leak-free). Counts appear in the Prepare notes. The model refuses '
+           'to run on any remaining NaN — nothing is dropped silently downstream.',
+           style={'color': MUTED, 'fontSize': '11px', 'margin': '0 0 6px', 'maxWidth': '900px'}),
     html.Div(className='control-row', style={'alignItems': 'flex-end'}, children=[
         _field('Scale method', dcc.RadioItems(id='fe-scale-method', options=_SCALE_METHOD_OPTIONS,
                                               value='none', inline=True, labelClassName='check-item')),
@@ -369,13 +382,16 @@ _MAX_HISTS = 12   # cap rendered charts so a huge multi-select can't flood the p
     Input('fe-tame-p', 'value'),
     Input('fe-tame-side', 'value'),
     Input('fe-exclude', 'value'),
+    Input('fe-exclude-apply', 'n_clicks'),
     State('fe-source-store', 'data'),
     prevent_initial_call=True,
 )
-def fe_histograms(cols, action, p, side, exclude, src):
+def fe_histograms(cols, action, p, side, exclude, _apply, src):
     """One histogram per selected column, previewing the live Action / Clip-p / side
     and the excluded tickers so you see exactly what Apply will do. Computed per column
-    via `column_preview` — no panel rebuild. (Tables removed; charts carry the signal.)"""
+    via `column_series` — no panel rebuild. Exclude redraws on Enter (debounce) OR the
+    'Apply exclude' button (the button is the reliable trigger; matching is
+    case-insensitive). (Tables removed; charts carry the signal.)"""
     cols = cols if isinstance(cols, list) else ([cols] if cols else [])
     if not src or src['token'] not in _SRC_CACHE:
         raise PreventUpdate
@@ -526,6 +542,7 @@ def _parse_exclude(text):
     State('fe-source-store', 'data'),
     State('fe-tame-store', 'data'),
     State('fe-exclude', 'value'),
+    State('fe-missing', 'value'),
     State('fe-scale-method', 'value'), State('fe-scale-scope', 'value'),
     State('fe-scale-cutoff', 'value'),
     State('fe-split-method', 'value'), State('fe-split-train', 'value'),
@@ -535,7 +552,7 @@ def _parse_exclude(text):
              (Output('fe-prepare', 'children'), 'Preparing…', 'Run Prepare')],
     prevent_initial_call=True,
 )
-def fe_run_prepare(_n, src, plan, exclude, sm, ss, sc, spm, st, sv, se, sd):
+def fe_run_prepare(_n, src, plan, exclude, missing, sm, ss, sc, spm, st, sv, se, sd):
     if not src or src['token'] not in _SRC_CACHE:
         return None, 'Load a dataset first.', None
     df = _SRC_CACHE[src['token']]
@@ -544,14 +561,14 @@ def fe_run_prepare(_n, src, plan, exclude, sm, ss, sc, spm, st, sv, se, sd):
     try:
         out, notes = features_service.prepare_features(
             df, tame_plan=plan or [], exclude_tickers=_parse_exclude(exclude),
-            scale_cfg=scale_cfg, split_cfg=split_cfg)
+            scale_cfg=scale_cfg, split_cfg=split_cfg, missing_action=missing or 'drop')
     except Exception as exc:
         logger.exception('fe prepare failed')
         return None, f'Prepare failed: {exc}', None
     if out.empty:
         return None, 'Nothing left after cleaning — check exclude list / actions.', None
 
-    token = str(abs(hash((src['token'], repr(plan), repr(exclude),
+    token = str(abs(hash((src['token'], repr(plan), repr(exclude), missing,
                           repr(scale_cfg), repr(split_cfg)))))
     _cache_put(_PREP_CACHE, token, out)
     step = max(1, len(out) // 50)
@@ -610,9 +627,10 @@ def fe_export(_p, _c, store, name):
 
 # ── FE recipe save / load ─────────────────────────────────────────────
 
-def _fe_spec(plan, exclude, sm, ss, sc, spm, st, sv, se, sd):
+def _fe_spec(plan, exclude, missing, sm, ss, sc, spm, st, sv, se, sd):
     return {
         'tame_plan': plan or [], 'exclude_tickers': _parse_exclude(exclude),
+        'missing': missing or 'drop',
         'scale': _scale_cfg(sm, ss, sc), 'split': _split_cfg(spm, st, sv, se, sd),
     }
 
@@ -623,6 +641,7 @@ def _fe_spec(plan, exclude, sm, ss, sc, spm, st, sv, se, sd):
     Input('fe-save-recipe', 'n_clicks'),
     State('fe-recipe-name', 'value'),
     State('fe-tame-store', 'data'), State('fe-exclude', 'value'),
+    State('fe-missing', 'value'),
     State('fe-scale-method', 'value'), State('fe-scale-scope', 'value'),
     State('fe-scale-cutoff', 'value'),
     State('fe-split-method', 'value'), State('fe-split-train', 'value'),
@@ -631,16 +650,18 @@ def _fe_spec(plan, exclude, sm, ss, sc, spm, st, sv, se, sd):
     State('fe-recipe-trigger', 'data'),
     prevent_initial_call=True,
 )
-def fe_save_recipe(_n, name, plan, exclude, sm, ss, sc, spm, st, sv, se, sd, trig):
+def fe_save_recipe(_n, name, plan, exclude, missing, sm, ss, sc, spm, st, sv, se, sd, trig):
     if not name:
         return trig, 'Enter an FE recipe name to save.'
-    features_service.save_fe_recipe(name, _fe_spec(plan, exclude, sm, ss, sc, spm, st, sv, se, sd))
+    features_service.save_fe_recipe(
+        name, _fe_spec(plan, exclude, missing, sm, ss, sc, spm, st, sv, se, sd))
     return (trig or 0) + 1, f'Saved FE recipe "{name}".'
 
 
 @callback(
     Output('fe-tame-store', 'data', allow_duplicate=True),
     Output('fe-exclude', 'value'),
+    Output('fe-missing', 'value'),
     Output('fe-scale-method', 'value'), Output('fe-scale-scope', 'value'),
     Output('fe-scale-cutoff', 'value'),
     Output('fe-split-method', 'value'), Output('fe-split-train', 'value'),
@@ -659,6 +680,7 @@ def fe_load_recipe(name):
     sc = s.get('scale', {})
     sp = s.get('split', {})
     return (s.get('tame_plan', []), ', '.join(s.get('exclude_tickers', [])),
+            s.get('missing', 'drop'),
             sc.get('method', 'none'), sc.get('scope', 'date'), sc.get('train_cutoff'),
             sp.get('method', 'none'), sp.get('train', 0.7), sp.get('valid', 0.15),
             sp.get('test', 0.15), sp.get('seed', 0))
