@@ -142,6 +142,11 @@ layout = html.Div(className='page', children=[
         _field('Action', dcc.RadioItems(id='fe-tame-action', options=_TAME_ACTION_OPTIONS,
                                         value='none', inline=True, labelClassName='check-item')),
         _field('Clip p', _num('fe-tame-p', '0.01', 0.01, '90px'), wrap_id='fe-f-tame-p'),
+        _field('Clip side', dcc.RadioItems(
+            id='fe-tame-side',
+            options=[{'label': ' Both', 'value': 'both'}, {'label': ' Lower', 'value': 'lower'},
+                     {'label': ' Upper', 'value': 'upper'}],
+            value='both', inline=True, labelClassName='check-item'), wrap_id='fe-f-tame-side'),
         html.Button('Apply to selected', id='fe-tame-add', className='run-btn', n_clicks=0),
     ]),
     html.P('One histogram per selected column. For Clip, dashed lines mark the '
@@ -155,7 +160,7 @@ layout = html.Div(className='page', children=[
         html.Button('Clear plan', id='fe-tame-clear', className='run-btn', n_clicks=0),
         _field('Exclude tickers (comma list)',
                dcc.Input(id='fe-exclude', type='text', placeholder='e.g. BADCO, XYZ',
-                         className='filter-input', style={'width': '320px'})),
+                         debounce=True, className='filter-input', style={'width': '320px'})),
     ]),
     html.Div(id='fe-tame-stack', style={'margin': '8px 0', 'maxWidth': '700px'}),
 
@@ -307,10 +312,10 @@ def fe_run_inspect(_n, src, plan, exclude):
     return _table(summ, page_size=15), [summ.iloc[0]['col']]   # auto-drill the worst column
 
 
-def _hist_figure(col, action, p, series):
+def _hist_figure(col, action, p, series, side='both'):
     """Server-side-binned histogram (60 bars) for one column, previewing `action`.
-    Clip → raw distribution with dashed lines at the [p, 1−p] cut points; Log → the
-    signed-log result; None → raw."""
+    Clip → raw distribution with dashed line(s) at the cut point(s) for the chosen
+    `side` (both/lower/upper); Log → the signed-log result; None → raw."""
     vals = pd.to_numeric(series, errors='coerce').dropna().to_numpy() if series is not None else np.array([])
     if not vals.size:
         return empty_figure(f'{col}: no numeric values')
@@ -318,23 +323,30 @@ def _hist_figure(col, action, p, series):
     lo = hi = view = None
     if action == 'clip':
         pc = min(max(float(p), 0.0), 0.4999)   # clamp to a valid tail fraction
-        lo, hi = float(np.quantile(vals, pc)), float(np.quantile(vals, 1 - pc))
-        # Bin + zoom to the BULK (a padded window around the two cut points) so a far
-        # outlier can't squash the bars and both lines straddle the centre.
-        span = hi - lo
-        if span > 0:
-            view = (lo - 0.5 * span, hi + 0.5 * span)
+        lo = float(np.quantile(vals, pc)) if side in ('both', 'lower') else None
+        hi = float(np.quantile(vals, 1 - pc)) if side in ('both', 'upper') else None
+        # Bin + zoom to the BULK around the cut point(s) so a far outlier can't squash
+        # the bars and the line(s) sit clearly inside the view.
+        lines = [x for x in (lo, hi) if x is not None]
+        if lines:
+            ref_lo = lo if lo is not None else float(np.quantile(vals, 0.01))
+            ref_hi = hi if hi is not None else float(np.quantile(vals, 0.99))
+            span = ref_hi - ref_lo
+            if span > 0:
+                view = (ref_lo - 0.5 * span, ref_hi + 0.5 * span)
     rng = view if view is not None else (float(vals.min()), float(vals.max()))
     counts, edges = np.histogram(vals, bins=60, range=rng)
     centers = (edges[:-1] + edges[1:]) / 2
     fig = go.Figure(go.Bar(x=centers, y=counts, marker_color=ACCENT))
     fig.update_layout(base_chart_layout(title=f'{col}{suffix}', yaxis_title='count',
                                         xaxis_title=col))
-    if action == 'clip' and lo is not None:
-        fig.add_vline(x=lo, line_dash='dash', line_color='#e45756',
-                      annotation_text=f'low {lo:.3g}', annotation_position='top left')
-        fig.add_vline(x=hi, line_dash='dash', line_color='#e45756',
-                      annotation_text=f'high {hi:.3g}', annotation_position='top right')
+    if action == 'clip':
+        if lo is not None:
+            fig.add_vline(x=lo, line_dash='dash', line_color='#e45756',
+                          annotation_text=f'low {lo:.3g}', annotation_position='top left')
+        if hi is not None:
+            fig.add_vline(x=hi, line_dash='dash', line_color='#e45756',
+                          annotation_text=f'high {hi:.3g}', annotation_position='top right')
         if view is not None:
             fig.update_xaxes(range=list(view))
     fig.update_layout(height=300, margin={'l': 40, 'r': 10, 't': 36, 'b': 36})
@@ -349,14 +361,15 @@ _MAX_HISTS = 12   # cap rendered charts so a huge multi-select can't flood the p
     Input('fe-col', 'value'),
     Input('fe-tame-action', 'value'),
     Input('fe-tame-p', 'value'),
+    Input('fe-tame-side', 'value'),
+    Input('fe-exclude', 'value'),
     State('fe-source-store', 'data'),
-    State('fe-exclude', 'value'),
     prevent_initial_call=True,
 )
-def fe_histograms(cols, action, p, src, exclude):
-    """One histogram per selected column, previewing the live Action/Clip-p so you see
-    exactly what Apply will do. Computed per column via `column_preview` — no panel
-    rebuild. (Tables removed; the charts carry the signal.)"""
+def fe_histograms(cols, action, p, side, exclude, src):
+    """One histogram per selected column, previewing the live Action / Clip-p / side
+    and the excluded tickers so you see exactly what Apply will do. Computed per column
+    via `column_preview` — no panel rebuild. (Tables removed; charts carry the signal.)"""
     cols = cols if isinstance(cols, list) else ([cols] if cols else [])
     if not src or src['token'] not in _SRC_CACHE:
         raise PreventUpdate
@@ -374,7 +387,7 @@ def fe_histograms(cols, action, p, src, exclude):
         # Log previews the transformed series; Clip/None show the raw series.
         entry = {'col': col, 'action': 'log'} if action == 'log' else None
         series, _ = features_service.column_preview(df, col, tame_entry=entry, exclude_tickers=excl)
-        fig = _hist_figure(col, action, pf, series)
+        fig = _hist_figure(col, action, pf, series, side=side)
         graphs.append(dcc.Graph(figure=fig, config={'displayModeBar': False},
                                 style={'flex': '1 1 360px'}))
     if len(cols) > _MAX_HISTS:
@@ -387,10 +400,12 @@ def fe_histograms(cols, action, p, src, exclude):
 
 @callback(
     Output('fe-f-tame-p', 'style'),
+    Output('fe-f-tame-side', 'style'),
     Input('fe-tame-action', 'value'),
 )
 def fe_toggle_tame_p(action):
-    return dict(_SHOW) if action == 'clip' else dict(_HIDE)
+    style = dict(_SHOW) if action == 'clip' else dict(_HIDE)
+    return style, style
 
 
 @callback(
@@ -401,10 +416,11 @@ def fe_toggle_tame_p(action):
     State('fe-col', 'value'),
     State('fe-tame-action', 'value'),
     State('fe-tame-p', 'value'),
+    State('fe-tame-side', 'value'),
     State('fe-tame-store', 'data'),
     prevent_initial_call=True,
 )
-def fe_edit_tame(_add, _clear, _dels, cols, action, p, plan):
+def fe_edit_tame(_add, _clear, _dels, cols, action, p, side, plan):
     plan = plan or []
     trig = ctx.triggered_id
     if trig == 'fe-tame-clear':
@@ -414,14 +430,16 @@ def fe_edit_tame(_add, _clear, _dels, cols, action, p, plan):
         return [s for j, s in enumerate(plan) if j != i]
     if trig == 'fe-tame-add' and cols:
         cols = cols if isinstance(cols, list) else [cols]
-        plan = [s for s in plan if s['col'] not in cols]       # one action per column
-        if action and action != 'none':                        # 'none' just clears them
-            pval = float(p) if p not in (None, '') else 0.01
-            for c in cols:
-                step = {'col': c, 'action': action}
-                if action == 'clip':
-                    step['p'] = pval
-                plan = plan + [step]
+        plan = [s for s in plan if s['col'] not in cols]       # one entry per column
+        pval = float(p) if p not in (None, '') else 0.01
+        for c in cols:
+            # 'none' = reviewed/keep as-is: still recorded so the column leaves the
+            # picker, but apply_tame_plan ignores it (no transform).
+            step = {'col': c, 'action': action or 'none'}
+            if action == 'clip':
+                step['p'] = pval
+                step['side'] = side or 'both'
+            plan = plan + [step]
     return plan
 
 
@@ -434,8 +452,14 @@ def fe_render_tame(plan):
         return html.P('No cleaning actions yet.', style={'color': MUTED, 'fontSize': '12px'})
     rows = []
     for i, s in enumerate(plan):
-        label = (f'{s["action"]} · {s["col"]}'
-                 + (f' p={s["p"]}' if s['action'] == 'clip' else ''))
+        act = s['action']
+        if act == 'clip':
+            extra = f' p={s.get("p", 0.01)} {s.get("side", "both")}'
+        elif act == 'none':
+            extra, act = '', 'keep'      # reviewed, no transform
+        else:
+            extra = ''
+        label = f'{act} · {s["col"]}{extra}'
         rows.append(html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '8px',
                                     'padding': '2px 0'}, children=[
             html.Span(label, style={'fontSize': '13px', 'color': ACCENT}),

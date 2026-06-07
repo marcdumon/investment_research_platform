@@ -202,14 +202,17 @@ def tame_columns(
     action: str,
     p: float = 0.01,
     train_mask: pd.Series | None = None,
+    side: str = 'both',
 ) -> pd.DataFrame:
     """Apply one heavy-tail action to `cols` before scaling. Reserved columns are
     never touched even if passed.
 
     action:
-        'clip' — winsorize to [p, 1-p] quantiles computed on `train_mask` rows
+        'clip' — winsorize to the [p, 1-p] quantiles computed on `train_mask` rows
                  (full sample if no mask), applied to all rows. Leak-free w.r.t.
-                 the test split.
+                 the test split. `side` ∈ {'both','lower','upper'} clips only that
+                 tail — use a one-sided clip when only one tail is bad so the clean
+                 tail's data is left untouched.
         'log'  — signed_log in place (stateless).
         'drop' — remove the columns.
         'none' — no-op.
@@ -230,8 +233,9 @@ def tame_columns(
         fit = out.loc[train_mask.reindex(out.index).fillna(False).astype(bool)] if train_mask is not None else out
         for c in cols:
             src = fit[c] if not fit[c].dropna().empty else out[c]
-            lo, hi = src.quantile(p), src.quantile(1 - p)
-            out[c] = out[c].clip(lo, hi)
+            lo = src.quantile(p) if side in ('both', 'lower') else None
+            hi = src.quantile(1 - p) if side in ('both', 'upper') else None
+            out[c] = out[c].clip(lower=lo, upper=hi)
         return out
     raise ValueError(f'unknown tame action {action!r}')
 
@@ -346,8 +350,8 @@ def apply_tame_plan(
         out = tame_columns(out, logs, 'log')
     for s in plan:
         if s.get('action') == 'clip':
-            out = tame_columns(out, [s['col']], 'clip',
-                               p=float(s.get('p', 0.01)), train_mask=train_mask)
+            out = tame_columns(out, [s['col']], 'clip', p=float(s.get('p', 0.01)),
+                               train_mask=train_mask, side=s.get('side', 'both'))
     return out
 
 
