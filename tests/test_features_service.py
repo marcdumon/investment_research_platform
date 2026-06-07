@@ -410,6 +410,32 @@ def test_prepare_features_excludes_tames_scales_splits():
     assert any('excluded' in n for n in notes)
 
 
+def test_prepare_features_missing_drop_and_impute():
+    rows = []
+    for yr in range(2015, 2020):
+        d = datetime.date(yr, 12, 31)
+        for i in range(20):
+            rows.append({'Date': d, 'Ticker': f'T{i}', 'roe': float(i),
+                         'fwd_ret': 0.0, 'label': float(i % 2)})
+    df = pd.DataFrame(rows)
+    df.loc[0, 'label'] = np.nan      # one unlabelable row
+    df.loc[1, 'roe'] = np.nan        # one missing-feature row
+
+    dropped, dn = svc.prepare_features(df, missing_action='drop')
+    assert not dropped[['roe', 'label']].isna().any().any()
+    assert len(dropped) == len(df) - 2
+    assert any('label' in n for n in dn) and any('feature' in n for n in dn)
+
+    imp, inotes = svc.prepare_features(df, missing_action='impute')
+    assert not imp[['roe', 'label']].isna().any().any()
+    assert len(imp) == len(df) - 1               # only the NaN-label row dropped
+    assert any('impute' in n for n in inotes)
+
+    # 'keep' (inspect path) leaves NaN untouched — the model layer is the guard.
+    kept, _ = svc.prepare_features(df, missing_action='keep')
+    assert kept[['roe', 'label']].isna().any().any()
+
+
 def test_column_preview_clip_log_drop_exclude():
     rows = []
     for yr in range(2015, 2020):

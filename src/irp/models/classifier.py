@@ -63,13 +63,14 @@ def walk_forward_classifier(
     has_ret = 'fwd_ret' in df.columns
     dates = sorted(df['Date'].unique())
     need = list(feature_cols) + [target]
+    bl._require_no_nan(df, need)
 
     preds = []
     for i, d in enumerate(dates):
         if i < min_train_dates:
             continue
-        train = df[df['Date'] < d].dropna(subset=need)
-        test = df[df['Date'] == d].dropna(subset=feature_cols)
+        train = df[df['Date'] < d]
+        test = df[df['Date'] == d]
         if train[target].nunique() < 2 or len(train) < 50 or test.empty:
             continue
         m = clone(model).fit(train[feature_cols].to_numpy(), train[target].to_numpy())
@@ -93,7 +94,7 @@ def walk_forward_classifier(
         )
 
     pred_df = pd.concat(preds, ignore_index=True)
-    classes = sorted(pred_df['label'].dropna().unique().tolist())
+    classes = sorted(pred_df['label'].unique().tolist())   # label is NaN-free (guarded)
     acc_by_date = pred_df.groupby('Date').apply(
         lambda g: (g['pred_class'] == g['label']).mean()
     )
