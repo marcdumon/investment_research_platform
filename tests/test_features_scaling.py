@@ -283,3 +283,16 @@ def test_tame_clip_p_out_of_range_is_clamped():
     assert out['f'].notna().all()
     out2 = eng.tame_columns(df, ['f'], 'clip', p=-1.0)  # negative too
     assert out2['f'].notna().all()
+
+
+def test_tame_clip_one_sided():
+    df = pd.DataFrame({
+        'Date': [datetime.date(2020, 12, 31)] * 6, 'Ticker': list('ABCDEF'),
+        'f': [-1000.0, 1, 2, 3, 4, 1000], 'fwd_ret': 0.0, 'label': 0,
+    })
+    lo = eng.tame_columns(df, ['f'], 'clip', p=0.2, side='lower')
+    assert lo['f'].max() == 1000.0          # upper tail untouched
+    assert lo['f'].min() > -1000.0          # lower tail capped
+    up = eng.tame_columns(df, ['f'], 'clip', p=0.2, side='upper')
+    assert up['f'].min() == -1000.0         # lower tail untouched
+    assert up['f'].max() < 1000.0           # upper tail capped
