@@ -166,7 +166,7 @@ layout = html.Div(className='page', children=[
         html.Button('Clear plan', id='fe-tame-clear', className='run-btn', n_clicks=0),
         _field('Exclude tickers (comma list)',
                dcc.Input(id='fe-exclude', type='text', placeholder='e.g. BADCO, XYZ',
-                         debounce=True, className='filter-input', style={'width': '320px'})),
+                         debounce=0.8, className='filter-input', style={'width': '320px'})),
     ]),
     html.Div(id='fe-tame-stack', style={'margin': '8px 0', 'maxWidth': '700px'}),
 
