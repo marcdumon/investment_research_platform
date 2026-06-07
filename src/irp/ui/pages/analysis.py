@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
 
 from irp.ui.charts import base_chart_layout, corr_heatmap_figure, empty_figure, scatter_chart_layout
-from irp.ui.services import analysis_service
+from irp.ui.services import analysis_service, risk_model_service
 from irp.ui.theme import ACCENT, MUTED
 
 dash.register_page(__name__, path='/analysis', name='Analysis')
@@ -85,6 +85,7 @@ def _section(title):
 layout = html.Div(className='page', children=[
     dcc.Store(id='an-init', data=1),
     dcc.Store(id='an-build'),     # {token}
+    dcc.Store(id='an-fm-build'),  # {token} for the factor model
 
     html.H2('Analysis', className='page-title'),
     html.P('Return statistics for one instrument plus its relationship to a benchmark and '
@@ -108,6 +109,27 @@ layout = html.Div(className='page', children=[
     dcc.Loading(html.Div(id='an-warnings', style={'margin': '6px 0', 'fontSize': '12px',
                                                   'color': _RED})),
     dcc.Loading(html.Div(id='an-output'), type='default'),
+
+    # ── Factor model (own Run; the universe factor-return build is slow) ──
+    html.H3('Multi-factor risk model', className='section-title',
+            style={'margin': '24px 0 4px', 'color': ACCENT,
+                   'borderTop': '1px solid var(--border)', 'paddingTop': '16px'}),
+    html.P('Decompose the instrument\'s return into exposures to systematic style factors '
+           '(value, quality, momentum) built from the backtest long-short portfolios, plus a '
+           'market factor = the Benchmark index you picked above (default ^SPX). Style factor '
+           'returns are quarterly and universe-level — the build is slow the first time (then '
+           'cached). Uses the Instrument above; pick a long period (Max) for a usable fit.',
+           style={'color': MUTED, 'fontSize': '12px', 'maxWidth': '900px'}),
+    html.Div(className='control-row', style={'alignItems': 'flex-end', 'gap': '12px'}, children=[
+        _field('Rebalance', dcc.RadioItems(id='an-fm-rebalance',
+                                           options=[{'label': ' Quarterly', 'value': 'Q'},
+                                                    {'label': ' Annual', 'value': 'A'}],
+                                           value='Q', inline=True, labelClassName='check-item')),
+        html.Button('Run factor model', id='an-fm-run', className='run-btn', n_clicks=0),
+    ]),
+    dcc.Loading(html.Div(id='an-fm-warnings', style={'margin': '6px 0', 'fontSize': '12px',
+                                                     'color': _RED})),
+    dcc.Loading(html.Div(id='an-fm-output'), type='default'),
 ])
 
 
@@ -317,3 +339,120 @@ def an_render(store):
         return html.P('Pick an instrument (and optionally a benchmark / peers), then Run.',
                       className='no-data')
     return _build_output(_RESULT_CACHE[store['token']])
+
+
+# ── factor model ──────────────────────────────────────────────────────
+
+_FM_CACHE: dict[str, risk_model_service.RiskModelResult] = {}
+_FM_HORIZON = {'Q': 63, 'A': 252}
+
+
+def _fm_cache_put(key, val):
+    _FM_CACHE[key] = val
+    while len(_FM_CACHE) > _CACHE_CAP:
+        _FM_CACHE.pop(next(iter(_FM_CACHE)))
+
+
+def _exposure_fig(res):
+    reg = res.regression
+    factors = res.factors
+    betas = [reg['betas'][f] for f in factors]
+    tvals = [reg['tvalues'][f] for f in factors]
+    colors = [_GREEN if abs(t) >= 2 else MUTED for t in tvals]   # |t|>=2 ~ significant
+    text = [f'β={b:.2f}<br>t={t:.1f}' for b, t in zip(betas, tvals, strict=True)]
+    fig = go.Figure(go.Bar(x=factors, y=betas, marker_color=colors, text=text,
+                           textposition='outside'))
+    fig.update_layout(base_chart_layout(title='Factor exposures (beta)', yaxis_title='beta',
+                                        showlegend=False), height=320)
+    return fig
+
+
+def _rolling_exposures_fig(res):
+    roll = res.rolling_exposures
+    if roll is None or roll.dropna(how='all').empty:
+        return empty_figure('Rolling exposures: n/a')
+    roll = roll.dropna(how='all')
+    fig = go.Figure()
+    for f in res.factors:
+        if f in roll.columns:
+            fig.add_scatter(x=list(roll.index), y=roll[f].to_numpy(), mode='lines', name=f)
+    fig.update_layout(base_chart_layout(title='Rolling factor betas', yaxis_title='beta'),
+                      height=320)
+    return fig
+
+
+def _contrib_fig(series, title, ytitle):
+    if series is None or series.empty:
+        return empty_figure(f'{title}: n/a')
+    vals = series.to_numpy()
+    colors = [_GREEN if v >= 0 else _RED for v in vals]
+    fig = go.Figure(go.Bar(x=list(series.index), y=vals, marker_color=colors))
+    fig.update_layout(base_chart_layout(title=title, yaxis_title=ytitle, showlegend=False),
+                      height=320)
+    return fig
+
+
+def _build_fm_output(res):
+    if res.n == 0 or not res.regression:
+        msg = '  •  '.join(res.warnings) if res.warnings else 'No factor-model result.'
+        return html.P(msg, className='no-data')
+    reg = res.regression
+    chips = _row(
+        _chip('Alpha (ann.)', _fmt_pct(reg['alpha']),
+              _GREEN if (np.isfinite(reg['alpha']) and reg['alpha'] > 0) else _RED),
+        _chip('R²', _fmt_num(reg['r2'])),
+        _chip('Periods', str(res.n)),
+        _chip('Rebalance', res.freq),
+    )
+    blocks = [
+        chips,
+        _row(_graph(_exposure_fig(res)), _graph(_rolling_exposures_fig(res))),
+        _row(_graph(_contrib_fig(res.return_contrib, 'Return decomposition (avg per period)',
+                                 'log ret')),
+             _graph(_contrib_fig(res.risk_contrib, 'Risk attribution (variance share)', 'share'))),
+    ]
+    if res.factor_corr is not None and not res.factor_corr.empty:
+        labels = list(res.factor_corr.columns)
+        blocks.append(_graph(corr_heatmap_figure(res.factor_corr, labels, 'Factor-return correlation'),
+                             basis='0 1 calc(50% - 8px)'))
+    return blocks
+
+
+@callback(
+    Output('an-fm-build', 'data'),
+    Output('an-fm-warnings', 'children'),
+    Input('an-fm-run', 'n_clicks'),
+    State('an-ticker', 'value'), State('an-bench', 'value'),
+    State('an-preset', 'value'), State('an-fm-rebalance', 'value'),
+    running=[(Output('an-fm-run', 'disabled'), True, False),
+             (Output('an-fm-run', 'children'), 'Building…', 'Run factor model')],
+    prevent_initial_call=True,
+)
+def an_run_fm(_n, ticker, bench, preset_days, rebalance):
+    if not ticker:
+        return None, 'Pick an instrument above.'
+    end = datetime.date.today()
+    # factor returns need history; default to 10y when the page period is "Max".
+    days = int(preset_days) if preset_days else 3650
+    start = end - datetime.timedelta(days=max(days, 1825))   # at least ~5y for a usable fit
+    horizon = _FM_HORIZON.get(rebalance, 63)
+    try:
+        res = risk_model_service._risk_model(ticker, start, end, freq=rebalance,
+                                             horizon=horizon, benchmark=bench)
+    except Exception as exc:
+        logger.exception('factor model failed')
+        return None, f'Factor model failed: {exc}'
+    token = str(abs(hash((ticker, bench, str(start), str(end), rebalance, horizon))))
+    _fm_cache_put(token, res)
+    warn = '  •  '.join(res.warnings) if res.warnings else ''
+    return {'token': token}, warn
+
+
+@callback(
+    Output('an-fm-output', 'children'),
+    Input('an-fm-build', 'data'),
+)
+def an_render_fm(store):
+    if not store or store.get('token') not in _FM_CACHE:
+        return html.P('Pick an instrument above, then Run factor model.', className='no-data')
+    return _build_fm_output(_FM_CACHE[store['token']])
