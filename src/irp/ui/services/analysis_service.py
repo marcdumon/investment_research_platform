@@ -9,9 +9,10 @@ import logging
 from dataclasses import dataclass, field
 from functools import lru_cache
 
+import numpy as np
 import pandas as pd
 
-from irp.analysis import stats as _st
+from irp.analysis import pairs as _pairs, stats as _st
 from irp.panel.load import available_tickers, load_prices_wide
 from irp.query.simfin import sector_map as _sector_map
 from irp.ui.services import universe_service
@@ -180,3 +181,53 @@ def _analyze(
             warnings.append('not enough overlapping history for peers correlation')
 
     return res
+
+
+# ── pairs / cointegration ──────────────────────────────────────────────
+
+@dataclass
+class PairResult:
+    a: str
+    b: str
+    eg: dict                       # engle_granger output (coint_t, pvalue, hedge_ratio, spread, …)
+    zscore: pd.Series
+    half_life: float
+    leadlag: tuple                 # (lags, xcorr, best_lag)
+    overlay: pd.DataFrame          # a_norm / b_norm rebased to 100
+    rolling_corr: pd.Series
+    log_a: pd.Series               # aligned log prices (for the hedge scatter)
+    log_b: pd.Series
+    n: int
+    warnings: list[str] = field(default_factory=list)
+
+
+def _pair_analysis(a: str, b: str, start, end) -> PairResult | None:
+    """Cointegration / stat-arb diagnostics for instruments A and B on log prices.
+    Reuses `_close_series`; returns None when either series is missing."""
+    ca = _close_series(a, start, end)
+    cb = _close_series(b, start, end)
+    if ca.empty or cb.empty:
+        return None
+    j = pd.concat([ca.rename('a'), cb.rename('b')], axis=1, join='inner').dropna()
+    warnings: list[str] = []
+    if len(j) < 60:
+        warnings.append(f'only {len(j)} overlapping days — pair stats unreliable')
+    if len(j) < 20:
+        return PairResult(a, b, {}, pd.Series(dtype=float), float('nan'), ([], [], 0),
+                          pd.DataFrame(), pd.Series(dtype=float), pd.Series(dtype=float),
+                          pd.Series(dtype=float), len(j), warnings)
+
+    la = np.log(j['a'])
+    lb = np.log(j['b'])
+    eg = _pairs.engle_granger(la, lb)
+    spread = eg['spread']
+    z = _pairs.spread_zscore(spread)
+    hl = _pairs.half_life(spread)
+    ra, rb = la.diff(), lb.diff()
+    leadlag = _pairs.lead_lag(ra, rb, max_lag=10)
+    overlay = pd.DataFrame({
+        'a_norm': j['a'] / j['a'].iloc[0] * 100.0,
+        'b_norm': j['b'] / j['b'].iloc[0] * 100.0,
+    })
+    rolling_corr = ra.rolling(63).corr(rb)
+    return PairResult(a, b, eg, z, hl, leadlag, overlay, rolling_corr, la, lb, len(j), warnings)
