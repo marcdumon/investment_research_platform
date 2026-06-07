@@ -447,6 +447,27 @@ def inspect_dataset(df: pd.DataFrame, cols: list[str] | None = None,
     return _eng.heavy_tail_report(df, cols=cols, with_detail=with_detail)
 
 
+def column_series(
+    df: pd.DataFrame, col: str, tame_entry: dict | None = None,
+    exclude_tickers: Iterable[str] | None = None,
+) -> pd.Series | None:
+    """Cleaned values of ONE column for the histogram: exclude tickers, and apply
+    `log` (clip/none show raw — the chart draws the cut lines itself). NO report, so
+    it skips the expensive per-column sort/groupby `column_preview` does. `drop`
+    returns None."""
+    if col not in df.columns:
+        return None
+    action = (tame_entry or {}).get('action')
+    if action == 'drop':
+        return None
+    s = df[col]
+    if exclude_tickers:
+        s = s[~df['Ticker'].isin(list(exclude_tickers))]
+    if action == 'log':
+        s = _eng.signed_log(s)
+    return s
+
+
 def column_preview(
     df: pd.DataFrame, col: str, tame_entry: dict | None = None,
     exclude_tickers: Iterable[str] | None = None,

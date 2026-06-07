@@ -384,9 +384,10 @@ def fe_histograms(cols, action, p, side, exclude, src):
             graphs.append(html.Div(html.P(f'"{col}" → DROP', className='no-data'),
                                    style={'flex': '1 1 360px'}))
             continue
-        # Log previews the transformed series; Clip/None show the raw series.
+        # Log previews the transformed series; Clip/None show the raw series. Use the
+        # series-only path (no per-column report sort) so charts stay fast.
         entry = {'col': col, 'action': 'log'} if action == 'log' else None
-        series, _ = features_service.column_preview(df, col, tame_entry=entry, exclude_tickers=excl)
+        series = features_service.column_series(df, col, tame_entry=entry, exclude_tickers=excl)
         fig = _hist_figure(col, action, pf, series, side=side)
         graphs.append(dcc.Graph(figure=fig, config={'displayModeBar': False},
                                 style={'flex': '1 1 360px'}))
