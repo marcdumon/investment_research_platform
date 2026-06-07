@@ -87,6 +87,7 @@ layout = html.Div(className='page', children=[
     dcc.Store(id='an-build'),       # {token}
     dcc.Store(id='an-fm-build'),    # {token} for the factor model
     dcc.Store(id='an-pair-build'),  # {token} for the pair / cointegration
+    dcc.Store(id='an-ev-build'),    # {token} for event study & seasonality
 
     html.H2('Analysis', className='page-title'),
     html.P('Return statistics for one instrument plus its relationship to a benchmark and '
@@ -150,6 +151,41 @@ layout = html.Div(className='page', children=[
     dcc.Loading(html.Div(id='an-pair-warnings', style={'margin': '6px 0', 'fontSize': '12px',
                                                        'color': _RED})),
     dcc.Loading(html.Div(id='an-pair-output'), type='default'),
+
+    # ── Event study & seasonality ────────────────────────────────────
+    html.H3('Event study & seasonality', className='section-title',
+            style={'margin': '24px 0 4px', 'color': ACCENT,
+                   'borderTop': '1px solid var(--border)', 'paddingTop': '16px'}),
+    html.P('Average abnormal return (AAR) and cumulative (CAR) of the Instrument around its '
+           'events — earnings (SimFin publish date, quarterly), dividends, splits — in a window '
+           'of trading days. Abnormal model: market-adjusted (vs the Benchmark above, default '
+           '^SPX), mean-adjusted (normal = each event\'s pre-event mean over −60…−11d, no '
+           'look-ahead), or raw. Plus month-of-year and day-of-week seasonality. '
+           'Earnings date is the filing/publish date (a proxy, not the intraday call).',
+           style={'color': MUTED, 'fontSize': '12px', 'maxWidth': '900px'}),
+    html.Div(className='control-row', style={'alignItems': 'flex-end', 'gap': '12px',
+                                             'flexWrap': 'wrap'}, children=[
+        _field('Event', dcc.RadioItems(id='an-ev-type',
+                                       options=[{'label': ' Earnings', 'value': 'earnings'},
+                                                {'label': ' Dividends', 'value': 'dividends'},
+                                                {'label': ' Splits', 'value': 'splits'}],
+                                       value='earnings', inline=True, labelClassName='check-item')),
+        _field('Abnormal model', dcc.RadioItems(id='an-ev-method',
+                                                options=[{'label': ' Market', 'value': 'market'},
+                                                         {'label': ' Mean', 'value': 'mean'},
+                                                         {'label': ' Raw', 'value': 'raw'}],
+                                                value='market', inline=True,
+                                                labelClassName='check-item')),
+        _field('Window (±days)', dcc.RadioItems(id='an-ev-window',
+                                                options=[{'label': ' 5', 'value': 5},
+                                                         {'label': ' 10', 'value': 10},
+                                                         {'label': ' 20', 'value': 20}],
+                                                value=10, inline=True, labelClassName='check-item')),
+        html.Button('Run event study', id='an-ev-run', className='run-btn', n_clicks=0),
+    ]),
+    dcc.Loading(html.Div(id='an-ev-warnings', style={'margin': '6px 0', 'fontSize': '12px',
+                                                     'color': _RED})),
+    dcc.Loading(html.Div(id='an-ev-output'), type='default'),
 ])
 
 
@@ -612,3 +648,116 @@ def an_render_pair(store):
     if not store or store.get('token') not in _PAIR_CACHE:
         return html.P('Pick Instrument B, then Run pair.', className='no-data')
     return _build_pair_output(_PAIR_CACHE[store['token']])
+
+
+# ── event study & seasonality ─────────────────────────────────────────
+
+_EV_CACHE: dict[str, tuple] = {}     # token -> (EventResult, SeasonalityResult)
+
+
+def _ev_cache_put(key, val):
+    _EV_CACHE[key] = val
+    while len(_EV_CACHE) > _CACHE_CAP:
+        _EV_CACHE.pop(next(iter(_EV_CACHE)))
+
+
+def _aar_fig(ev):
+    aar = ev.aar
+    if aar is None or aar.empty:
+        return empty_figure('AAR: n/a')
+    lags = list(aar.index)
+    colors = [_GREEN if lg == 0 else ACCENT for lg in lags]
+    fig = go.Figure(go.Bar(x=lags, y=aar.to_numpy(), marker_color=colors))
+    fig.update_layout(base_chart_layout(title='Average abnormal return (per event day)',
+                                        xaxis_title='days from event', yaxis_title='AAR',
+                                        showlegend=False), height=300)
+    return fig
+
+
+def _car_fig(ev):
+    car = ev.car
+    if car is None or car.empty:
+        return empty_figure('CAR: n/a')
+    fig = go.Figure(go.Scatter(x=list(car.index), y=car.to_numpy(), mode='lines',
+                               line={'color': ACCENT}))
+    fig.add_hline(y=0, line_dash='dot', line_color=MUTED)
+    fig.add_vline(x=0, line_dash='dot', line_color=MUTED)
+    fig.update_layout(base_chart_layout(title='Cumulative abnormal return',
+                                        xaxis_title='days from event', yaxis_title='CAR'),
+                      height=300)
+    return fig
+
+
+def _season_fig(series, title):
+    if series is None or series.dropna().empty:
+        return empty_figure(f'{title}: n/a')
+    s = series
+    colors = [_GREEN if v >= 0 else _RED for v in s.to_numpy()]
+    fig = go.Figure(go.Bar(x=[str(i) for i in s.index], y=s.to_numpy(), marker_color=colors))
+    fig.update_layout(base_chart_layout(title=title, yaxis_title='mean return',
+                                        showlegend=False), height=300)
+    return fig
+
+
+def _build_ev_output(ev, seas):
+    blocks = []
+    if ev.n == 0 or ev.aar.empty:
+        msg = '  •  '.join(ev.warnings) if ev.warnings else f'No {ev.event_type} events.'
+        blocks.append(html.P(msg, className='no-data'))
+    else:
+        t = ev.tstat
+        blocks += [
+            _row(
+                _chip('Events', str(ev.n)),
+                _chip(f'CAR ±window ({ev.method})', _fmt_pct(ev.car_end),
+                      _GREEN if ev.car_end > 0 else _RED),
+                _chip('CAR t-stat', _fmt_num(t),
+                      _GREEN if (np.isfinite(t) and abs(t) >= 2) else MUTED),
+            ),
+            _row(_graph(_aar_fig(ev)), _graph(_car_fig(ev))),
+        ]
+    blocks.append(_row(
+        _graph(_season_fig(seas.monthly, 'Month-of-year seasonality')),
+        _graph(_season_fig(seas.dow, 'Day-of-week seasonality')),
+    ))
+    return blocks
+
+
+@callback(
+    Output('an-ev-build', 'data'),
+    Output('an-ev-warnings', 'children'),
+    Input('an-ev-run', 'n_clicks'),
+    State('an-ticker', 'value'), State('an-bench', 'value'),
+    State('an-ev-type', 'value'), State('an-ev-method', 'value'),
+    State('an-ev-window', 'value'), State('an-preset', 'value'),
+    running=[(Output('an-ev-run', 'disabled'), True, False),
+             (Output('an-ev-run', 'children'), 'Running…', 'Run event study')],
+    prevent_initial_call=True,
+)
+def an_run_ev(_n, ticker, bench, etype, method, window, preset_days):
+    if not ticker:
+        return None, 'Pick an instrument above.'
+    end = datetime.date.today()
+    start = None if not preset_days else end - datetime.timedelta(days=int(preset_days))
+    w = int(window)
+    try:
+        ev = analysis_service._event_study(ticker, etype, method, bench, start, end, w, w)
+        seas = analysis_service._seasonality(ticker, start, end)
+    except Exception as exc:
+        logger.exception('event study failed')
+        return None, f'Event study failed: {exc}'
+    token = str(abs(hash((ticker, bench, etype, method, w, preset_days, str(start), str(end)))))
+    _ev_cache_put(token, (ev, seas))
+    warn = '  •  '.join(ev.warnings) if ev.warnings else ''
+    return {'token': token}, warn
+
+
+@callback(
+    Output('an-ev-output', 'children'),
+    Input('an-ev-build', 'data'),
+)
+def an_render_ev(store):
+    if not store or store.get('token') not in _EV_CACHE:
+        return html.P('Pick an instrument above, then Run event study.', className='no-data')
+    ev, seas = _EV_CACHE[store['token']]
+    return _build_ev_output(ev, seas)

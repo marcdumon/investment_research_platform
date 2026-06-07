@@ -12,10 +12,10 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-from irp.analysis import pairs as _pairs, stats as _st
+from irp.analysis import events as _ev, pairs as _pairs, stats as _st
 from irp.panel.load import available_tickers, load_prices_wide
-from irp.query.simfin import sector_map as _sector_map
-from irp.ui.services import universe_service
+from irp.query.simfin import fundamentals as _fundamentals, sector_map as _sector_map
+from irp.ui.services import price_service, universe_service
 
 logger = logging.getLogger(__name__)
 
@@ -231,3 +231,83 @@ def _pair_analysis(a: str, b: str, start, end) -> PairResult | None:
     })
     rolling_corr = ra.rolling(63).corr(rb)
     return PairResult(a, b, eg, z, hl, leadlag, overlay, rolling_corr, la, lb, len(j), warnings)
+
+
+# ── event study & seasonality ──────────────────────────────────────────
+
+@dataclass
+class EventResult:
+    ticker: str
+    event_type: str
+    method: str
+    aar: pd.Series
+    car: pd.Series
+    n: int
+    car_end: float
+    tstat: float
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SeasonalityResult:
+    ticker: str
+    monthly: pd.Series
+    dow: pd.Series
+    n: int
+
+
+def _event_dates(ticker: str, event_type: str) -> list:
+    """Event dates for the instrument: earnings = SimFin Publish Date (quarterly);
+    dividends / splits = Yahoo action dates."""
+    if event_type == 'earnings':
+        df = _fundamentals(ticker, 'income', variant='Q')
+        if df.empty or 'Publish Date' not in df.columns:
+            return []
+        return list(pd.to_datetime(df['Publish Date'], errors='coerce').dropna())
+    if event_type == 'dividends':
+        df = price_service._get_dividends(ticker)
+    elif event_type == 'splits':
+        df = price_service._get_splits(ticker)
+    else:
+        return []
+    if df.empty or 'Date' not in df.columns:
+        return []
+    return list(pd.to_datetime(df['Date'], errors='coerce').dropna())
+
+
+def _event_study(ticker: str, event_type: str, method: str, benchmark: str | None,
+                 start, end, pre: int = 10, post: int = 10) -> EventResult:
+    """CAR/AAR of `ticker` around its `event_type` dates under the chosen abnormal-return
+    `method` (market/mean/raw)."""
+    warnings: list[str] = []
+    rets = _log_returns(ticker, start, end, 'D')
+    if rets.empty:
+        warnings.append(f'no price history for {ticker}')
+        return EventResult(ticker, event_type, method, pd.Series(dtype=float),
+                           pd.Series(dtype=float), 0, float('nan'), float('nan'), warnings)
+    lo, hi = rets.index.min(), rets.index.max()
+    dates = [d for d in _event_dates(ticker, event_type) if lo <= pd.Timestamp(d) <= hi]
+    if not dates:
+        warnings.append(f'no {event_type} events for {ticker} in this period')
+        return EventResult(ticker, event_type, method, pd.Series(dtype=float),
+                           pd.Series(dtype=float), 0, float('nan'), float('nan'), warnings)
+
+    if method == 'mean':
+        # textbook event study: each event's 'normal' = mean over a pre-event window
+        matrix = _ev.mean_adjusted_matrix(rets, dates, pre, post)
+    else:
+        market = _log_returns(benchmark or '^SPX', start, end, 'D') if method == 'market' else None
+        ar = _ev.abnormal_returns(rets, market, method=method)
+        matrix = _ev.event_window_matrix(ar, dates, pre, post)
+    res = _ev.aar_car(matrix)
+    if res['n'] < 3:
+        warnings.append(f'only {res["n"]} usable {event_type} events — AAR/CAR noisy')
+    return EventResult(ticker, event_type, method, res['aar'], res['car'], res['n'],
+                       res['car_end'], res['tstat'], warnings)
+
+
+def _seasonality(ticker: str, start, end) -> SeasonalityResult:
+    """Month-of-year and day-of-week average daily returns for the instrument."""
+    rets = _log_returns(ticker, start, end, 'D')
+    return SeasonalityResult(ticker, _ev.monthly_seasonality(rets),
+                             _ev.dow_seasonality(rets), int(rets.size))
