@@ -132,8 +132,9 @@ def dashboard(variant: str = 'A', market: str | None = None, sector: str | None 
         warnings.append(f'regime is current ({regime["as_of"]}) but names use the {as_of} '
                         f'cross-section cache — names may be stale')
 
-    xs = factors_service._load_cross_section(as_of, variant, market=market, sector=sector,
-                                             watchlist=watchlist)
+    # Top names rank the (market/sector) universe — NOT the watchlist, which has its own
+    # section below; otherwise the two would show the same names.
+    xs = factors_service._load_cross_section(as_of, variant, market=market, sector=sector)
     if xs.empty:
         warnings.append('cross-section is empty for these filters')
         return empty
