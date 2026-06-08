@@ -121,6 +121,9 @@ def delete_markers(name: str, feed: str) -> None:
 def make_source(
     name: str,
     yahoo_content: list[str] | None = None,
+    yahoo_batch_size: int | None = None,
+    yahoo_batch_sleep: float | None = None,
+    yahoo_actions_sleep: float | None = None,
 ) -> DataProvider:
     if name == 'simfin':
         from irp.ingest.sim_fin import SimFinSource
@@ -134,6 +137,9 @@ def make_source(
         return YahooSource(
             fetch_actions='actions' in content,
             fetch_prices='prices' in content,
+            prices_batch_size=yahoo_batch_size,
+            batch_sleep=yahoo_batch_sleep,
+            actions_sleep=yahoo_actions_sleep,
         )
     raise ValueError(f'unknown provider: {name!r}')
 
