@@ -204,6 +204,17 @@ def an_populate(_init):
 
 
 @callback(
+    Output('an-peer-sector', 'value'),
+    Input('an-ticker', 'value'),
+    prevent_initial_call=True,
+)
+def an_preset_sector(ticker):
+    """Preselect the Peer-sector dropdown to the chosen instrument's own sector (this
+    cascades into `an_filter_peers`, which refreshes the peers list)."""
+    return analysis_service._ticker_sector(ticker)
+
+
+@callback(
     Output('an-peers', 'options', allow_duplicate=True),
     Output('an-peers', 'value'),
     Input('an-peer-sector', 'value'),
