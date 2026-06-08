@@ -1026,6 +1026,12 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
 
     fmt_df, note = fmt_statement(df)
 
+    # Share-count rows (Basic/Diluted) belong at the bottom, after the monetary lines.
+    shares = [i for i in fmt_df.index if str(i).startswith('Shares')]
+    if shares:
+        rest = [i for i in fmt_df.index if not str(i).startswith('Shares')]
+        fmt_df = fmt_df.reindex(rest + shares)
+
     table_df = fmt_df.reset_index(names='Metric')
     period_cols = [c for c in fmt_df.columns]
     columns: list = [{'name': 'Metric', 'id': 'Metric'}] + [
