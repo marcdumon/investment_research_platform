@@ -170,6 +170,22 @@ def _build_output(r):
                            'percentile across the full universe.')
         num = [c for c in r.watchlist.columns if c not in ('Company Name', 'Sector')]
         blocks.append(_table(r.watchlist, fmt_cols=num))
+
+    mp = r.model
+    blocks += _section('4 · Model picks',
+                       'Top names from your latest model export (notebook → '
+                       'save_predictions), ranked by predicted forward return.')
+    if mp is None or mp.picks is None or mp.picks.empty:
+        msg = '  •  '.join(mp.warnings) if (mp and mp.warnings) else 'No model export yet.'
+        blocks.append(html.P(msg + ' Run a model notebook and call '
+                             'save_predictions(res.predictions, name).', className='no-data'))
+    else:
+        blocks.append(html.P(f'Source: {mp.source}  ·  prediction date {mp.as_of}  ·  '
+                             'click a row to open it on /analysis.',
+                             style={'color': MUTED, 'fontSize': '11px'}))
+        num = [c for c in mp.picks.columns if c not in ('Rank', 'Company Name', 'Sector', 'Date')]
+        view = mp.picks.drop(columns=[c for c in ('Date',) if c in mp.picks.columns])
+        blocks.append(_table(view, fmt_cols=num, table_id='today-model-table'))
     return blocks
 
 
@@ -206,7 +222,7 @@ def today_render(store):
 
 @callback(
     Output('workspace', 'data', allow_duplicate=True),
-    Output('url-redirect', 'pathname'),
+    Output('url-redirect', 'pathname', allow_duplicate=True),
     Input('today-top-table', 'active_cell'),
     State('today-top-table', 'data'), State('workspace', 'data'),
     prevent_initial_call=True,
@@ -217,6 +233,25 @@ def today_row_to_analysis(active, data, ws):
         raise PreventUpdate
     row = data[active['row']]
     ticker = row.get('Ticker')
+    if not ticker:
+        raise PreventUpdate
+    new_ws = dict(ws or {})
+    new_ws['ticker'] = ticker
+    return new_ws, '/analysis'
+
+
+@callback(
+    Output('workspace', 'data', allow_duplicate=True),
+    Output('url-redirect', 'pathname', allow_duplicate=True),
+    Input('today-model-table', 'active_cell'),
+    State('today-model-table', 'data'), State('workspace', 'data'),
+    prevent_initial_call=True,
+)
+def today_model_row_to_analysis(active, data, ws):
+    """Click a model-pick row → carry the ticker to /analysis (same handoff as top names)."""
+    if not active or not data:
+        raise PreventUpdate
+    ticker = data[active['row']].get('Ticker')
     if not ticker:
         raise PreventUpdate
     new_ws = dict(ws or {})
