@@ -180,6 +180,21 @@ def dashboard(start: datetime.date | None, end: datetime.date | None,
         eq[eq.index >= lo], contrib, n_states, warnings)
 
 
+def current_regime(end: datetime.date | None = None) -> dict:
+    """Light current-state read for the /today banner: latest rule label + risk score +
+    top feature drivers. Fast — full-history rule classifier, no HMM."""
+    feats = feature_panel(None, end)
+    rule = _rg.rule_regime(feats)
+    valid = rule.dropna()
+    if valid.empty:
+        return {'label': 'unknown', 'score': np.nan, 'drivers': pd.Series(dtype=float),
+                'as_of': None}
+    last = valid.iloc[-1]
+    contrib = _rg.feature_contributions(feats)
+    return {'label': str(last['label']), 'score': float(last['risk_score']),
+            'drivers': contrib, 'as_of': valid.index[-1].date()}
+
+
 def _rule_labels(end) -> pd.Series:
     """Daily causal rule regime labels over FULL history up to `end` (PIT — expanding
     z-score). Full history so conditioning at a rebalance date uses everything knowable
