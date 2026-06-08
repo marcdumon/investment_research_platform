@@ -1045,7 +1045,7 @@ def _render_statement(ticker: str | None, name: str, period: str) -> tuple[Any, 
         data=data,
         columns=columns,
         sort_action='native',
-        page_size=40,
+        page_action='none',          # show all line items (statements run ~60 rows)
         **{k: v for k, v in style.items()},
     )
 
