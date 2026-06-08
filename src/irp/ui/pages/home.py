@@ -25,6 +25,7 @@ layout = html.Div(className='home-page', children=[
     html.H1('Investment Research Platform', className='home-title'),
     html.P('Data pipelines, fundamentals analysis, factor research.', className='home-subtitle'),
     html.Div(className='card-grid', children=[
+        _card('\U0001f5d3️', 'Today', 'Daily decision surface: regime + playbook + top names.', '/today'),
         _card('\U0001f4e5', 'Ingest',   'Run SimFin, Stooq and Yahoo data pipelines.', '/ingest'),
         _card('\U0001f50d', 'Ticker',   'Per-ticker fundamentals, prices, and actions.', '/ticker'),
         _card('\U0001f4ca', 'Factors',  'Cross-section screening and factor history.', '/factors'),

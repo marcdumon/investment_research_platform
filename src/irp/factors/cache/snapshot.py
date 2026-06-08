@@ -33,6 +33,20 @@ def store(as_of_date: datetime.date, variant: str, df: pd.DataFrame) -> None:
     df.to_parquet(p)
 
 
+def latest_cached(variant: str) -> datetime.date | None:
+    """Most recent as-of date with a cached cross-section for `variant`, or None."""
+    root = CACHE_ROOT / variant
+    if not root.exists():
+        return None
+    dates = []
+    for p in root.glob('*.parquet'):
+        try:
+            dates.append(datetime.date.fromisoformat(p.stem))
+        except ValueError:
+            continue
+    return max(dates) if dates else None
+
+
 def clear(variant: str | None = None) -> int:
     """Delete cached snapshots. Returns number of files removed."""
     root = CACHE_ROOT / variant if variant else CACHE_ROOT
