@@ -2,6 +2,8 @@
 
 DuckDB-backed data pipeline for equity fundamentals and price data. Three providers: **SimFin** (fundamentals, company metadata), **Stooq** (historical OHLCV prices, bulk snapshot), **Yahoo** (corporate actions: dividends + splits, and live-adjusted OHLCV prices).
 
+> **Non-expert user guide:** [`docs/user_manual.md`](docs/user_manual.md) — plain-language walkthrough of the **Feature Engineering** workflow (`/features` + `/feature-engineering`) and the **Regime** page (`/regime`), explaining every section and chart and how to use them for investment decisions.
+
 ---
 
 ## Datasets
