@@ -15,7 +15,7 @@ from irp.core.config import config
 from irp.features.composite import PRESETS
 from irp.ui.charts import base_chart_layout as _chart_layout, empty_figure
 from irp.ui.factor_meta import FACTOR_OPTIONS
-from irp.ui.services import backtest_service, universe_service, watchlist_service
+from irp.ui.services import backtest_service, features_service, universe_service, watchlist_service
 from irp.ui.theme import ACCENT, MUTED
 
 dash.register_page(__name__, path='/backtest', name='Backtest')
@@ -422,6 +422,20 @@ layout = html.Div(
                 ),
             ],
         ),
+        # Precompute panel
+        html.Details(style={'marginTop': '24px', 'borderTop': '1px solid var(--border)',
+                            'paddingTop': '12px'}, children=[
+            html.Summary('Rebuild factor cache', style={'cursor': 'pointer', 'color': MUTED,
+                                                        'fontSize': '12px', 'userSelect': 'none'}),
+            html.Div(style={'display': 'flex', 'gap': '10px', 'alignItems': 'flex-end',
+                            'flexWrap': 'wrap', 'marginTop': '8px'}, children=[
+                html.Button('Precompute (use backtest year/variant settings)',
+                            id='bt-precompute-btn', className='run-btn', n_clicks=0,
+                            style={'fontSize': '12px', 'padding': '4px 12px'}),
+            ]),
+            dcc.Loading(html.Div(id='bt-pre-status',
+                                 style={'fontSize': '12px', 'marginTop': '6px', 'color': MUTED})),
+        ]),
     ],
 )
 
@@ -1102,3 +1116,22 @@ def render_decay(data):
         yaxis_title='Mean IC',
     )
     return fig
+
+
+@callback(
+    Output('bt-pre-status', 'children'),
+    Input('bt-precompute-btn', 'n_clicks'),
+    State('bt-variant', 'value'),
+    State('bt-start-year', 'value'),
+    State('bt-end-year', 'value'),
+    running=[(Output('bt-precompute-btn', 'disabled'), True, False),
+             (Output('bt-precompute-btn', 'children'), 'Running…', 'Precompute (use backtest year/variant settings)')],
+    prevent_initial_call=True,
+)
+def bt_precompute(_n, variant, start_yr, end_yr):
+    try:
+        n = features_service.precompute(int(start_yr), int(end_yr), variant or 'A')
+        return f'Done — {n} new snapshot(s) written.'
+    except Exception as exc:
+        logger.exception('precompute failed')
+        return f'Failed: {exc}'

@@ -1,6 +1,6 @@
-# User Manual — Feature Engineering & Regime
+# User Manual — Today Dashboard, Feature Engineering & Regime
 
-A plain-language guide to two parts of the platform you can use to make investing
+A plain-language guide to the parts of the platform you can use to make investing
 decisions, even if you are not a quant. It explains what every section and chart means,
 and gives you step-by-step workflows.
 
@@ -11,22 +11,181 @@ If a word is unfamiliar, check the **Glossary** at the end first.
 ## Part 1 — The big picture
 
 The platform turns raw company and market data into **signals** (numbers that hint whether
-a stock will do well) and then helps you **decide** how to act on them. Two areas:
+a stock will do well) and then helps you **decide** how to act on them. Three areas:
 
-1. **Feature Engineering** (pages `/features` and `/feature-engineering`) — prepare a clean
+1. **Today** (page `/today`) — your daily one-page briefing: what regime is the market in,
+   which stocks rank highest for that regime right now, how your watchlist is doing, and
+   what the prediction model currently recommends.
+2. **Feature Engineering** (pages `/features` and `/feature-engineering`) — prepare a clean
    table of signals for a prediction model. Think of it as cooking: gather ingredients
    (features), clean them, and portion them into train/test sets so the model learns
    honestly.
-2. **Regime** (page `/regime`) — read the overall "weather" of the market (calm vs stormy)
+3. **Regime** (page `/regime`) — read the overall "weather" of the market (calm vs stormy)
    and check which signals actually work in which weather, so you trust the right signal at
    the right time.
 
-You do not have to use both. Feature Engineering feeds the prediction models; Regime is a
-standalone decision aid. They complement each other.
+You do not have to use all three. `/today` is the daily starting point. Feature Engineering
+feeds the prediction models. Regime is a deeper standalone decision aid. They complement
+each other.
 
 ---
 
-## Part 2 — Feature Engineering
+## Part 2 — The Today page (`/today`)
+
+### 2.1 What it is
+
+`/today` is your **daily decision surface** — a single page that answers three questions
+the moment you open it:
+
+1. **What is the market doing right now?** (the macro regime)
+2. **Which stocks are best positioned for that regime?** (the ranked top names)
+3. **How is my watchlist and my model doing?** (standing + model picks)
+
+It does not tell you to buy or sell. It is a structured starting point that reduces the
+daily "where do I even look?" problem to a few minutes of reading.
+
+---
+
+### 2.2 The controls
+
+Before pressing **Run**, set these filters (all optional):
+
+| Control | What it does |
+|---|---|
+| **Filing** | Annual (A) or Quarterly (Q) fundamental data for the factor scores. Annual is more stable; Quarterly reacts faster to earnings. |
+| **Signal** | Which composite signal to rank stocks by. *Auto (regime)* picks automatically: momentum in risk-on, composite normally, quality in risk-off. You can override. |
+| **Sector** | Restrict the ranked list to one sector. Leave blank for the whole universe. |
+| **Watchlist** | Choose a saved watchlist to see how those names score (section 3). |
+| **Min cap ($B)** | Minimum market cap. Default $1B removes micro-cap names whose extreme ratios distort rankings. |
+| **Top N** | How many names to show in the ranked list. |
+
+Press **Run** after changing any control.
+
+---
+
+### 2.3 Section 1 — Regime & playbook
+
+This is the macro context. It reads the same cross-asset data as the full `/regime` page
+but just shows the current state without charts.
+
+**What each chip means:**
+
+- **Regime** — `risk-on`, `neutral`, or `risk-off`. The colour tells you instantly: green
+  is calm/rising, grey is uncertain, red is stress.
+- **Risk score** — a number from 0 (most defensive) to 100 (most aggressive). Derived from
+  yield-curve slope, equity trend, volatility, dollar, and commodities. A score above 60 is
+  risk-on; below 40 is risk-off.
+- **Playbook** — a plain-language sentence about what the regime implies: e.g. "Lean into
+  trend; full gross" in risk-on, or "Defensive; tilt to quality, reduce gross" in risk-off.
+  This is a fixed, hand-written rule — not a prediction.
+- **Signal used** — which composite the top-names ranking actually used (may differ from
+  your dropdown if you left it on Auto).
+- **Regime as-of / Names as-of** — the dates the regime reading and the factor snapshot
+  come from. If the names date is earlier than the regime date, the page shows a warning
+  (normal near quarter-ends; will update when you next run Precompute on `/features`).
+
+The link at the bottom opens the full `/regime` page for deeper analysis.
+
+---
+
+### 2.4 Section 2 — Top names
+
+A table of the highest-ranked stocks for the active signal and your sector/market filters,
+**from the full universe** (not your watchlist — that has its own section).
+
+Columns:
+
+- **Rank** — 1 = highest composite score.
+- **Company Name / Sector** — identifiers.
+- **mktcap** — market cap in $B. Helps you see how investable a name is.
+- **score** — the composite signal value after rank-normalization. Higher = better relative
+  positioning according to the chosen signal.
+- **Factor columns** — the individual factor values that make up the composite (e.g. `pe`,
+  `roe`, `mom_12_1`). These let you see *why* a name scored high.
+
+**Clicking a row** opens that stock on the `/analysis` page while keeping `/today` intact.
+This is the intended workflow: scan the list, click names of interest, review the price
+history and fundamentals on `/analysis`, come back.
+
+**Why not just sort by P/E?** The composite blends several factors so a stock must look
+attractive on multiple dimensions at once, not just one. This reduces the chance of ranking
+cheap-but-broken companies highly.
+
+---
+
+### 2.5 Section 3 — Watchlist standing
+
+Shows the same composite score for each name on your chosen watchlist, plus:
+
+- **percentile** — where each name stands in the full universe (0 = bottom, 100 = top).
+  A name at the 80th percentile scores better than 80% of all stocks.
+- **mom_12_1** — 12-month minus 1-month price momentum. Positive means the stock has been
+  rising over the past year (after excluding the last month to avoid the short-term
+  reversal effect).
+
+Use this to quickly check: are your positions still well-positioned by the factor model,
+or have they drifted to the bottom of the ranking?
+
+This section only appears when you select a watchlist from the control bar.
+
+---
+
+### 2.6 Section 4 — Model picks
+
+Shows the top names from the most recent **prediction export** — the output of a model
+notebook (baseline linear or classifier). Unlike sections 2 and 3, which use hand-crafted
+factor composites, this section shows what a trained machine-learning model predicts.
+
+Columns depend on the model type:
+
+- **pred** — predicted forward return (regression model). Higher = model expects more gain.
+- **score** — expected quantile bucket (classifier model). Higher = model expects the stock
+  to land in the best return bucket.
+- **fwd_ret** — the actual forward return, if the prediction date is now in the past. Use
+  this to see how the model performed.
+
+The page shows the **source filename** and **prediction date** so you know how fresh the
+model is.
+
+**If this section says "No model export yet":** Run one of the model notebooks
+(`baseline_linear_model.ipynb` or `baseline_classifier.ipynb`) and call
+`save_predictions(res.predictions, 'baseline')` at the end. The file lands in
+`data/model_predictions/` and `/today` picks it up automatically.
+
+Clicking a row navigates to `/analysis` for that stock, same as section 2.
+
+---
+
+### 2.7 Today workflow — step by step
+
+**Daily morning routine (5 minutes):**
+
+1. Open `/today`, press **Run**.
+2. Read the **Regime chip** (colour + score). Has it changed since yesterday?
+3. Read the **Playbook chip** — one sentence about how aggressive to be.
+4. Scan the **Top names table**. Any names you recognise? Any new entries near the top?
+5. Click 1–3 names of interest → `/analysis` → check price chart and recent fundamentals.
+6. Check **Watchlist standing** — are your holdings still near the top or have they slipped?
+7. If a model is running, glance at **Model picks** — do they confirm or differ from the
+   factor ranking?
+
+**When regime changes** (e.g. flips from risk-on to risk-off):
+
+- The playbook updates automatically.
+- The Signal used will switch (e.g. momentum → quality).
+- The top-names list will show different stocks. Names that scored well on momentum may
+  drop; quality names rise.
+- Consider reviewing current positions against the new ranking.
+
+**When names date lags regime date:**  
+A small yellow warning appears. This is normal near quarter-ends. The factor snapshot is
+updated quarterly; the regime reads daily prices. The lag is at most ~3 months. Run
+**Precompute** on the `/features` page (select the current year + variant, press Precompute)
+to catch up.
+
+---
+
+## Part 3 — Feature Engineering (pages `/features` and `/feature-engineering`)
 
 Goal: produce a clean dataset where each row is "one stock on one date" with a set of
 signal columns and a **label** (what actually happened next), ready for a model to learn
@@ -43,7 +202,7 @@ This is a **two-page workflow**:
 > jobs. Keeping them apart means you can rebuild ingredients without redoing the cleaning,
 > and the cleaning is always done in one auditable place.
 
-### 2.1 Why we clean and split (the one idea that matters)
+### 3.1 Why we clean and split (the one idea that matters)
 
 A model is only useful if it works on data it has **never seen**. The cardinal sin is
 **look-ahead / leakage**: letting the model peek at the future during training. It will look
@@ -61,7 +220,7 @@ You do not have to understand the math. Just follow the order the page enforces:
 handle missing → split → scale → export**. The page fits each step on the right slice for
 you.
 
-### 2.2 Page `/features` — Dataset Builder
+### 3.2 Page `/features` — Dataset Builder
 
 **Row 1 — Universe & grid.** Choose *what stocks and how often*:
 
@@ -105,7 +264,7 @@ Each step appears in a stack; delete any with its ✕.
 **What you do here:** assemble the ingredients and the label, click Run Build, then either
 Export or just move to `/feature-engineering` (which can pick up your last build in memory).
 
-### 2.3 Page `/feature-engineering` — Feature Engineering
+### 3.3 Page `/feature-engineering` — Feature Engineering
 
 **Section 1 — Source.** Either **Use last build** (the dataset you just made on `/features`)
 or load a previously exported file. The chosen dataset is what every step below operates on.
@@ -153,7 +312,7 @@ when nothing looks pathological.
   (`_train`, `_valid`, `_test`).
 - **FE recipes** — save/load the whole cleaning+scaling+split configuration.
 
-### 2.4 Feature-Engineering workflow for a decision
+### 3.4 Feature-Engineering workflow for a decision
 
 1. On `/features`: pick your universe, add a Quick pack (e.g. "value" + "quality"), set a
    label (continuous, 252d horizon), **Run Build**.
@@ -172,7 +331,7 @@ model never trained on.
 
 ---
 
-## Part 3 — The Regime page (`/regime`)
+## Part 4 — The Regime page (`/regime`)
 
 Goal: know the market's overall "weather", and use it to trust the right signals and time
 your risk.
@@ -188,7 +347,7 @@ Inputs are **cross-asset**: the US yield curve, stock-market trend and volatilit
 dollar, and commodities. These collectively describe the macro backdrop better than stocks
 alone.
 
-### 3.1 Section 1 — Dashboard
+### 4.1 Section 1 — Dashboard
 
 Controls: **Period** (how far back to show) and **HMM states** (how many market states to
 find — 3 is a good default). Click **Run dashboard**.
@@ -215,7 +374,7 @@ What you see:
 **How to use it:** a one-glance read of the macro backdrop. Low score + red shading building
 = be cautious. High score + green contributions = supportive backdrop.
 
-### 3.2 Section 2 — Regime-conditioned factors
+### 4.2 Section 2 — Regime-conditioned factors
 
 The key question: **does my favourite signal actually work in every market, or only some?**
 
@@ -236,7 +395,7 @@ signal earns its keep.
 > If you see a warning about an empty IC series, the factor cache is cold for that period —
 > click **Precompute** on `/features` for those years, then retry.
 
-### 3.3 Section 3 — Regime-gated backtest
+### 4.3 Section 3 — Regime-gated backtest
 
 The question: **would timing this signal by regime have helped?**
 
@@ -257,7 +416,7 @@ across regimes and you can keep it always-on.
 > Honest-test note: regimes are labelled using only information available at each date
 > (no look-ahead), so the comparison is fair.
 
-### 3.4 Section 4 — Tactical allocation (cross-asset trend)
+### 4.4 Section 4 — Tactical allocation (cross-asset trend)
 
 The question: **which asset class has the wind at its back right now?**
 
@@ -270,7 +429,7 @@ top the ranking while equities lag, that is a defensive tilt in the market — c
 risk-off regime upstairs. It is a descriptive overlay, **not** a sized portfolio or a
 buy/sell order.
 
-### 3.5 Section 5 — Single-asset Markov regime ("hedge-fund method")
+### 4.5 Section 5 — Single-asset Markov regime ("hedge-fund method")
 
 This is the per-asset timing tool popularised in trading videos as the "Markov hedge-fund
 method". It works on **one asset's own price** (a stock, crypto, ETF) rather than the macro
@@ -317,7 +476,7 @@ Two things to take seriously:
 and a built-in honesty check on whether timing it actually pays. Treat the signal as a lean,
 not gospel, and always glance at the walk-forward result first.
 
-### 3.6 A Regime workflow for a decision
+### 4.6 A Regime workflow for a decision
 
 1. **Run dashboard** (10Y). Read the current regime and the contribution bars — know the
    backdrop and why.
@@ -334,6 +493,16 @@ current market** — instead of trading one signal blindly through every kind of
 
 ## Glossary
 
+- **Regime** — the market's overall state (risk-on / neutral / risk-off). Determined by
+  cross-asset data: yield curve, equity trend, volatility, dollar, commodities.
+- **Risk score** — 0 to 100; above 60 = risk-on, below 40 = risk-off. Derived from a
+  weighted blend of expanding z-scored macro features; no fitting, fully transparent.
+- **Playbook** — the hand-written rule mapping each regime to a recommended signal and
+  gross-exposure stance. Changes automatically when the regime changes.
+- **Composite** — several factors blended into one signal.
+- **Percentile** — where a stock ranks in the universe; 80th percentile = better than 80%
+  of all stocks on the chosen signal.
+- **Cross-section** — all stocks scored on a single date.
 - **Feature / signal** — a number describing a stock (e.g. P/E ratio, 12-month momentum).
 - **Label** — what actually happened next (the answer the model learns), e.g. the forward
   return.

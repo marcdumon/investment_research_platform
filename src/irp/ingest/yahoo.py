@@ -162,45 +162,7 @@ def _fetch_actions_per_ticker(
     return has_header
 
 
-def _fetch_prices_per_ticker(
-    yf,
-    ticker_map: dict[str, str],
-    queried: set[str],
-    known_errors: set[str],
-    new_errors: set[str],
-    has_header: bool,
-    last_dates: dict[str, date] | None = None,
-) -> bool:
-    from irp.core.cancel import is_cancelled
 
-    todo = [t for t in ticker_map if t not in known_errors and t not in queried]
-    logger.info(f'Yahoo prices (per-ticker): {len(todo)} tickers')
-    for ticker in todo:
-        if is_cancelled():
-            break
-        yahoo = ticker_map[ticker]
-        logger.debug(f'Prices: {ticker} (yahoo={yahoo})')
-        last = last_dates.get(ticker) if last_dates is not None else None
-        kwargs = (
-            {'start': (last + timedelta(days=1)).isoformat(), 'auto_adjust': True}
-            if last is not None
-            else {'period': 'max', 'auto_adjust': True}
-        )
-        try:
-            hist = yf.Ticker(yahoo).history(**kwargs)
-        except Exception as e:
-            logger.warning(f'{ticker}: {type(e).__name__}: {e}')
-            new_errors.add(ticker)
-            _ERRORS.save(known_errors | new_errors)
-            time.sleep(yahoo_cfg.ticker_sleep)
-            continue
-        time.sleep(yahoo_cfg.ticker_sleep)
-        if hist is not None and not hist.empty:
-            rows_df = _prices_to_long(ticker, hist)
-            has_header = _append_csv(rows_df, _PRICES_FILE, has_header)
-        queried.add(ticker)
-        _QUERIED_PRICES.save(queried)
-    return has_header
 
 
 def _fetch_prices_batched(
@@ -228,6 +190,7 @@ def _fetch_prices_batched(
 
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
     bsize = yahoo_cfg.prices_batch_size
+    _sleep = yahoo_cfg.batch_sleep
     n_batches = (len(todo) + bsize - 1) // bsize
     logger.info(
         f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers, {n_batches} batches'
@@ -256,7 +219,6 @@ def _fetch_prices_batched(
                 batch_yahoo,
                 **dl_kwargs,
                 auto_adjust=True,
-                threads=False,
                 progress=False,
                 group_by='ticker',
             )
@@ -264,7 +226,7 @@ def _fetch_prices_batched(
             logger.warning(
                 f'batch [{i}:{i + len(batch)}] failed: {type(e).__name__}: {e}'
             )
-            time.sleep(yahoo_cfg.batch_sleep)
+            time.sleep(_sleep)
             continue
         time.sleep(yahoo_cfg.batch_sleep)
         if raw is None or raw.empty:
@@ -306,21 +268,16 @@ def _fetch_ticker_data(
     skip_queried: bool = True,
     fetch_actions: bool = True,
     fetch_prices: bool = True,
-    prices_mode: Literal['batch', 'ticker'] = 'batch',
     last_dates: dict[str, date] | None = None,
 ) -> None:
     """Pull dividends, splits, and/or OHLCV prices from yfinance.
 
-    `prices_mode='batch'` (default) uses yf.download with batch_size from
-    config — ~10x faster than per-ticker. `prices_mode='ticker'` falls back
-    to per-ticker yf.Ticker.history (slower, finer error attribution).
-
-    Actions always go per-ticker (no batch endpoint).
+    Actions go per-ticker. Prices use yf.download in batches (batch_size from config).
 
     `last_dates` maps Ticker -> last stored date in yahoo_prices. When set,
     prices are fetched from last_date+1 day instead of full history. Tickers
-    absent from the map get full history. Batched mode uses the minimum
-    last_date across the batch as the shared start.
+    absent from the map get full history. Batches use the minimum last_date of
+    the group as the shared start.
 
     Resume-safe: skips tickers already in queried_actions.json /
     queried_prices.json / error_tickers.json.
@@ -348,12 +305,7 @@ def _fetch_ticker_data(
         )
 
     if fetch_prices:
-        fn = (
-            _fetch_prices_batched
-            if prices_mode == 'batch'
-            else _fetch_prices_per_ticker
-        )
-        prices_has_header = fn(
+        prices_has_header = _fetch_prices_batched(
             yf,
             ticker_map,
             queried_prices,
@@ -477,13 +429,11 @@ class YahooSource:
         self,
         fetch_actions: bool = True,
         fetch_prices: bool = True,
-        prices_mode: Literal['batch', 'ticker'] = 'batch',
     ) -> None:
         from irp.core.markers import MarkerSet
 
         self._fetch_actions = fetch_actions
         self._fetch_prices = fetch_prices
-        self._prices_mode = prices_mode
         self.markers = MarkerSet(raw_dir)
 
     def fetch_bulk(self) -> None:
@@ -511,7 +461,6 @@ class YahooSource:
         _fetch_ticker_data(
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
-            prices_mode=self._prices_mode,  # type: ignore (pylance widens instance attribute type)
         )
         self.markers.touch('fetched')
         logger.debug('Yahoo ticker data fetched.')
@@ -534,7 +483,6 @@ class YahooSource:
             skip_queried=False,
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
-            prices_mode=self._prices_mode,  # type: ignore (pylance widens instance attribute type)
             last_dates=last_dates,
         )
         self.markers.touch('fetched')

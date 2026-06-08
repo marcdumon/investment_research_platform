@@ -43,18 +43,6 @@ layout = html.Div(className='ingest-page', children=[
                 value=['actions', 'prices'],
                 labelClassName='check-item',
             ),
-            html.Div(id='prices-mode-container', children=[
-                html.Label('Yahoo prices mode', className='section-label'),
-                dcc.RadioItems(
-                    id='yahoo-prices-mode',
-                    options=[
-                        {'label': ' batch (~10x faster)', 'value': 'batch'},
-                        {'label': ' ticker (per-ticker history)', 'value': 'ticker'},
-                    ],
-                    value='batch',
-                    labelClassName='check-item',
-                ),
-            ]),
         ]),
 
         html.Label('Feed', className='section-label'),
@@ -126,12 +114,6 @@ def toggle_yahoo_options(providers: list[str]) -> dict:
     return _SHOW if providers and 'yahoo' in providers else _HIDE
 
 
-@callback(
-    Output('prices-mode-container', 'style'),
-    Input('yahoo-content', 'value'),
-)
-def toggle_prices_mode(yahoo_content: list[str]) -> dict:
-    return _SHOW if yahoo_content and 'prices' in yahoo_content else _HIDE
 
 
 @callback(
@@ -142,7 +124,6 @@ def toggle_prices_mode(yahoo_content: list[str]) -> dict:
     Input('run-btn', 'n_clicks'),
     State('providers', 'value'),
     State('yahoo-content', 'value'),
-    State('yahoo-prices-mode', 'value'),
     State('feed', 'value'),
     State('steps', 'value'),
     State('maintenance-steps', 'value'),
@@ -153,7 +134,6 @@ def start_run(
     n_clicks: int,
     providers: list[str],
     yahoo_content: list[str],
-    yahoo_prices_mode: str,
     feed: str,
     steps: list[str],
     maintenance_steps: list[str],
@@ -177,7 +157,6 @@ def start_run(
             _run_pipeline(
                 providers or [],
                 yahoo_content or ['actions', 'prices'],
-                yahoo_prices_mode or 'batch',
                 feed or 'bulk',
                 (steps or []) + (maintenance_steps or []),
                 bool(force),
@@ -225,7 +204,7 @@ def poll_log(n_intervals: int) -> tuple[Any, ...]:
     ]
     active = lh._run_active
     done = lh._run_done
-    cancelled = _cancel._is_cancelled()
+    cancelled = _cancel.is_cancelled()
     if active and cancelled:
         status = 'Cancelling...'
     elif active:
@@ -242,7 +221,6 @@ def poll_log(n_intervals: int) -> tuple[Any, ...]:
 def _run_pipeline(
     providers: list[str],
     yahoo_content: list[str],
-    yahoo_prices_mode: str,
     feed: str,
     steps: list[str],
     force: bool,
@@ -250,7 +228,7 @@ def _run_pipeline(
     from irp.cli import delete_markers, make_source
 
     def cancelled() -> bool:
-        return _cancel._is_cancelled()
+        return _cancel.is_cancelled()
 
     if force:
         for name in providers:
@@ -259,7 +237,7 @@ def _run_pipeline(
     for name in providers:
         if cancelled():
             break
-        src = make_source(name, yahoo_content=yahoo_content, yahoo_prices_mode=yahoo_prices_mode)
+        src = make_source(name, yahoo_content=yahoo_content)
         logger.info(f'-- {name} --')
         effective_feed = feed
         if feed not in src.SUPPORTED_FEEDS:
