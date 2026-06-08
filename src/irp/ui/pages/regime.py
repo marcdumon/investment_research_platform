@@ -95,6 +95,7 @@ layout = html.Div(className='page', children=[
     dcc.Store(id='rg-init', data=1),
     dcc.Store(id='rg-dash-build'), dcc.Store(id='rg-cond-build'),
     dcc.Store(id='rg-gate-build'), dcc.Store(id='rg-tac-build'),
+    dcc.Store(id='rg-mk-build'),
 
     html.H2('Regime', className='page-title'),
     html.P('Cross-asset macro state from the US yield curve, equity trend/vol, USD and '
@@ -163,7 +164,48 @@ layout = html.Div(className='page', children=[
         html.Button('Run tactical', id='rg-tac-run', className='run-btn', n_clicks=0),
     ]),
     dcc.Loading(html.Div(id='rg-tac-output'), type='default'),
+
+    # ── 5 Single-asset Markov regime (hedge-fund method) ─────────────
+    *_section_head('Single-asset Markov regime (hedge-fund method)',
+                   'Per-asset version of the "Markov hedge-fund method": label each day '
+                   'bull / sideways / bear from the trailing-window return (your lookback + '
+                   'threshold), build the bull/sideways/bear transition matrix, read its '
+                   'persistence, project it forward (matrix powers) to a stationary '
+                   'distribution, and turn it into a trade signal = P(bull)−P(bear). An HMM '
+                   'overlay gives a second, threshold-free opinion. Overlapping daily windows '
+                   'inflate persistence (adjacent days share data) — use non-overlapping for '
+                   'an honest matrix. The walk-forward backtest builds the matrix from past '
+                   'data only and is usually a sobering reality check vs buy-and-hold.'),
+    html.Div(className='control-row', style={'alignItems': 'flex-end', 'gap': '12px',
+                                             'flexWrap': 'wrap'}, children=[
+        _field('Instrument', dcc.Dropdown(id='rg-mk-ticker', options=[], placeholder='e.g. AAPL',
+                                          clearable=False, className='filter-dropdown',
+                                          style={'minWidth': '200px'})),
+        _field('Lookback (days)', dcc.Input(id='rg-mk-lookback', type='number', value=20,
+                                            min=2, max=252, step=1, style={'width': '90px'})),
+        _field('Threshold (%)', dcc.Input(id='rg-mk-threshold', type='number', value=5,
+                                          min=0.5, max=50, step=0.5, style={'width': '90px'})),
+        _field('Sampling', dcc.RadioItems(id='rg-mk-sampling',
+                                          options=[{'label': ' Overlapping', 'value': 'over'},
+                                                   {'label': ' Non-overlapping', 'value': 'non'}],
+                                          value='non', inline=True, labelClassName='check-item')),
+        _field('HMM overlay', dcc.Checklist(id='rg-mk-hmm',
+                                            options=[{'label': ' on', 'value': 'on'}],
+                                            value=['on'], inline=True, labelClassName='check-item')),
+        _field('Backtest horizon (days)', dcc.RadioItems(id='rg-mk-horizon', options=_HORIZONS,
+                                                         value=21, inline=True,
+                                                         labelClassName='check-item')),
+        html.Button('Run Markov', id='rg-mk-run', className='run-btn', n_clicks=0),
+    ]),
+    dcc.Loading(html.Div(id='rg-mk-warnings', style={'margin': '6px 0', 'fontSize': '12px',
+                                                     'color': _RED})),
+    dcc.Loading(html.Div(id='rg-mk-output'), type='default'),
 ])
+
+
+@callback(Output('rg-mk-ticker', 'options'), Input('rg-init', 'data'))
+def rg_populate_mk(_init):
+    return regime_service.instrument_options()
 
 
 # ── 1 Dashboard ───────────────────────────────────────────────────────
@@ -488,3 +530,132 @@ def rg_render_tac(store):
     if tab is None or tab.empty:
         return html.P('No tactical data.', className='no-data')
     return [_row(_graph(_tac_fig(tab), basis='1 1 100%')), _tac_table(tab)]
+
+
+# ── 5 Single-asset Markov regime ──────────────────────────────────────
+
+_MK_CACHE: dict[str, regime_service.MarkovResult] = {}
+_MK_STATE_COLOR = {'bear': _RED, 'sideways': _GREY, 'bull': _GREEN}
+_MK_ORDER = ['bear', 'sideways', 'bull']
+
+
+def _mk_transition_fig(r):
+    P = r.transition
+    if P is None or P.empty:
+        return empty_figure('Transition matrix: n/a')
+    order = [s for s in _MK_ORDER if s in P.index]
+    P = P.reindex(index=order, columns=order)
+    z = P.to_numpy()
+    fig = go.Figure(go.Heatmap(z=z, x=order, y=order, colorscale='Blues', zmin=0, zmax=1,
+                               text=np.round(z, 2), texttemplate='%{text}', showscale=False))
+    fig.update_layout(base_chart_layout(title='Transition matrix (today→tomorrow)',
+                                        xaxis_title='tomorrow', yaxis_title='today'), height=320)
+    return fig
+
+
+def _mk_nstep_fig(r):
+    ns = r.n_step
+    if ns is None or ns.empty:
+        return empty_figure('Forecast: n/a')
+    fig = go.Figure()
+    for s in [c for c in _MK_ORDER if c in ns.columns]:
+        fig.add_scatter(x=list(ns.index), y=ns[s].to_numpy(), mode='lines', name=s,
+                        line={'color': _MK_STATE_COLOR.get(s, ACCENT)})
+        if s in r.stationary.index:                       # stationary level (dashed)
+            fig.add_hline(y=float(r.stationary[s]), line_dash='dot',
+                          line_color=_MK_STATE_COLOR.get(s, MUTED))
+    fig.update_layout(base_chart_layout(title=f'State forecast from "{r.current_state}" '
+                                        f'(dashed = long-run / stationary)',
+                                        xaxis_title='days ahead', yaxis_title='probability'),
+                      height=320)
+    return fig
+
+
+def _mk_backtest_fig(r):
+    bt = r.backtest
+    if not bt or bt.get('strat_cumret') is None or bt['strat_cumret'].empty:
+        return empty_figure('Walk-forward backtest: n/a')
+    sc, hc = bt['strat_cumret'], bt['hold_cumret']
+    fig = go.Figure([
+        go.Scatter(x=list(hc.index), y=hc.to_numpy(), mode='lines', name='buy & hold',
+                   line={'color': MUTED}),
+        go.Scatter(x=list(sc.index), y=sc.to_numpy(), mode='lines', name='Markov signal',
+                   line={'color': ACCENT}),
+    ])
+    fig.update_layout(base_chart_layout(title='Walk-forward: Markov signal vs buy & hold',
+                                        yaxis_title='cum log ret'), height=340)
+    return fig
+
+
+def _build_mk_output(r):
+    if r.states.empty:
+        msg = '  •  '.join(r.warnings) if r.warnings else 'No Markov result.'
+        return html.P(msg, className='no-data')
+    bt = r.backtest
+    ss, hs = bt.get('strat_sharpe', np.nan), bt.get('hold_sharpe', np.nan)
+    persist = float(r.transition.loc[r.current_state, r.current_state]) \
+        if r.current_state in r.transition.index else np.nan
+    sig_dir = 'LONG' if (np.isfinite(r.signal) and r.signal > 0) else \
+        ('SHORT' if (np.isfinite(r.signal) and r.signal < 0) else 'flat')
+    chips = _row(
+        _chip('Current state', r.current_state, _MK_STATE_COLOR.get(r.current_state, ACCENT)),
+        _chip('Signal P(bull)−P(bear)', _fmt_num(r.signal, 2),
+              _GREEN if (np.isfinite(r.signal) and r.signal > 0) else _RED),
+        _chip('Direction', sig_dir),
+        _chip('Persistence (stickiness)', _fmt_pct(persist)),
+        _chip('HMM agreement', _fmt_pct(r.hmm_agree) if np.isfinite(r.hmm_agree) else '—'),
+        _chip('Sampling', 'overlapping' if r.overlapping else 'non-overlap',
+              _RED if r.overlapping else _GREEN),
+    )
+    bt_chips = _row(
+        _chip('Strategy Sharpe', _fmt_num(ss),
+              _GREEN if (np.isfinite(ss) and np.isfinite(hs) and ss > hs) else MUTED),
+        _chip('Buy & hold Sharpe', _fmt_num(hs)),
+    )
+    note = html.P('Reminder: P(bull)−P(bear) is the raw signal; magnitude scales bet size. '
+                  'If the strategy Sharpe does not beat buy & hold, the matrix is not adding '
+                  'tradeable edge for this asset. Under overlapping sampling the absolute '
+                  'Sharpe is inflated (overlapping forward returns understate variance) — '
+                  'compare strategy-vs-hold, not the raw number.',
+                  style={'color': MUTED, 'fontSize': '11px'})
+    return [chips,
+            _row(_graph(_mk_transition_fig(r)), _graph(_mk_nstep_fig(r))),
+            bt_chips, _row(_graph(_mk_backtest_fig(r), basis='1 1 100%')), note]
+
+
+@callback(
+    Output('rg-mk-build', 'data'), Output('rg-mk-warnings', 'children'),
+    Input('rg-mk-run', 'n_clicks'),
+    State('rg-mk-ticker', 'value'), State('rg-mk-lookback', 'value'),
+    State('rg-mk-threshold', 'value'), State('rg-mk-sampling', 'value'),
+    State('rg-mk-hmm', 'value'), State('rg-mk-horizon', 'value'), State('rg-preset', 'value'),
+    running=[(Output('rg-mk-run', 'disabled'), True, False),
+             (Output('rg-mk-run', 'children'), 'Running…', 'Run Markov')],
+    prevent_initial_call=True,
+)
+def rg_run_mk(_n, ticker, lookback, threshold, sampling, hmm, horizon, preset_days):
+    if not ticker:
+        return None, 'Pick an instrument.'
+    end = datetime.date.today()
+    start = None if not preset_days else end - datetime.timedelta(days=int(preset_days))
+    lb = int(lookback or 20)
+    thr = float(threshold or 5) / 100.0
+    try:
+        r = regime_service.markov_analysis(
+            ticker, start, end, lookback=lb, threshold=thr,
+            overlapping=(sampling == 'over'), hmm_overlay=bool(hmm), horizon=int(horizon))
+    except Exception as exc:
+        logger.exception('markov analysis failed')
+        return None, f'Markov analysis failed: {exc}'
+    token = str(abs(hash((ticker, lb, thr, sampling, bool(hmm), horizon, preset_days,
+                          str(start), str(end)))))
+    _put(_MK_CACHE, token, r)
+    return {'token': token}, '  •  '.join(r.warnings)
+
+
+@callback(Output('rg-mk-output', 'children'), Input('rg-mk-build', 'data'))
+def rg_render_mk(store):
+    if not store or store.get('token') not in _MK_CACHE:
+        return html.P('Pick an instrument, set lookback/threshold, then Run Markov.',
+                      className='no-data')
+    return _build_mk_output(_MK_CACHE[store['token']])

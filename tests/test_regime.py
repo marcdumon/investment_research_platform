@@ -142,6 +142,59 @@ def test_gated_returns_zeroes_disallowed():
     assert np.allclose(out['base_period'].to_numpy(), rets.to_numpy())
 
 
+def _trend(rate, n=80, start=100.0):
+    idx = pd.bdate_range('2015-01-01', periods=n)
+    return pd.Series(start * (1.0 + rate) ** np.arange(n), index=idx)
+
+
+def test_return_states_buckets_by_threshold():
+    bull = rg.return_states(_trend(0.01), lookback=20, threshold=0.05)
+    bear = rg.return_states(_trend(-0.01), lookback=20, threshold=0.05)
+    flat = rg.return_states(_trend(0.0), lookback=20, threshold=0.05)
+    assert (bull == 'bull').all()
+    assert (bear == 'bear').all()
+    assert (flat == 'sideways').all()
+
+
+def test_return_states_nonoverlap_is_sparser():
+    s = _trend(0.005, n=200)
+    over = rg.return_states(s, lookback=20, overlapping=True)
+    non = rg.return_states(s, lookback=20, overlapping=False)
+    assert len(non) < len(over)
+    assert len(non) <= len(over) // 10 + 2          # ~ every 20th obs
+
+
+def test_n_step_distribution_compounds():
+    P = pd.DataFrame([[0.8, 0.2], [0.5, 0.5]], index=['bear', 'bull'], columns=['bear', 'bull'])
+    dist = rg.n_step_distribution(P, 'bull', steps=2)
+    assert np.allclose(dist.loc[1].to_numpy(), [0.5, 0.5])           # one step = P row
+    assert np.allclose(dist.loc[2].to_numpy(), [0.65, 0.35])         # [.5,.5] @ P
+    assert np.allclose(dist.sum(axis=1).to_numpy(), 1.0)
+
+
+def test_stationary_distribution_matches_power_limit():
+    P = pd.DataFrame([[0.9, 0.1], [0.4, 0.6]], index=['bear', 'bull'], columns=['bear', 'bull'])
+    pi = rg.stationary_distribution(P)
+    assert np.isclose(pi.sum(), 1.0)
+    # πP = π
+    assert np.allclose((pi.to_numpy() @ P.to_numpy()), pi.to_numpy(), atol=1e-6)
+
+
+def test_directional_signal_sign():
+    P = pd.DataFrame([[0.7, 0.2, 0.1], [0.3, 0.4, 0.3], [0.1, 0.2, 0.7]],
+                     index=['bear', 'sideways', 'bull'], columns=['bear', 'sideways', 'bull'])
+    assert np.isclose(rg.directional_signal(P, 'bull'), 0.7 - 0.1)   # bull row: P(bull)-P(bear)
+    assert rg.directional_signal(P, 'bear') < 0                      # bear row: bear-heavy
+
+
+def test_markov_backtest_keys_and_long_bias():
+    s = _trend(0.01, n=200)                       # steady uptrend -> long bias profits
+    res = rg.markov_backtest(s, lookback=20, threshold=0.05, horizon=5)
+    for k in ('strat_cumret', 'hold_cumret', 'strat_sharpe', 'hold_sharpe'):
+        assert k in res
+    assert not res['strat_cumret'].empty
+
+
 def test_tactical_table_ranks_leader_first():
     n = 300
     idx = pd.bdate_range('2015-01-01', periods=n)
