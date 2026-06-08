@@ -204,6 +204,32 @@ def an_populate(_init):
 
 
 @callback(
+    Output('an-ticker', 'value'),
+    Input('an-init', 'data'),
+    State('workspace', 'data'),
+)
+def an_prefill_from_workspace(_init, ws):
+    """On page load, preselect the instrument carried over from another page (shared
+    workspace), e.g. a row clicked on /today. Empty workspace → leave as-is."""
+    return (ws or {}).get('ticker') or dash.no_update
+
+
+@callback(
+    Output('workspace', 'data', allow_duplicate=True),
+    Input('an-ticker', 'value'),
+    State('workspace', 'data'),
+    prevent_initial_call=True,
+)
+def an_ticker_to_workspace(ticker, ws):
+    """Remember the chosen instrument in the shared workspace so other pages inherit it."""
+    if not ticker:
+        return dash.no_update
+    new_ws = dict(ws or {})
+    new_ws['ticker'] = ticker
+    return new_ws
+
+
+@callback(
     Output('an-peer-sector', 'value'),
     Input('an-ticker', 'value'),
     prevent_initial_call=True,
