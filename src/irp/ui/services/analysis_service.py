@@ -84,6 +84,14 @@ def _sector_options() -> list[dict]:
     return [{'label': s, 'value': s} for s in universe_service._get_sectors()]
 
 
+def _ticker_sector(ticker: str | None) -> str | None:
+    """Sector the instrument belongs to (None if unmapped)."""
+    if not ticker:
+        return None
+    val = _sector_map().get(ticker)
+    return str(val) if val is not None and pd.notna(val) else None
+
+
 def _peers_options(sector: str | None = None) -> list[dict]:
     """Peer-instrument options, optionally restricted to one sector. Without a sector
     the full panel is offered; with one, only that sector's tickers that exist in the
