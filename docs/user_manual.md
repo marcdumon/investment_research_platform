@@ -270,7 +270,54 @@ top the ranking while equities lag, that is a defensive tilt in the market — c
 risk-off regime upstairs. It is a descriptive overlay, **not** a sized portfolio or a
 buy/sell order.
 
-### 3.5 A Regime workflow for a decision
+### 3.5 Section 5 — Single-asset Markov regime ("hedge-fund method")
+
+This is the per-asset timing tool popularised in trading videos as the "Markov hedge-fund
+method". It works on **one asset's own price** (a stock, crypto, ETF) rather than the macro
+backdrop.
+
+The idea in four steps:
+
+1. **Label each day** bull / sideways / bear from the trailing return: if the last *N* days
+   (your **Lookback**, default 20) returned more than the **Threshold** (default 5%) it is
+   `bull`; less than −5% is `bear`; in between is `sideways`.
+2. **Build a transition matrix** — a 3×3 grid of "if today is X, how often is tomorrow Y".
+   The diagonal is **persistence** (how sticky each state is).
+3. **Project forward** — multiplying the matrix by itself gives the odds *k* days out; far
+   enough out it settles to the **stationary distribution** (the long-run mix).
+4. **Make a signal** — `P(bull tomorrow) − P(bear tomorrow)`. Positive ⇒ lean long, negative
+   ⇒ lean short; the size of the number is your conviction.
+
+Controls: **Instrument**, **Lookback**, **Threshold %**, **Sampling**, **HMM overlay**,
+**Backtest horizon**, then **Run Markov**.
+
+What you see:
+
+- **Chips** — current state, the **signal** value and its direction, **persistence**
+  (stickiness of the current state), **HMM agreement** (how often the threshold-free HMM
+  states agree with the rule states — a confidence check), and which **sampling** you used.
+- **Transition matrix** heatmap and **state forecast** (probability of each state vs days
+  ahead, with the long-run/stationary level dashed).
+- **Walk-forward backtest** — the honest test: builds the matrix from *past data only* at each
+  step, trades the signal, and plots it against simply buying and holding, with both Sharpe
+  ratios.
+
+Two things to take seriously:
+
+- **Sampling matters.** "Overlapping" (the video's default) samples every day, but two
+  adjacent 20-day windows share 19 days, which makes states look far stickier than they really
+  are. **Non-overlapping** (the default here) samples every 20 days for an honest matrix. Flip
+  between them and watch the persistence number drop — that drop is the illusion leaving.
+- **Check the backtest before believing the signal.** Very often the strategy's Sharpe does
+  **not** beat buy-and-hold (e.g. for big trending stocks). That means the matrix is not adding
+  tradeable edge for that asset, however clever it looks. This is the reality check the hype
+  videos skip.
+
+**How to use it:** a quick, transparent read on one asset's momentum/mean-reversion character
+and a built-in honesty check on whether timing it actually pays. Treat the signal as a lean,
+not gospel, and always glance at the walk-forward result first.
+
+### 3.6 A Regime workflow for a decision
 
 1. **Run dashboard** (10Y). Read the current regime and the contribution bars — know the
    backdrop and why.
@@ -313,6 +360,13 @@ current market** — instead of trading one signal blindly through every kind of
 - **Risk-on / risk-off** — appetite for risk: on = calm and rising, off = stress and falling.
 - **HMM (Hidden Markov Model)** — a statistical method that discovers recurring market states
   on its own.
+- **Transition matrix** — a grid of probabilities of moving from today's state to tomorrow's.
+- **Persistence / stickiness** — how likely a state is to repeat tomorrow (the matrix diagonal).
+- **Stationary distribution** — the long-run mix of states the matrix settles into far ahead.
+- **Markov property** — the assumption that tomorrow depends only on today's state, not the
+  full past.
+- **Overlapping vs non-overlapping windows** — sampling every day (windows share data, inflates
+  stickiness) vs every N days (honest). Prefer non-overlapping for the transition matrix.
 - **Yield curve** — the gap between long and short government-bond rates; an inverted (negative)
   curve has historically preceded recessions.
 - **Z-score** — how many standard deviations a value is from its average; a way to compare

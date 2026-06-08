@@ -19,13 +19,14 @@ import datetime
 import logging
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 from irp.analysis import regime as _rg
 from irp.features.composite import PRESETS
 from irp.panel.load import load_prices_wide
 from irp.query import stooq as _stooq
-from irp.ui.services import backtest_service
+from irp.ui.services import analysis_service, backtest_service
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,29 @@ class GatedBacktest:
     allowed: list[str]
     result: dict                        # gated/base period + cumret + sharpe + maxdd
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class MarkovResult:
+    """Single-asset Markov regime ('hedge-fund method') payload."""
+    ticker: str
+    states: pd.Series
+    transition: pd.DataFrame
+    current_state: str
+    signal: float                       # P(bull)−P(bear) for the current state
+    n_step: pd.DataFrame                # distribution 1..N days ahead
+    stationary: pd.Series
+    hmm_states: pd.Series               # HMM bull/sideways/bear, aligned (empty if off)
+    hmm_agree: float                    # fraction where rule & HMM agree (nan if off)
+    equity: pd.Series
+    backtest: dict
+    lookback: int
+    threshold: float
+    overlapping: bool
+    warnings: list[str] = field(default_factory=list)
+
+
+_STATE_FROM_INT = {0: 'bear', 1: 'sideways', 2: 'bull'}
 
 
 def _stooq_close(ticker: str) -> pd.Series:
@@ -237,8 +261,79 @@ def tactical(start: datetime.date | None, end: datetime.date | None,
     return _rg.tactical_table(closes, lookbacks=lookbacks)
 
 
+def _any_close(ticker: str, start, end) -> pd.Series:
+    """Close for any tradeable ticker: Yahoo panel first, Stooq fallback, windowed."""
+    s = analysis_service._close_series(ticker, start, end)
+    if s.empty:
+        s = _stooq_close(ticker)
+        if start is not None:
+            s = s[s.index >= pd.Timestamp(start)]
+        if end is not None:
+            s = s[s.index <= pd.Timestamp(end)]
+    return s
+
+
+def _hmm_single_asset(close: pd.Series, vol_win: int = 20) -> pd.Series:
+    """HMM bull/sideways/bear labels from one asset's return + vol (states ordered by
+    mean return → 0=bear, 2=bull)."""
+    ret = np.log(close / close.shift(1))
+    feats = pd.concat([ret.rename('ret'), ret.rolling(vol_win).std().rename('vol')],
+                      axis=1).dropna()
+    if len(feats) < 50:
+        return pd.Series(dtype=object)
+    fit = _rg.hmm_regime(feats, n_states=3, mode='full')
+    return fit.labels.map(_STATE_FROM_INT)
+
+
+def markov_analysis(ticker: str, start: datetime.date | None, end: datetime.date | None,
+                    lookback: int = 20, threshold: float = 0.05, overlapping: bool = True,
+                    hmm_overlay: bool = True, n_step: int = 20,
+                    horizon: int = 5) -> MarkovResult:
+    """Full single-asset Markov regime: states, transition matrix, n-step forecast,
+    stationary distribution, current signal, optional HMM agreement, walk-forward backtest."""
+    warnings: list[str] = []
+    close = _any_close(ticker, start, end)
+    empty = MarkovResult(ticker, pd.Series(dtype=object), pd.DataFrame(), '—', np.nan,
+                         pd.DataFrame(), pd.Series(dtype=float), pd.Series(dtype=object),
+                         np.nan, pd.Series(dtype=float), {}, lookback, threshold,
+                         overlapping, warnings)
+    if close.empty or len(close) < lookback + 30:
+        warnings.append(f'not enough price history for {ticker}')
+        return empty
+    states = _rg.return_states(close, lookback, threshold, overlapping)
+    if states.empty:
+        warnings.append('no states computed')
+        return empty
+    P = _rg.transition_matrix(states)
+    current = str(states.iloc[-1])
+    signal = _rg.directional_signal(P, current)
+    nstep = _rg.n_step_distribution(P, current, steps=n_step)
+    stat = _rg.stationary_distribution(P)
+    bt = _rg.markov_backtest(close, lookback, threshold, overlapping, horizon=horizon)
+
+    hmm_states = pd.Series(dtype=object)
+    agree = np.nan
+    if hmm_overlay:
+        hmm_states = _hmm_single_asset(close)
+        if not hmm_states.empty:
+            j = pd.concat([states.rename('rule'),
+                           hmm_states.reindex(states.index, method='ffill').rename('hmm')],
+                          axis=1).dropna()
+            if len(j):
+                agree = float((j['rule'] == j['hmm']).mean())
+        else:
+            warnings.append('HMM overlay skipped — too little history')
+    return MarkovResult(ticker, states, P, current, signal, nstep, stat, hmm_states, agree,
+                        close, bt, lookback, threshold, overlapping, warnings)
+
+
 def signal_options() -> list[dict]:
     """Factor + composite-preset choices for the conditioning/gating pickers."""
     from irp.ui.factor_meta import FACTOR_OPTIONS
     presets = [{'label': f'Composite: {k}', 'value': k} for k in PRESETS]
     return presets + list(FACTOR_OPTIONS)
+
+
+def instrument_options() -> list[dict]:
+    """All panel tickers, for the single-asset Markov picker."""
+    return [{'label': t, 'value': t} for t in analysis_service._available_instruments()]
