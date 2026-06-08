@@ -12,7 +12,8 @@ import pandas as pd
 
 from irp.factors.cache import snapshot
 from irp.features.composite import PRESETS, build_composite
-from irp.ui.services import factors_service, regime_service, watchlist_service
+from irp.models import predictions as _predictions
+from irp.ui.services import factors_service, regime_service, universe_service, watchlist_service
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,14 @@ _REGIME_COLOR = {'risk_on': '#4ec94e', 'neutral': '#9aa0a6', 'risk_off': '#e4575
 
 
 @dataclass
+class ModelPicks:
+    picks: pd.DataFrame                 # ranked names from the latest model export
+    as_of: datetime.date | None         # the model's most recent prediction date
+    source: str | None                  # export filename
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class TodayResult:
     regime: dict                        # label, score, drivers, as_of
     playbook: dict                      # preset, stance
@@ -36,6 +45,7 @@ class TodayResult:
     as_of: datetime.date | None         # cross-section date
     top: pd.DataFrame                   # ranked names
     watchlist: pd.DataFrame             # watchlist standing (empty if none)
+    model: 'ModelPicks'                 # latest model export picks (empty if none)
     variant: str
     warnings: list[str] = field(default_factory=list)
 
@@ -80,6 +90,24 @@ def _display_cols(preset: str) -> list[str]:
     return base + list(PRESETS[preset].keys())
 
 
+def model_picks(n: int = 20) -> ModelPicks:
+    """Top names from the most recent model-prediction export (the model→action bridge).
+
+    Empty + a warning when no notebook has exported predictions yet."""
+    try:
+        df = _predictions.load_predictions()
+    except FileNotFoundError as exc:
+        return ModelPicks(pd.DataFrame(), None, None, [str(exc)])
+    picks = _predictions.latest_picks(df, n)
+    if picks.empty:
+        return ModelPicks(pd.DataFrame(), None, None, ['exported predictions are empty'])
+    comp = (universe_service._get_companies()[['Ticker', 'Company Name', 'Sector']]
+            .set_index('Ticker'))
+    picks = picks.join(comp, how='left')
+    src = _predictions.list_predictions()
+    return ModelPicks(picks, df['Date'].max().date(), src[0].name if src else None, [])
+
+
 def dashboard(variant: str = 'A', market: str | None = None, sector: str | None = None,
               watchlist: str | None = None, top_n: int = 20, preset: str | None = None,
               min_mktcap: float = 1.0) -> TodayResult:
@@ -93,9 +121,10 @@ def dashboard(variant: str = 'A', market: str | None = None, sector: str | None 
     play = _REGIME_PLAYBOOK.get(label, _REGIME_PLAYBOOK['unknown'])
     use_preset = preset or play['preset']
 
+    mp = model_picks(top_n)
     as_of = snapshot.latest_cached(variant)
     empty = TodayResult(regime, play, use_preset, as_of, pd.DataFrame(), pd.DataFrame(),
-                        variant, warnings)
+                        mp, variant, warnings)
     if as_of is None:
         warnings.append(f'no cached cross-section for variant {variant} — run Precompute on /features')
         return empty
@@ -119,7 +148,7 @@ def dashboard(variant: str = 'A', market: str | None = None, sector: str | None 
     wl = pd.DataFrame()
     if watchlist:
         wl = _watchlist_panel(as_of, variant, use_preset, watchlist)
-    return TodayResult(regime, play, use_preset, as_of, top_view, wl, variant, warnings)
+    return TodayResult(regime, play, use_preset, as_of, top_view, wl, mp, variant, warnings)
 
 
 def _watchlist_panel(as_of: datetime.date, variant: str, preset: str,
