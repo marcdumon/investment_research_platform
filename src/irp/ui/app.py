@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import dash
-from dash import html
+from dash import dcc, html
 
 from irp.ui.components import navbar
 
@@ -17,6 +17,11 @@ app = dash.Dash(
 app.title = 'IRP'
 
 app.layout = html.Div([
+    # Cross-page shared context: a session-scoped "current selection" (e.g. ticker) that
+    # pages prefill from on load and write to on change, plus a Location for programmatic
+    # navigation (e.g. /today row click → /analysis). See pages that read `workspace`.
+    dcc.Location(id='url-redirect', refresh=False),
+    dcc.Store(id='workspace', storage_type='session', data={}),
     navbar(),
     html.Main(className='main-content', children=[dash.page_container]),
 ])

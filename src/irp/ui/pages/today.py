@@ -6,6 +6,7 @@ import logging
 
 import dash
 from dash import Input, Output, State, callback, dash_table, dcc, html
+from dash.exceptions import PreventUpdate
 
 from irp.ui.services import today_service
 from irp.ui.theme import ACCENT, MUTED
@@ -130,7 +131,7 @@ def _regime_banner(r):
         [*_section('1 · Regime & playbook'), chips, link]
 
 
-def _table(df, fmt_cols=()):
+def _table(df, fmt_cols=(), table_id=None):
     cols = []
     for c in df.columns:
         col = {'name': str(c), 'id': str(c)}
@@ -138,10 +139,11 @@ def _table(df, fmt_cols=()):
             col['type'] = 'numeric'
             col['format'] = {'specifier': '.2f'}
         cols.append(col)
+    kwargs = {'id': table_id} if table_id else {}
     return dash_table.DataTable(
         data=df.reset_index().rename(columns={'index': 'Ticker'}).to_dict('records'),
         columns=[{'name': 'Ticker', 'id': 'Ticker'}] + cols,
-        sort_action='native', page_action='none',
+        sort_action='native', page_action='none', **kwargs,
         style_as_list_view=True,
         style_header={'backgroundColor': 'transparent', 'color': MUTED,
                       'fontWeight': '600', 'border': 'none'},
@@ -159,7 +161,9 @@ def _build_output(r):
         blocks.append(html.P('No ranked names (cold cache or empty filter).', className='no-data'))
     else:
         num = [c for c in r.top.columns if c not in ('Rank', 'Company Name', 'Sector')]
-        blocks.append(_table(r.top, fmt_cols=num))
+        blocks.append(html.P('Click a row to open it on /analysis.',
+                             style={'color': MUTED, 'fontSize': '11px'}))
+        blocks.append(_table(r.top, fmt_cols=num, table_id='today-top-table'))
     if r.watchlist is not None and not r.watchlist.empty:
         blocks += _section('3 · Watchlist standing',
                            'Your watchlist names scored on the same signal, with their '
@@ -198,3 +202,23 @@ def today_render(store):
     if not store or store.get('token') not in _CACHE:
         return html.P('Pick filters, then Run.', className='no-data')
     return _build_output(_CACHE[store['token']])
+
+
+@callback(
+    Output('workspace', 'data', allow_duplicate=True),
+    Output('url-redirect', 'pathname'),
+    Input('today-top-table', 'active_cell'),
+    State('today-top-table', 'data'), State('workspace', 'data'),
+    prevent_initial_call=True,
+)
+def today_row_to_analysis(active, data, ws):
+    """Click a top-name row → stash the ticker in the shared workspace and jump to /analysis."""
+    if not active or not data:
+        raise PreventUpdate
+    row = data[active['row']]
+    ticker = row.get('Ticker')
+    if not ticker:
+        raise PreventUpdate
+    new_ws = dict(ws or {})
+    new_ws['ticker'] = ticker
+    return new_ws, '/analysis'

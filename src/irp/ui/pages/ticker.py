@@ -415,6 +415,31 @@ layout = html.Div(
 
 
 @callback(
+    Output('ticker-select', 'value'),
+    Input('ticker-init', 'data'),
+    State('workspace', 'data'),
+)
+def ticker_prefill_from_workspace(_init: Any, ws: Any) -> Any:
+    """On load, preselect the ticker carried over from another page (shared workspace)."""
+    return (ws or {}).get('ticker') or dash.no_update
+
+
+@callback(
+    Output('workspace', 'data', allow_duplicate=True),
+    Input('ticker-select', 'value'),
+    State('workspace', 'data'),
+    prevent_initial_call=True,
+)
+def ticker_to_workspace(ticker: Any, ws: Any) -> Any:
+    """Remember the selected ticker in the shared workspace for other pages to inherit."""
+    if not ticker:
+        return dash.no_update
+    new_ws = dict(ws or {})
+    new_ws['ticker'] = ticker
+    return new_ws
+
+
+@callback(
     Output('all-tickers-store', 'data'),
     Output('filter-market', 'options'),
     Output('filter-sector', 'options'),
