@@ -30,8 +30,10 @@ _PRICES_FILE = raw_dir / 'prices.csv'
 # These are the source of truth for fetch progress. The `catalog` table in DuckDB
 # mirrors them as BOOLEAN columns but is a derived snapshot, not live state.
 _QUERIED_ACTIONS = JsonSet(raw_dir / 'queried_actions.json')
+_QUERIED_ACTIONS_UPDATE = JsonSet(raw_dir / 'queried_actions_update.json')
 _QUERIED_PRICES = JsonSet(raw_dir / 'queried_prices.json')
 _ERRORS = JsonSet(raw_dir / 'error_tickers.json')
+_UPDATE_SESSION = raw_dir / 'update_session.marker'
 _ACTIONS_COLS = ['Ticker', 'Date', 'Type', 'Value']
 
 
@@ -135,6 +137,7 @@ def _fetch_actions_per_ticker(
     new_errors: set[str],
     has_header: bool,
     actions_sleep: float | None = None,
+    tracker: JsonSet | None = None,
 ) -> bool:
     from irp.core.cancel import is_cancelled
 
@@ -160,7 +163,7 @@ def _fetch_actions_per_ticker(
             if not rows_df.empty:
                 has_header = _append_csv(rows_df, _ACTIONS_FILE, has_header)
         queried.add(ticker)
-        _QUERIED_ACTIONS.save(queried)
+        (tracker or _QUERIED_ACTIONS).save(queried)
     return has_header
 
 
@@ -242,6 +245,7 @@ def _fetch_ticker_data(
     batch_size: int | None = None,
     batch_sleep: float | None = None,
     actions_sleep: float | None = None,
+    actions_tracker: JsonSet | None = None,
 ) -> None:
     """Pull dividends, splits, and/or OHLCV prices from yfinance.
 
@@ -259,7 +263,8 @@ def _fetch_ticker_data(
     raw_dir.mkdir(parents=True, exist_ok=True)
     ticker_map = _load_yahoo_tickers()
     known_errors = _ERRORS.load() if skip_errors else set()
-    queried_actions = _QUERIED_ACTIONS.load() if skip_queried else set()
+    _at = actions_tracker or _QUERIED_ACTIONS
+    queried_actions = _at.load() if (skip_queried or actions_tracker) else set()
     queried_prices = _QUERIED_PRICES.load() if skip_queried else set()
     new_errors: set[str] = set()
 
@@ -275,6 +280,7 @@ def _fetch_ticker_data(
             new_errors,
             actions_has_header,
             actions_sleep=actions_sleep,
+            tracker=actions_tracker,
         )
 
     if fetch_prices:
@@ -463,6 +469,14 @@ class YahooSource:
             if last_dates_raw is not None
             else None
         )
+        if self._fetch_actions:
+            if not _UPDATE_SESSION.exists():
+                _QUERIED_ACTIONS_UPDATE.save(set())
+                raw_dir.mkdir(parents=True, exist_ok=True)
+                _UPDATE_SESSION.touch()
+                logger.debug('Actions update: fresh run, progress reset')
+            else:
+                logger.debug('Actions update: resuming from prior run')
         _fetch_ticker_data(
             skip_queried=False,
             fetch_actions=self._fetch_actions,
@@ -471,7 +485,9 @@ class YahooSource:
             batch_size=self._prices_batch_size,
             batch_sleep=self._batch_sleep,
             actions_sleep=self._actions_sleep,
+            actions_tracker=_QUERIED_ACTIONS_UPDATE if self._fetch_actions else None,
         )
+        _UPDATE_SESSION.unlink(missing_ok=True)
         self.markers.touch('fetched')
 
     def transform(self, feed: Literal['bulk', 'update']) -> None:

@@ -49,7 +49,7 @@ layout = html.Div(className='ingest-page', children=[
             html.Label('Yahoo batch & sleep', className='section-label', style={'marginTop': '8px'}),
             html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}, children=[
                 html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '6px'}, children=[
-                    html.Span('Batch size', style={'fontSize': '12px', 'width': '90px'}),
+                    html.Span('Price batch size', style={'fontSize': '12px', 'width': '90px'}),
                     dcc.Input(id='yahoo-batch-size', type='number', value=_yahoo_cfg.prices_batch_size, min=1, step=1,
                               style={'width': '60px', 'fontSize': '12px'}),
                 ]),
