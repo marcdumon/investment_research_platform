@@ -84,7 +84,7 @@ def precompute(start_year: int, end_year: int, variant: Literal['A', 'Q']) -> in
     Skips already-cached dates. Returns the number of new snapshots written.
     """
     start = datetime.date(int(start_year), 1, 1)
-    end = datetime.date(int(end_year), 12, 31)
+    end = min(datetime.date(int(end_year), 12, 31), datetime.date.today())
     return _snapshot.precompute_all(start, end, variants=[variant], freq='QE')
 
 

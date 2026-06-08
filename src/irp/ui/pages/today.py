@@ -2,13 +2,14 @@
 ranked by the regime-appropriate composite + your watchlist's standing. Reads only from
 `today_service` (services-only rule).
 """
+import datetime
 import logging
 
 import dash
 from dash import Input, Output, State, callback, dash_table, dcc, html
 from dash.exceptions import PreventUpdate
 
-from irp.ui.services import today_service
+from irp.ui.services import features_service, today_service
 from irp.ui.theme import ACCENT, MUTED
 
 dash.register_page(__name__, path='/today', name='Today')
@@ -88,6 +89,25 @@ layout = html.Div(className='page', children=[
     dcc.Loading(html.Div(id='today-warnings', style={'margin': '6px 0', 'fontSize': '12px',
                                                      'color': _RED})),
     dcc.Loading(html.Div(id='today-output'), type='default'),
+
+    html.Details(style={'marginTop': '24px', 'borderTop': '1px solid var(--border)',
+                        'paddingTop': '12px'}, children=[
+        html.Summary('Rebuild factor cache', style={'cursor': 'pointer', 'color': MUTED,
+                                                    'fontSize': '12px', 'userSelect': 'none'}),
+        html.Div(style={'display': 'flex', 'gap': '10px', 'alignItems': 'flex-end',
+                        'flexWrap': 'wrap', 'marginTop': '8px'}, children=[
+            _field('Start year', dcc.Input(id='today-pre-start', type='number',
+                                           value=datetime.date.today().year - 3,
+                                           min=2010, max=2030, step=1, style={'width': '80px'})),
+            _field('End year', dcc.Input(id='today-pre-end', type='number',
+                                         value=datetime.date.today().year,
+                                         min=2010, max=2030, step=1, style={'width': '80px'})),
+            html.Button('Precompute', id='today-precompute-btn', className='run-btn',
+                        n_clicks=0, style={'fontSize': '12px', 'padding': '4px 12px'}),
+        ]),
+        dcc.Loading(html.Div(id='today-pre-status',
+                             style={'fontSize': '12px', 'marginTop': '6px', 'color': MUTED})),
+    ]),
 ])
 
 
@@ -147,7 +167,7 @@ def _table(df, fmt_cols=(), table_id=None):
         style_as_list_view=True,
         style_header={'backgroundColor': 'transparent', 'color': MUTED,
                       'fontWeight': '600', 'border': 'none'},
-        style_cell={'backgroundColor': 'transparent', 'color': '#d8dade',
+        style_cell={'backgroundColor': 'transparent', 'color': 'var(--text)',
                     'border': 'none', 'fontSize': '13px', 'padding': '6px 10px'},
         style_data={'borderBottom': '1px solid var(--border)'},
     )
@@ -257,3 +277,22 @@ def today_model_row_to_analysis(active, data, ws):
     new_ws = dict(ws or {})
     new_ws['ticker'] = ticker
     return new_ws, '/analysis'
+
+
+@callback(
+    Output('today-pre-status', 'children'),
+    Input('today-precompute-btn', 'n_clicks'),
+    State('today-variant', 'value'),
+    State('today-pre-start', 'value'),
+    State('today-pre-end', 'value'),
+    running=[(Output('today-precompute-btn', 'disabled'), True, False),
+             (Output('today-precompute-btn', 'children'), 'Running…', 'Precompute')],
+    prevent_initial_call=True,
+)
+def today_precompute(_n, variant, start_yr, end_yr):
+    try:
+        n = features_service.precompute(int(start_yr), int(end_yr), variant or 'A')
+        return f'Done — {n} new snapshot(s) written.'
+    except Exception as exc:
+        logger.exception('precompute failed')
+        return f'Failed: {exc}'

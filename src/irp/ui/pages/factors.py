@@ -13,7 +13,7 @@ from dash.exceptions import PreventUpdate
 
 from irp.ui.charts import base_chart_layout, empty_figure
 from irp.ui.factor_meta import FACTOR_LABELS, FACTOR_OPTIONS, PCT_FACTORS
-from irp.ui.services import factors_service, universe_service, watchlist_service
+from irp.ui.services import factors_service, features_service, universe_service, watchlist_service
 from irp.ui.tables import column_format as _col_fmt, format_factor_value as _fmt
 from irp.ui.theme import ACCENT, HOVER_LABEL, MUTED, TABLE_STYLE
 
@@ -203,6 +203,38 @@ layout = html.Div(
                 ),
             ],
         ),
+        # Precompute panel
+        html.Details(style={'marginTop': '24px', 'borderTop': '1px solid var(--border)',
+                            'paddingTop': '12px'}, children=[
+            html.Summary('Rebuild factor cache', style={'cursor': 'pointer', 'color': MUTED,
+                                                        'fontSize': '12px', 'userSelect': 'none'}),
+            html.Div(style={'display': 'flex', 'gap': '10px', 'alignItems': 'flex-end',
+                            'flexWrap': 'wrap', 'marginTop': '8px'}, children=[
+                html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}, children=[
+                    html.Label('Start year', style={'color': MUTED, 'fontSize': '11px'}),
+                    dcc.Input(id='fac-pre-start', type='number',
+                              value=datetime.date.today().year - 3,
+                              min=2010, max=2030, step=1, style={'width': '80px'}),
+                ]),
+                html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}, children=[
+                    html.Label('End year', style={'color': MUTED, 'fontSize': '11px'}),
+                    dcc.Input(id='fac-pre-end', type='number',
+                              value=datetime.date.today().year,
+                              min=2010, max=2030, step=1, style={'width': '80px'}),
+                ]),
+                html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}, children=[
+                    html.Label('Variant', style={'color': MUTED, 'fontSize': '11px'}),
+                    dcc.RadioItems(id='fac-pre-variant',
+                                   options=[{'label': ' A', 'value': 'A'},
+                                            {'label': ' Q', 'value': 'Q'}],
+                                   value='A', inline=True, labelClassName='check-item'),
+                ]),
+                html.Button('Precompute', id='fac-precompute-btn', className='run-btn', n_clicks=0,
+                            style={'fontSize': '12px', 'padding': '4px 12px'}),
+            ]),
+            dcc.Loading(html.Div(id='fac-pre-status',
+                                 style={'fontSize': '12px', 'marginTop': '6px', 'color': MUTED})),
+        ]),
     ],
 )
 
@@ -592,3 +624,22 @@ def render_history_table(store: dict | None) -> Any:
             + left_cols,
         },
     )
+
+
+@callback(
+    Output('fac-pre-status', 'children'),
+    Input('fac-precompute-btn', 'n_clicks'),
+    State('fac-pre-variant', 'value'),
+    State('fac-pre-start', 'value'),
+    State('fac-pre-end', 'value'),
+    running=[(Output('fac-precompute-btn', 'disabled'), True, False),
+             (Output('fac-precompute-btn', 'children'), 'Running…', 'Precompute')],
+    prevent_initial_call=True,
+)
+def fac_precompute(_n, variant, start_yr, end_yr):
+    try:
+        n = features_service.precompute(int(start_yr), int(end_yr), variant or 'A')
+        return f'Done — {n} new snapshot(s) written.'
+    except Exception as exc:
+        logger.exception('precompute failed')
+        return f'Failed: {exc}'

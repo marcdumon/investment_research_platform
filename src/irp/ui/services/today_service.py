@@ -128,9 +128,12 @@ def dashboard(variant: str = 'A', market: str | None = None, sector: str | None 
     if as_of is None:
         warnings.append(f'no cached cross-section for variant {variant} — run Precompute on /features')
         return empty
-    if regime.get('as_of') and as_of and str(regime['as_of']) != str(as_of):
-        warnings.append(f'regime is current ({regime["as_of"]}) but names use the {as_of} '
-                        f'cross-section cache — names may be stale')
+    regime_as_of = regime.get('as_of')
+    if regime_as_of and as_of:
+        gap = (regime_as_of - as_of).days
+        if gap > 92:
+            warnings.append(f'names use the {as_of} cross-section — '
+                            f'{gap} days behind regime ({regime_as_of}); run Precompute on /features')
 
     # Top names rank the (market/sector) universe — NOT the watchlist, which has its own
     # section below; otherwise the two would show the same names.

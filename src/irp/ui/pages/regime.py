@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, callback, dcc, html
 
 from irp.ui.charts import base_chart_layout, empty_figure
-from irp.ui.services import regime_service
+from irp.ui.services import features_service, regime_service
 from irp.ui.theme import ACCENT, MUTED
 
 dash.register_page(__name__, path='/regime', name='Regime')
@@ -200,6 +200,38 @@ layout = html.Div(className='page', children=[
     dcc.Loading(html.Div(id='rg-mk-warnings', style={'margin': '6px 0', 'fontSize': '12px',
                                                      'color': _RED})),
     dcc.Loading(html.Div(id='rg-mk-output'), type='default'),
+
+    html.Details(style={'marginTop': '24px', 'borderTop': '1px solid var(--border)',
+                        'paddingTop': '12px'}, children=[
+        html.Summary('Rebuild factor cache', style={'cursor': 'pointer', 'color': MUTED,
+                                                    'fontSize': '12px', 'userSelect': 'none'}),
+        html.Div(style={'display': 'flex', 'gap': '10px', 'alignItems': 'flex-end',
+                        'flexWrap': 'wrap', 'marginTop': '8px'}, children=[
+            html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}, children=[
+                html.Label('Start year', style={'color': MUTED, 'fontSize': '11px'}),
+                dcc.Input(id='rg-pre-start', type='number',
+                          value=datetime.date.today().year - 3,
+                          min=2010, max=2030, step=1, style={'width': '80px'}),
+            ]),
+            html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}, children=[
+                html.Label('End year', style={'color': MUTED, 'fontSize': '11px'}),
+                dcc.Input(id='rg-pre-end', type='number',
+                          value=datetime.date.today().year,
+                          min=2010, max=2030, step=1, style={'width': '80px'}),
+            ]),
+            html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '2px'}, children=[
+                html.Label('Variant', style={'color': MUTED, 'fontSize': '11px'}),
+                dcc.RadioItems(id='rg-pre-variant',
+                               options=[{'label': ' A', 'value': 'A'},
+                                        {'label': ' Q', 'value': 'Q'}],
+                               value='A', inline=True, labelClassName='check-item'),
+            ]),
+            html.Button('Precompute', id='rg-precompute-btn', className='run-btn', n_clicks=0,
+                        style={'fontSize': '12px', 'padding': '4px 12px'}),
+        ]),
+        dcc.Loading(html.Div(id='rg-pre-status',
+                             style={'fontSize': '12px', 'marginTop': '6px', 'color': MUTED})),
+    ]),
 ])
 
 
@@ -659,3 +691,22 @@ def rg_render_mk(store):
         return html.P('Pick an instrument, set lookback/threshold, then Run Markov.',
                       className='no-data')
     return _build_mk_output(_MK_CACHE[store['token']])
+
+
+@callback(
+    Output('rg-pre-status', 'children'),
+    Input('rg-precompute-btn', 'n_clicks'),
+    State('rg-pre-variant', 'value'),
+    State('rg-pre-start', 'value'),
+    State('rg-pre-end', 'value'),
+    running=[(Output('rg-precompute-btn', 'disabled'), True, False),
+             (Output('rg-precompute-btn', 'children'), 'Running…', 'Precompute')],
+    prevent_initial_call=True,
+)
+def rg_precompute(_n, variant, start_yr, end_yr):
+    try:
+        n = features_service.precompute(int(start_yr), int(end_yr), variant or 'A')
+        return f'Done — {n} new snapshot(s) written.'
+    except Exception as exc:
+        logger.exception('precompute failed')
+        return f'Failed: {exc}'

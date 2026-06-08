@@ -83,8 +83,9 @@ def refresh(rebuild_panels: bool = True, precompute: bool = True,
         sy = start_year or today.year - 3
         ey = end_year or today.year
         logger.info('precomputing factor cache %s–%s variants=%s…', sy, ey, list(variants))
+        end_date = min(datetime.date(ey, 12, 31), today)
         summary['snapshots'] = snapshot.precompute_all(
-            datetime.date(sy, 1, 1), datetime.date(ey, 12, 31),
+            datetime.date(sy, 1, 1), end_date,
             variants=list(variants), freq=freq, force=force)
         logger.info('snapshots written: %s', summary['snapshots'])
     return summary
