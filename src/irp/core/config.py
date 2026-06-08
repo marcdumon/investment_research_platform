@@ -31,7 +31,6 @@ class SimfinConfig(ProviderConfig):
 class YahooConfig(ProviderConfig):
     batch_sleep: float
     actions_sleep: float
-    ticker_sleep: float
     prices_batch_size: int = 50
     markets_exclude: list[str]
 

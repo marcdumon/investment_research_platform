@@ -26,10 +26,9 @@ refresh_days_meta = 1
 [providers.yahoo]
 raw_dir = "yahoo/raw"
 processed_dir = "yahoo/processed"
-prices_batch_size = 50
+prices_batch_size = 75
 batch_sleep = 1.0
 actions_sleep = 0.5
-ticker_sleep = 0.5
 markets_exclude = ["cryptocurrencies", "money market", "bonds"]
 
 

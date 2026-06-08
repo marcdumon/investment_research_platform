@@ -134,6 +134,7 @@ def _fetch_actions_per_ticker(
     known_errors: set[str],
     new_errors: set[str],
     has_header: bool,
+    actions_sleep: float | None = None,
 ) -> bool:
     from irp.core.cancel import is_cancelled
 
@@ -144,15 +145,16 @@ def _fetch_actions_per_ticker(
             break
         yahoo = ticker_map[ticker]
         logger.debug(f'Actions: {ticker} (yahoo={yahoo})')
+        _asleep = actions_sleep if actions_sleep is not None else yahoo_cfg.actions_sleep
         try:
             actions = yf.Ticker(yahoo).actions
         except Exception as e:
             logger.warning(f'{ticker}: {type(e).__name__}: {e}')
             new_errors.add(ticker)
             _ERRORS.save(known_errors | new_errors)
-            time.sleep(yahoo_cfg.actions_sleep)
+            time.sleep(_asleep)
             continue
-        time.sleep(yahoo_cfg.actions_sleep)
+        time.sleep(_asleep)
         if actions is not None and not actions.empty:
             rows_df = _actions_to_long(ticker, actions)
             if not rows_df.empty:
@@ -173,62 +175,35 @@ def _fetch_prices_batched(
     new_errors: set[str],
     has_header: bool,
     last_dates: dict[str, date] | None = None,
+    batch_size: int | None = None,
+    batch_sleep: float | None = None,
 ) -> bool:
-    """Batch download via yf.download. Each batch is one HTTP request to
-    Yahoo's chart API; invalid tickers come back as all-NaN columns (not
-    failures), so per-ticker success is detected by checking the Close column.
-    Whole-batch failures (rate-limit, network) are retried on next run.
-
-    ticker_map keys are canonical Stooq tickers; values are Yahoo Finance
-    symbols. yf.download uses the Yahoo symbols; data is stored under
-    canonical tickers so all DB tables share the same key.
-
-    When `last_dates` is provided, each batch uses the minimum last_date of
-    the group as the shared start date (incremental update). Batches containing
-    any ticker absent from `last_dates` fall back to `period='max'`."""
     from irp.core.cancel import is_cancelled
 
     todo = [t for t in ticker_map if t not in known_errors and t not in queried]
-    bsize = yahoo_cfg.prices_batch_size
-    _sleep = yahoo_cfg.batch_sleep
+    bsize = batch_size if batch_size is not None else yahoo_cfg.prices_batch_size
+    _bsleep = batch_sleep if batch_sleep is not None else yahoo_cfg.batch_sleep
     n_batches = (len(todo) + bsize - 1) // bsize
-    logger.info(
-        f'Yahoo prices (batched, size={bsize}): {len(todo)} tickers, {n_batches} batches'
-    )
+    logger.info(f'Yahoo prices (batch size={bsize}): {len(todo)} tickers, {n_batches} batches')
     for i in range(0, len(todo), bsize):
         if is_cancelled():
             break
         batch = todo[i : i + bsize]
         batch_yahoo = [ticker_map[t] for t in batch]
-        batch_starts = (
-            [last_dates.get(t) for t in batch] if last_dates is not None else []
-        )
+        batch_starts = [last_dates.get(t) for t in batch] if last_dates is not None else []
         non_null_starts: list[date] = [s for s in batch_starts if s is not None]
         if non_null_starts and len(non_null_starts) == len(batch_starts):
-            dl_kwargs: dict = {
-                'start': (min(non_null_starts) + timedelta(days=1)).isoformat()
-            }
+            dl_kwargs: dict = {'start': (min(non_null_starts) + timedelta(days=1)).isoformat()}
         else:
             dl_kwargs = {'period': 'max'}
-        batch_num = i // bsize + 1
-        logger.info(
-            f'Batch {batch_num}/{n_batches}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}'
-        )
+        logger.info(f'Batch {i // bsize + 1}/{n_batches}: {len(batch)} tickers, start={dl_kwargs.get("start", "max")}')
         try:
-            raw = yf.download(
-                batch_yahoo,
-                **dl_kwargs,
-                auto_adjust=True,
-                progress=False,
-                group_by='ticker',
-            )
+            raw = yf.download(batch_yahoo, **dl_kwargs, auto_adjust=True, progress=False, group_by='ticker')
         except Exception as e:
-            logger.warning(
-                f'batch [{i}:{i + len(batch)}] failed: {type(e).__name__}: {e}'
-            )
-            time.sleep(_sleep)
+            logger.warning(f'batch [{i}:{i + len(batch)}] failed: {type(e).__name__}: {e}')
+            time.sleep(_bsleep)
             continue
-        time.sleep(yahoo_cfg.batch_sleep)
+        time.sleep(_bsleep)
         if raw is None or raw.empty:
             new_errors.update(batch)
             _ERRORS.save(known_errors | new_errors)
@@ -240,19 +215,14 @@ def _fetch_prices_batched(
                 new_errors.add(ticker)
                 _ERRORS.save(known_errors | new_errors)
                 continue
-            rows_df = _prices_to_long(ticker, df)  # store under canonical ticker
+            rows_df = _prices_to_long(ticker, df)
             has_header = _append_csv(rows_df, _PRICES_FILE, has_header)
             queried.add(ticker)
             _QUERIED_PRICES.save(queried)
     return has_header
 
 
-def _extract_batch_slice(
-    raw: pd.DataFrame, ticker: str, single_ticker: bool
-) -> pd.DataFrame | None:
-    """Pull one ticker's OHLCV out of yf.download's result. With multiple
-    tickers + group_by='ticker', columns are MultiIndex ('ticker', field).
-    With a single ticker the result is flat-columned."""
+def _extract_batch_slice(raw: pd.DataFrame, ticker: str, single_ticker: bool) -> pd.DataFrame | None:
     try:
         df = raw if single_ticker else raw[ticker]
     except KeyError:
@@ -269,15 +239,17 @@ def _fetch_ticker_data(
     fetch_actions: bool = True,
     fetch_prices: bool = True,
     last_dates: dict[str, date] | None = None,
+    batch_size: int | None = None,
+    batch_sleep: float | None = None,
+    actions_sleep: float | None = None,
 ) -> None:
     """Pull dividends, splits, and/or OHLCV prices from yfinance.
 
     Actions go per-ticker. Prices use yf.download in batches (batch_size from config).
 
     `last_dates` maps Ticker -> last stored date in yahoo_prices. When set,
-    prices are fetched from last_date+1 day instead of full history. Tickers
-    absent from the map get full history. Batches use the minimum last_date of
-    the group as the shared start.
+    prices are fetched from last_date+1 day instead of full history. Batches
+    use the minimum last_date of the group as the shared start.
 
     Resume-safe: skips tickers already in queried_actions.json /
     queried_prices.json / error_tickers.json.
@@ -302,6 +274,7 @@ def _fetch_ticker_data(
             known_errors,
             new_errors,
             actions_has_header,
+            actions_sleep=actions_sleep,
         )
 
     if fetch_prices:
@@ -313,6 +286,8 @@ def _fetch_ticker_data(
             new_errors,
             prices_has_header,
             last_dates=last_dates,
+            batch_size=batch_size,
+            batch_sleep=batch_sleep,
         )
 
 
@@ -429,11 +404,17 @@ class YahooSource:
         self,
         fetch_actions: bool = True,
         fetch_prices: bool = True,
+        prices_batch_size: int | None = None,
+        batch_sleep: float | None = None,
+        actions_sleep: float | None = None,
     ) -> None:
         from irp.core.markers import MarkerSet
 
         self._fetch_actions = fetch_actions
         self._fetch_prices = fetch_prices
+        self._prices_batch_size = prices_batch_size
+        self._batch_sleep = batch_sleep
+        self._actions_sleep = actions_sleep
         self.markers = MarkerSet(raw_dir)
 
     def fetch_bulk(self) -> None:
@@ -461,6 +442,9 @@ class YahooSource:
         _fetch_ticker_data(
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
+            batch_size=self._prices_batch_size,
+            batch_sleep=self._batch_sleep,
+            actions_sleep=self._actions_sleep,
         )
         self.markers.touch('fetched')
         logger.debug('Yahoo ticker data fetched.')
@@ -484,6 +468,9 @@ class YahooSource:
             fetch_actions=self._fetch_actions,
             fetch_prices=self._fetch_prices,
             last_dates=last_dates,
+            batch_size=self._prices_batch_size,
+            batch_sleep=self._batch_sleep,
+            actions_sleep=self._actions_sleep,
         )
         self.markers.touch('fetched')
 

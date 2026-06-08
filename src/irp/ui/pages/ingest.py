@@ -7,8 +7,11 @@ from dash import Input, Output, State, callback, dcc, html
 from dash.exceptions import PreventUpdate
 
 from irp.core import cancel as _cancel
+from irp.core.config import config as _config
 from irp.core.logging import LEVEL_COLORS_HEX as _LEVEL_COLORS, LOG_DATEFMT, LOG_FMT
 from irp.ui import log_handler as lh
+
+_yahoo_cfg = _config.providers.yahoo
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,24 @@ layout = html.Div(className='ingest-page', children=[
                 value=['actions', 'prices'],
                 labelClassName='check-item',
             ),
+            html.Label('Yahoo batch & sleep', className='section-label', style={'marginTop': '8px'}),
+            html.Div(style={'display': 'flex', 'flexDirection': 'column', 'gap': '4px'}, children=[
+                html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '6px'}, children=[
+                    html.Span('Batch size', style={'fontSize': '12px', 'width': '90px'}),
+                    dcc.Input(id='yahoo-batch-size', type='number', value=_yahoo_cfg.prices_batch_size, min=1, step=1,
+                              style={'width': '60px', 'fontSize': '12px'}),
+                ]),
+                html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '6px'}, children=[
+                    html.Span('Price sleep (s)', style={'fontSize': '12px', 'width': '90px'}),
+                    dcc.Input(id='yahoo-batch-sleep', type='number', value=_yahoo_cfg.batch_sleep, min=0, step=0.1,
+                              style={'width': '60px', 'fontSize': '12px'}),
+                ]),
+                html.Div(style={'display': 'flex', 'alignItems': 'center', 'gap': '6px'}, children=[
+                    html.Span('Actions sleep (s)', style={'fontSize': '12px', 'width': '90px'}),
+                    dcc.Input(id='yahoo-actions-sleep', type='number', value=_yahoo_cfg.actions_sleep, min=0, step=0.1,
+                              style={'width': '60px', 'fontSize': '12px'}),
+                ]),
+            ]),
         ]),
 
         html.Label('Feed', className='section-label'),
@@ -124,6 +145,9 @@ def toggle_yahoo_options(providers: list[str]) -> dict:
     Input('run-btn', 'n_clicks'),
     State('providers', 'value'),
     State('yahoo-content', 'value'),
+    State('yahoo-batch-size', 'value'),
+    State('yahoo-batch-sleep', 'value'),
+    State('yahoo-actions-sleep', 'value'),
     State('feed', 'value'),
     State('steps', 'value'),
     State('maintenance-steps', 'value'),
@@ -134,6 +158,9 @@ def start_run(
     n_clicks: int,
     providers: list[str],
     yahoo_content: list[str],
+    yahoo_batch_size: int | None,
+    yahoo_batch_sleep: float | None,
+    yahoo_actions_sleep: float | None,
     feed: str,
     steps: list[str],
     maintenance_steps: list[str],
@@ -160,6 +187,9 @@ def start_run(
                 feed or 'bulk',
                 (steps or []) + (maintenance_steps or []),
                 bool(force),
+                yahoo_batch_size=yahoo_batch_size,
+                yahoo_batch_sleep=yahoo_batch_sleep,
+                yahoo_actions_sleep=yahoo_actions_sleep,
             )
         except Exception as exc:
             import traceback
@@ -224,6 +254,9 @@ def _run_pipeline(
     feed: str,
     steps: list[str],
     force: bool,
+    yahoo_batch_size: int | None = None,
+    yahoo_batch_sleep: float | None = None,
+    yahoo_actions_sleep: float | None = None,
 ) -> None:
     from irp.cli import delete_markers, make_source
 
@@ -237,7 +270,13 @@ def _run_pipeline(
     for name in providers:
         if cancelled():
             break
-        src = make_source(name, yahoo_content=yahoo_content)
+        src = make_source(
+            name,
+            yahoo_content=yahoo_content,
+            yahoo_batch_size=yahoo_batch_size,
+            yahoo_batch_sleep=yahoo_batch_sleep,
+            yahoo_actions_sleep=yahoo_actions_sleep,
+        )
         logger.info(f'-- {name} --')
         effective_feed = feed
         if feed not in src.SUPPORTED_FEEDS:
