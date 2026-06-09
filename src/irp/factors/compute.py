@@ -11,27 +11,52 @@ moved to `data_loaders.py`. Re-exports preserve the historic import surface
 Only this module + `cache.py` touch external state; the rest of the
 package is pure computation.
 """
+
 import datetime
 import logging
-from typing import Literal
+from typing import (
+    Literal,
+)
 
 import pandas as pd
 
-from irp.factors import cache as _cache
-from irp.factors._cols import REPORT_DATE
-from irp.factors._pit import _pit_ttm, pit_latest, pit_price
-from irp.factors.momentum import compute_momentum
+from irp.factors import (
+    cache as _cache,
+)
+from irp.factors._cols import (
+    REPORT_DATE,
+)
+from irp.factors._pit import (
+    _pit_ttm,
+    pit_latest,
+    pit_price,
+)
+from irp.factors.momentum import (
+    compute_momentum,
+)
 from irp.factors.orchestrate import (
     run_backtest,
     run_composite_backtest,
     run_factor_decay,
 )
-from irp.factors.profitability import compute_profitability
-from irp.factors.technical import compute_technical
-from irp.factors.valuation import compute_valuation
-from irp.panel import cross_section_panel
-from irp.query.simfin import fundamentals
-from irp.query.yahoo import prices as yahoo_prices
+from irp.factors.profitability import (
+    compute_profitability,
+)
+from irp.factors.technical import (
+    compute_technical,
+)
+from irp.factors.valuation import (
+    compute_valuation,
+)
+from irp.panel import (
+    cross_section_panel,
+)
+from irp.query.simfin import (
+    fundamentals,
+)
+from irp.query.yahoo import (
+    prices as yahoo_prices,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +83,26 @@ def cross_section(
     `data/factor_cache/<variant>/<date>.parquet`. Filtered results are not
     cached.
     """
+
     if tickers is None:
-        cached = _cache.load(as_of_date, variant)
+        cached = _cache.load(
+            as_of_date,
+            variant,
+        )
         if cached is not None:
             return cached
 
-    result = cross_section_panel(as_of_date, variant, tickers)
+    result = cross_section_panel(
+        as_of_date,
+        variant,
+        tickers,
+    )
     if tickers is None and not result.empty:
-        _cache.store(as_of_date, variant, result)
+        _cache.store(
+            as_of_date,
+            variant,
+            result,
+        )
     return result
 
 
@@ -80,32 +117,109 @@ def ticker_factor_history(
     per-ticker time series. Returns one row per Report Date with valuation,
     profitability, and momentum factors.
     """
-    raw_income   = fundamentals([ticker], 'income',   variant)
-    raw_balance  = fundamentals([ticker], 'balance',  variant)
-    raw_cashflow = fundamentals([ticker], 'cashflow', variant)
-    raw_prices   = yahoo_prices([ticker])
+    raw_income = fundamentals(
+        [ticker],
+        'income',
+        variant,
+    )
+    raw_balance = fundamentals(
+        [ticker],
+        'balance',
+        variant,
+    )
+    raw_cashflow = fundamentals(
+        [ticker],
+        'cashflow',
+        variant,
+    )
+    raw_prices = yahoo_prices([ticker])
 
-    if any(df.empty for df in [raw_income, raw_balance, raw_cashflow, raw_prices]):
+    if any(
+        df.empty
+        for df in [
+            raw_income,
+            raw_balance,
+            raw_cashflow,
+            raw_prices,
+        ]
+    ):
         return pd.DataFrame()
 
     report_dates = sorted(raw_income[REPORT_DATE].dropna().unique())
     rows = []
     for rd in report_dates:
         as_of = pd.Timestamp(rd).date()
-        inc = _pit_ttm(raw_income,   as_of) if variant == 'Q' else pit_latest(raw_income,   as_of)
-        bal = pit_latest(raw_balance,  as_of)
-        cf  = _pit_ttm(raw_cashflow, as_of) if variant == 'Q' else pit_latest(raw_cashflow, as_of)
-        px  = pit_price(raw_prices,    as_of)
+        inc = (
+            _pit_ttm(
+                raw_income,
+                as_of,
+            )
+            if variant == 'Q'
+            else pit_latest(
+                raw_income,
+                as_of,
+            )
+        )
+        bal = pit_latest(
+            raw_balance,
+            as_of,
+        )
+        cf = (
+            _pit_ttm(
+                raw_cashflow,
+                as_of,
+            )
+            if variant == 'Q'
+            else pit_latest(
+                raw_cashflow,
+                as_of,
+            )
+        )
+        px = pit_price(
+            raw_prices,
+            as_of,
+        )
         if inc.empty or bal.empty or cf.empty or px.empty:
             continue
-        row = compute_valuation(inc, bal, cf, px).join(
-            compute_profitability(inc, bal, cf), how='outer',
-        ).join(
-            compute_momentum(raw_prices, as_of), how='outer',
-        ).join(
-            compute_technical(raw_prices, as_of), how='outer',
-        ).reset_index()
+        row = (
+            compute_valuation(
+                inc,
+                bal,
+                cf,
+                px,
+            )
+            .join(
+                compute_profitability(
+                    inc,
+                    bal,
+                    cf,
+                ),
+                how='outer',
+            )
+            .join(
+                compute_momentum(
+                    raw_prices,
+                    as_of,
+                ),
+                how='outer',
+            )
+            .join(
+                compute_technical(
+                    raw_prices,
+                    as_of,
+                ),
+                how='outer',
+            )
+            .reset_index()
+        )
         row[REPORT_DATE] = pd.Timestamp(rd)
         rows.append(row)
 
-    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+    return (
+        pd.concat(
+            rows,
+            ignore_index=True,
+        )
+        if rows
+        else pd.DataFrame()
+    )
