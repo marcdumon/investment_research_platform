@@ -23,7 +23,7 @@ def _db_latest_price_date() -> datetime.date | None:
     """Most recent price Date in DuckDB (the panel's source of truth)."""
     from irp.query._common import db
     try:
-        row = db().execute('SELECT max(Date) FROM yahoo_prices').fetchone()
+        row = db().execute("SELECT max(Date) FROM prices WHERE Src = 'yahoo'").fetchone()
     except Exception:
         return None
     if not row or row[0] is None:

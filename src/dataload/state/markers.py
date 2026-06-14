@@ -6,19 +6,14 @@ Sources track their own progress on disk via dotfiles in `raw_dir`:
   .transformed_X   — feed X transformed
   .stored_X        — feed X stored
 
-This module consolidates the previously duplicated read/write/freshness
-patterns. Each provider creates a `MarkerSet` over its raw directory and
-calls `.touch(kind)` / `.is_fresh(kind, upstream)` instead of constructing
-paths inline.
-
-`is_fresh` is also re-exported from `irp.core.freshness` (kept there for
-backwards compatibility with any module that still imports from there).
+Each provider creates a `MarkerSet` over its raw directory and calls
+`.touch(kind)` / `.is_fresh(kind, upstream)` instead of constructing paths inline.
 """
 import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
-from irp.core.freshness import is_fresh as _is_fresh_func
+from dataload.state.freshness import is_fresh as _is_fresh_func
 
 
 @dataclass(frozen=True)

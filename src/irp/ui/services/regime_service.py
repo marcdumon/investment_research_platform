@@ -112,7 +112,7 @@ def _stooq_close(ticker: str) -> pd.Series:
         s = pd.Series(dtype=float)
     else:
         df = df.sort_values('Date').drop_duplicates('Date', keep='last')
-        s = pd.Series(df['C'].to_numpy(float), index=pd.to_datetime(df['Date']))
+        s = pd.Series(df['Close'].to_numpy(float), index=pd.to_datetime(df['Date']))
     _STOOQ_CACHE[ticker] = s
     return s
 

@@ -90,7 +90,7 @@ def refresh() -> int:
             con.register(view, pd.DataFrame({'Ticker': sorted(items), col: True}))
 
         ex = {t: _table_exists(con, t) for t in [
-            'prices', 'yahoo_prices', 'dividends', 'splits',
+            'prices', 'dividends', 'splits',
             'income', 'balance', 'cashflow', 'companies',
         ]}
         present = [t for t, ok in ex.items() if ok]
@@ -98,13 +98,15 @@ def refresh() -> int:
         logger.debug(f'catalog.refresh: tables present={present}, absent={absent}')
 
         stooq_body = (
-            'SELECT Ticker, MIN(Date) AS stooq_first, MAX(Date) AS stooq_last, COUNT(*) AS stooq_rows FROM prices GROUP BY Ticker'
+            "SELECT Ticker, MIN(Date) AS stooq_first, MAX(Date) AS stooq_last, COUNT(*) AS stooq_rows "
+            "FROM prices WHERE Src = 'stooq' GROUP BY Ticker"
             if ex['prices'] else
             _empty_cte('NULL::VARCHAR AS Ticker, NULL::DATE AS stooq_first, NULL::DATE AS stooq_last, 0::BIGINT AS stooq_rows')
         )
         yp_body = (
-            'SELECT Ticker, MIN(Date) AS yahoo_first, MAX(Date) AS yahoo_last, COUNT(*) AS yahoo_rows FROM yahoo_prices GROUP BY Ticker'
-            if ex['yahoo_prices'] else
+            "SELECT Ticker, MIN(Date) AS yahoo_first, MAX(Date) AS yahoo_last, COUNT(*) AS yahoo_rows "
+            "FROM prices WHERE Src = 'yahoo' GROUP BY Ticker"
+            if ex['prices'] else
             _empty_cte('NULL::VARCHAR AS Ticker, NULL::DATE AS yahoo_first, NULL::DATE AS yahoo_last, 0::BIGINT AS yahoo_rows')
         )
         div_body = (

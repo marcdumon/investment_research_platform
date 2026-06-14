@@ -258,57 +258,48 @@ def _run_pipeline(
     yahoo_batch_sleep: float | None = None,
     yahoo_actions_sleep: float | None = None,
 ) -> None:
-    from irp.cli import delete_markers, make_source
+    from dataload import make_provider, run
+    from dataload import universe as ul
+    from irp.core.ingest_context import build_ingest_context, reset_state, yahoo_datasets
 
     def cancelled() -> bool:
         return _cancel.is_cancelled()
 
+    ctx = build_ingest_context(yahoo_overrides={
+        'prices_batch_size': yahoo_batch_size,
+        'batch_sleep': yahoo_batch_sleep,
+        'actions_sleep': yahoo_actions_sleep,
+    })
+    incremental = feed == 'update'
+    do_ingest = bool({'fetch', 'transform', 'store'} & set(steps))
+    do_cleanup = 'cleanup' in steps
+
     if force:
         for name in providers:
-            delete_markers(name, feed)
+            reset_state(ctx, name)
 
     for name in providers:
         if cancelled():
             break
-        src = make_source(
-            name,
-            yahoo_content=yahoo_content,
-            yahoo_batch_size=yahoo_batch_size,
-            yahoo_batch_sleep=yahoo_batch_sleep,
-            yahoo_actions_sleep=yahoo_actions_sleep,
-        )
-        logger.info(f'-- {name} --')
-        effective_feed = feed
-        if feed not in src.SUPPORTED_FEEDS:
-            if 'bulk' in src.SUPPORTED_FEEDS:
-                logger.warning(f'feed {feed!r} not supported by {name}, falling back to bulk')
-                effective_feed = 'bulk'
-            else:
-                logger.warning(f'feed {feed!r} not supported by {name}, skipping')
-                continue
-        if 'fetch' in steps and not cancelled():
-            logger.info(f'fetch ({effective_feed})')
-            src.fetch_bulk() if effective_feed == 'bulk' else src.update()
-        if 'transform' in steps and not cancelled():
-            logger.info(f'transform ({effective_feed})')
-            src.transform(effective_feed)
-        if 'store' in steps and not cancelled():
-            logger.info(f'store ({effective_feed})')
-            src.store(effective_feed)
-        if 'cleanup' in steps and not cancelled():
-            logger.info('cleanup')
-            src.cleanup()
+        logger.info(f'-- {name} ({"incremental" if incremental else "full"}) --')
+        provider = make_provider(name)
+        datasets = yahoo_datasets(yahoo_content) if name == 'yahoo' else None
+        if do_ingest:
+            summary = run(ctx, [provider], datasets=datasets, incremental=incremental, cleanup=do_cleanup)
+            for dataset, n in summary.get(name, {}).items():
+                logger.info(f'{dataset}: {n:,} rows')
+        elif do_cleanup:
+            provider.cleanup(ctx)
+            logger.info('cleaned')
 
     if 'seed-universe' in steps and not cancelled():
-        from irp.query.universe import seed as _seed_universe
         logger.info('-- seed-universe --')
-        n = _seed_universe()
+        n = ul.seed(ctx)
         logger.info(f'{n:,} tickers written to universe.csv')
 
     if 'universe' in steps and not cancelled():
-        from irp.query.universe import refresh as _refresh_universe
         logger.info('-- universe --')
-        n = _refresh_universe()
+        n = ul.refresh(ctx)
         logger.info(f'{n:,} tickers')
 
     if 'catalog' in steps and not cancelled():

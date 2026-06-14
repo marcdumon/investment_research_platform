@@ -1,7 +1,9 @@
-"""Row accessors for Yahoo tables (`yahoo_prices`, `dividends`, `splits`)."""
+"""Row accessors for Yahoo data: `prices` (a `src='yahoo'` view of the unified
+`prices` table) plus the `dividends` and `splits` tables."""
 import pandas as pd
 
 from irp.query._common import build_where, db
+from irp.query.prices import prices as _prices
 
 
 def _select(table: str, tickers, start, end) -> pd.DataFrame:
@@ -19,7 +21,7 @@ def prices(
     end: str | None = None,
 ) -> pd.DataFrame:
     """Auto-adjusted OHLCV prices from Yahoo Finance. `start` / `end` as 'YYYY-MM-DD'."""
-    return _select('yahoo_prices', tickers, start, end)
+    return _prices(tickers, start=start, end=end, src='yahoo')
 
 
 def dividends(

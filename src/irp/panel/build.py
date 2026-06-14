@@ -107,7 +107,8 @@ def _build_prices_panel() -> Path:
     logger.info(f'materializing prices panel → {out}')
     arrow = conn.execute("""
         SELECT Ticker, Date, Close, Volume
-        FROM yahoo_prices
+        FROM prices
+        WHERE Src = 'yahoo'
         ORDER BY Ticker, Date
     """).arrow()
     df: pl.DataFrame = pl.from_arrow(arrow)  # type: ignore[assignment]
