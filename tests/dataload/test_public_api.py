@@ -7,6 +7,7 @@ def test_public_api_is_importable() -> None:
         Capability,
         IngestContext,
         TableSchema,
+        load_context,
         make_provider,
         run,
         universe,
@@ -14,6 +15,7 @@ def test_public_api_is_importable() -> None:
 
     assert callable(run)
     assert callable(make_provider)
+    assert callable(load_context)
     assert 'prices' in SCHEMAS
     assert isinstance(SCHEMAS['prices'], TableSchema)
     assert Capability(incremental=True).incremental is True

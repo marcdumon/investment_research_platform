@@ -13,6 +13,7 @@ Typical use::
     run(ctx, [make_provider('stooq'), make_provider('yahoo')], datasets=['prices'])
 """
 from dataload import universe
+from dataload.config import load_context
 from dataload.context import IngestContext
 from dataload.orchestrator import run
 from dataload.providers import PROVIDERS, Capability, Provider, make_provider
@@ -25,6 +26,7 @@ __all__ = [
     'IngestContext',
     'Provider',
     'TableSchema',
+    'load_context',
     'make_provider',
     'run',
     'universe',
