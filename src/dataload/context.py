@@ -8,6 +8,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import duckdb
 
@@ -16,7 +17,7 @@ def _never_cancelled() -> bool:
     return False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IngestContext:
     """Everything providers + the loader need, with zero global state.
 
@@ -29,11 +30,11 @@ class IngestContext:
             to never-cancelled. A host (e.g. a UI) injects its own.
     """
     data_root: Path
-    provider_cfg: dict[str, dict]
+    provider_cfg: dict[str, dict[str, Any]]
     connect: Callable[[], AbstractContextManager[duckdb.DuckDBPyConnection]]
     is_cancelled: Callable[[], bool] = _never_cancelled
 
-    def cfg(self, provider: str) -> dict:
+    def cfg(self, provider: str) -> dict[str, Any]:
         return self.provider_cfg[provider]
 
     def raw_dir(self, provider: str) -> Path:

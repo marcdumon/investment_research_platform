@@ -14,10 +14,12 @@ import time
 from collections.abc import Sequence
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pandas as pd
 
+from dataload._sql import copy_to_parquet, reader
 from dataload.context import IngestContext
 from dataload.providers.base import Capability
 from dataload.state import JsonSet
@@ -132,7 +134,7 @@ def _load_last_prices_dates(ctx: IngestContext) -> dict[str, date]:
 # --------------------------------------------------------------------------- #
 # acquire (network)
 # --------------------------------------------------------------------------- #
-def _fetch_actions(ctx, yf, raw: Path, ticker_map: dict[str, str], incremental: bool) -> None:
+def _fetch_actions(ctx: IngestContext, yf: Any, raw: Path, ticker_map: dict[str, str], incremental: bool) -> None:
     """Fetch dividends + splits per ticker.
 
     Actions have no incremental API, so an `incremental` run re-scans every
@@ -186,8 +188,8 @@ def _fetch_actions(ctx, yf, raw: Path, ticker_map: dict[str, str], incremental: 
         session.unlink(missing_ok=True)   # clean finish — next session re-scans
 
 
-def _fetch_prices(ctx, yf, raw: Path, ticker_map: dict[str, str], skip_queried: bool,
-                  last_dates: dict[str, date] | None) -> None:
+def _fetch_prices(ctx: IngestContext, yf: Any, raw: Path, ticker_map: dict[str, str],
+                  skip_queried: bool, last_dates: dict[str, date] | None) -> None:
     queried_set = JsonSet(raw / 'queried_prices.json')
     errors_set = JsonSet(raw / 'error_tickers.json')
     prices_file = raw / 'prices.csv'
@@ -236,32 +238,25 @@ def _fetch_prices(ctx, yf, raw: Path, ticker_map: dict[str, str], skip_queried: 
 # normalize (raw csv -> canonical parquet)
 # --------------------------------------------------------------------------- #
 def _normalize_prices(con: duckdb.DuckDBPyConnection, src: Path, out: Path) -> Path:
-    con.execute(f"""
-        COPY (
-            SELECT Ticker, CAST(Date AS DATE) AS Date,
-                   Open, High, Low, Close, CAST(Volume AS BIGINT) AS Volume,
-                   'yahoo' AS Src, Ticker AS SrcId
-            FROM read_csv_auto('{src}')
-        ) TO '{out}' (FORMAT PARQUET)
-    """)
-    return out
+    return copy_to_parquet(con, f"""
+        SELECT Ticker, CAST(Date AS DATE) AS Date,
+               Open, High, Low, Close, CAST(Volume AS BIGINT) AS Volume,
+               'yahoo' AS Src, Ticker AS SrcId
+        FROM {reader(src)}
+    """, out)
 
 
 def _normalize_actions(con: duckdb.DuckDBPyConnection, src: Path, div_out: Path, spl_out: Path) -> None:
-    con.execute(f"""
-        COPY (
-            SELECT Ticker, CAST(Date AS DATE) AS Date, Value AS Amount,
-                   'yahoo' AS Src, Ticker AS SrcId
-            FROM read_csv_auto('{src}') WHERE Type = 'dividend'
-        ) TO '{div_out}' (FORMAT PARQUET)
-    """)
-    con.execute(f"""
-        COPY (
-            SELECT Ticker, CAST(Date AS DATE) AS Date, Value AS Ratio,
-                   'yahoo' AS Src, Ticker AS SrcId
-            FROM read_csv_auto('{src}') WHERE Type = 'split'
-        ) TO '{spl_out}' (FORMAT PARQUET)
-    """)
+    copy_to_parquet(con, f"""
+        SELECT Ticker, CAST(Date AS DATE) AS Date, Value AS Amount,
+               'yahoo' AS Src, Ticker AS SrcId
+        FROM {reader(src)} WHERE Type = 'dividend'
+    """, div_out)
+    copy_to_parquet(con, f"""
+        SELECT Ticker, CAST(Date AS DATE) AS Date, Value AS Ratio,
+               'yahoo' AS Src, Ticker AS SrcId
+        FROM {reader(src)} WHERE Type = 'split'
+    """, spl_out)
 
 
 class YahooProvider:

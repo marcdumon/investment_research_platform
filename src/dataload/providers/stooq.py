@@ -18,6 +18,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from dataload._sql import copy_to_parquet, reader
 from dataload.context import IngestContext
 from dataload.providers.base import Capability
 from dataload.state import MarkerSet
@@ -102,26 +103,21 @@ def _build_price_dataset(raw_dir: Path) -> None:
         writer.writerows(market_rows)
 
 
-def _normalize_prices(con: duckdb.DuckDBPyConnection, src: Path, fmt: str, out: Path) -> Path:
+def _normalize_prices(con: duckdb.DuckDBPyConnection, src: Path, out: Path) -> Path:
     """Stooq raw OHLCV (`<TICKER>`, `<DATE>`, ...) -> canonical `prices` parquet."""
-    reader = f"read_parquet('{src}')" if fmt == 'parquet' else f"read_csv_auto('{src}')"
-    con.execute(f"""
-        COPY (
-            SELECT
-                split_part(upper(t."<TICKER>"), '.', 1)            AS Ticker,
-                STRPTIME(CAST(t."<DATE>" AS VARCHAR), '%Y%m%d')::DATE AS Date,
-                t."<OPEN>"                AS Open,
-                t."<HIGH>"                AS High,
-                t."<LOW>"                 AS Low,
-                t."<CLOSE>"               AS Close,
-                CAST(t."<VOL>" AS BIGINT) AS Volume,
-                'stooq'                   AS Src,
-                t."<TICKER>"              AS SrcId
-            FROM {reader} t
-        ) TO '{out}' (FORMAT PARQUET)
-    """)
-    logger.debug(f'Wrote {out}')
-    return out
+    return copy_to_parquet(con, f"""
+        SELECT
+            split_part(upper(t."<TICKER>"), '.', 1)              AS Ticker,
+            STRPTIME(CAST(t."<DATE>" AS VARCHAR), '%Y%m%d')::DATE AS Date,
+            t."<OPEN>"                AS Open,
+            t."<HIGH>"                AS High,
+            t."<LOW>"                 AS Low,
+            t."<CLOSE>"               AS Close,
+            CAST(t."<VOL>" AS BIGINT) AS Volume,
+            'stooq'                   AS Src,
+            t."<TICKER>"              AS SrcId
+        FROM {reader(src)} t
+    """, out)
 
 
 class StooqProvider:
@@ -141,16 +137,15 @@ class StooqProvider:
         if incremental:
             src = raw / cfg['update_file']
             _ensure_files_available([src], f'Stooq update file not available: {src}')
-            fmt = 'csv'
         else:
             self._acquire_bulk(raw, cfg)
-            src, fmt = raw / 'bulk_prices.parquet', 'parquet'
+            src = raw / 'bulk_prices.parquet'
 
         processed.mkdir(parents=True, exist_ok=True)
         out = processed / 'prices.parquet'
         con = duckdb.connect()
         try:
-            _normalize_prices(con, src, fmt, out)
+            _normalize_prices(con, src, out)
         finally:
             con.close()
         return {'prices': out}

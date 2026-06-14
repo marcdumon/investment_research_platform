@@ -5,15 +5,30 @@ from typing import Literal
 Mode = Literal['merge', 'replace']
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TableSchema:
-    """One target table's contract: columns, merge key, and load mode."""
+    """One target table's contract: columns, merge key, and load mode.
+
+    Merge-table invariants are enforced at construction, so the schema registry
+    cannot define a table whose column groups are inconsistent.
+    """
     name: str
     mode: Mode
     columns: dict[str, str] = field(default_factory=dict)
     key: list[str] = field(default_factory=list)
     values: list[str] = field(default_factory=list)
     extra: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.mode != 'merge':
+            return
+        groups = self.key + self.values + self.extra
+        if not self.key:
+            raise ValueError(f'{self.name}: a merge table needs a non-empty key')
+        if len(groups) != len(set(groups)):
+            raise ValueError(f'{self.name}: key/values/extra must be disjoint')
+        if set(groups) != set(self.columns):
+            raise ValueError(f'{self.name}: columns must equal key + values + extra')
 
 
 def _merge(name: str, columns: dict[str, str], key: list[str], values: list[str],

@@ -14,7 +14,7 @@ from typing import Protocol, runtime_checkable
 from dataload.context import IngestContext
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Capability:
     """What a provider can do for one dataset."""
     incremental: bool = False

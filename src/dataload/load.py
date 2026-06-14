@@ -9,11 +9,12 @@ from pathlib import Path
 
 import duckdb
 
+from dataload._sql import reader
 from dataload.schemas import SCHEMAS, TableSchema
 
 
 def _parquet_columns(con: duckdb.DuckDBPyConnection, parquet: Path) -> list[str]:
-    rows = con.execute('DESCRIBE SELECT * FROM read_parquet(?)', [str(parquet)]).fetchall()
+    rows = con.execute(f'DESCRIBE SELECT * FROM {reader(parquet)}').fetchall()
     return [r[0] for r in rows]
 
 
@@ -43,7 +44,6 @@ def _ensure_table(con: duckdb.DuckDBPyConnection, schema: TableSchema) -> None:
 
 
 def _merge_into(con: duckdb.DuckDBPyConnection, schema: TableSchema, parquet: Path) -> None:
-    reader = f"read_parquet('{parquet}')"
     insert_cols = schema.key + schema.values + schema.extra
     on_clause = ' AND '.join(f't.{c} = s.{c}' for c in schema.key)
     update_set = ', '.join(f'{c} = s.{c}' for c in schema.values)
@@ -52,7 +52,7 @@ def _merge_into(con: duckdb.DuckDBPyConnection, schema: TableSchema, parquet: Pa
     distinct_key = ', '.join(schema.key)
     con.execute(f"""
         MERGE INTO {schema.name} t
-        USING (SELECT DISTINCT ON ({distinct_key}) * FROM {reader}) s
+        USING (SELECT DISTINCT ON ({distinct_key}) * FROM {reader(parquet)}) s
         ON {on_clause}
         WHEN MATCHED THEN UPDATE SET {update_set}
         WHEN NOT MATCHED THEN INSERT ({insert_cols_sql}) VALUES ({insert_vals_sql})
@@ -61,7 +61,7 @@ def _merge_into(con: duckdb.DuckDBPyConnection, schema: TableSchema, parquet: Pa
 
 def _replace_with(con: duckdb.DuckDBPyConnection, schema: TableSchema, parquet: Path) -> None:
     con.execute(f'DROP TABLE IF EXISTS {schema.name}')
-    con.execute(f"CREATE TABLE {schema.name} AS SELECT * FROM read_parquet('{parquet}')")
+    con.execute(f'CREATE TABLE {schema.name} AS SELECT * FROM {reader(parquet)}')
 
 
 def load_dataset(con: duckdb.DuckDBPyConnection, dataset: str, parquet: Path) -> int:
