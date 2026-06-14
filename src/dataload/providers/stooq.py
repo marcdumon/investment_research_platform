@@ -26,10 +26,18 @@ from dataload.state import MarkerSet
 logger = logging.getLogger(__name__)
 
 
-def _ensure_files_available(paths: Sequence[Path], message: str) -> None:
+def _instruction(cfg: dict, key: str) -> str:
+    """Manual-download guidance from a config template (formatted), or '' if not configured."""
+    template = cfg.get(key)
+    return template.format(**cfg) if template else ''
+
+
+def _ensure_files_available(paths: Sequence[Path], message: str, instruction: str = '') -> None:
     if all(p.is_file() for p in paths):
         return
     logger.error(message)
+    if instruction:
+        logger.info(instruction)
     raise FileNotFoundError(message)
 
 
@@ -136,7 +144,8 @@ class StooqProvider:
 
         if incremental:
             src = raw / cfg['update_file']
-            _ensure_files_available([src], f'Stooq update file not available: {src}')
+            _ensure_files_available([src], f'Stooq update file not available: {src}',
+                                    _instruction(cfg, 'update_instruction_template'))
         else:
             self._acquire_bulk(raw, cfg)
             src = raw / 'bulk_prices.parquet'
@@ -157,7 +166,8 @@ class StooqProvider:
         if markers.is_fresh('fetched', *zips):
             logger.info('stooq acquire: already up to date, skipping')
             return
-        _ensure_files_available(zips, 'Stooq bulk zips not available in raw_dir.')
+        _ensure_files_available(zips, 'Stooq bulk zips not available in raw_dir.',
+                                _instruction(cfg, 'bulk_instruction_template'))
         _unzip_bulk_files(raw, cfg['bulk_files'])
         _build_price_dataset(raw)
         markers.touch('fetched')

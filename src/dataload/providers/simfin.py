@@ -217,7 +217,9 @@ class SimFinProvider:
         for spec in specs:
             dest = download_dir / spec.filename
             if not _needs_download(dest, spec.refresh_days):
+                logger.debug('Skipping %s (fresh)', spec.filename)
                 continue
+            logger.info('Downloading %s ...', spec.filename)
             try:
                 _download_file(spec.url, headers, dest)
             except Exception as e:  # noqa: BLE001

@@ -168,6 +168,7 @@ def _fetch_actions(ctx: IngestContext, yf: Any, raw: Path, ticker_map: dict[str,
         if ctx.is_cancelled():
             completed = False
             break
+        logger.debug(f'Actions: {ticker} (yahoo={ticker_map[ticker]})')
         try:
             actions = yf.Ticker(ticker_map[ticker]).actions
         except Exception as e:  # noqa: BLE001 — yfinance raises many error types
