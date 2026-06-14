@@ -22,6 +22,7 @@ from dataload._sql import copy_to_parquet, reader
 from dataload.context import IngestContext
 from dataload.providers.base import Capability
 from dataload.state import MarkerSet
+from dataload.universe import BANNED_MARKETS
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +112,19 @@ def _build_price_dataset(raw_dir: Path) -> None:
         writer.writerows(market_rows)
 
 
-def _normalize_prices(con: duckdb.DuckDBPyConnection, src: Path, out: Path) -> Path:
-    """Stooq raw OHLCV (`<TICKER>`, `<DATE>`, ...) -> canonical `prices` parquet."""
+def _normalize_prices(con: duckdb.DuckDBPyConnection, src: Path, out: Path, markets_csv: Path | None = None) -> Path:
+    """Stooq raw OHLCV (`<TICKER>`, `<DATE>`, ...) -> canonical `prices` parquet.
+
+    When `markets.csv` is available, drop tickers whose market is banned (e.g. crypto)
+    via a join on the lowercased symbol; unknown/unlisted markets are kept.
+    """
+    join = where = ''
+    if markets_csv is not None and markets_csv.is_file():
+        banned = ', '.join(f"'{m}'" for m in sorted(BANNED_MARKETS))
+        join = f'LEFT JOIN {reader(markets_csv)} m ON lower(t."<TICKER>") = m.ticker'
+        where = f'WHERE m.market IS NULL OR lower(m.market) NOT IN ({banned})'
+    elif markets_csv is not None:
+        logger.warning(f'markets.csv not found at {markets_csv}; skipping banned-market filter')
     return copy_to_parquet(con, f"""
         SELECT
             split_part(upper(t."<TICKER>"), '.', 1)              AS Ticker,
@@ -125,6 +137,8 @@ def _normalize_prices(con: duckdb.DuckDBPyConnection, src: Path, out: Path) -> P
             'stooq'                   AS Src,
             t."<TICKER>"              AS SrcId
         FROM {reader(src)} t
+        {join}
+        {where}
     """, out)
 
 
@@ -154,7 +168,7 @@ class StooqProvider:
         out = processed / 'prices.parquet'
         con = ctx.duck()
         try:
-            _normalize_prices(con, src, out)
+            _normalize_prices(con, src, out, raw / 'markets.csv')
         finally:
             con.close()
         return {'prices': out}
