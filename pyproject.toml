@@ -33,7 +33,7 @@ dependencies = [
 [project.scripts]
 irp = "irp.cli:main"
 irp-ui = "irp.ui.server:run_server"
-dataload = "dataload.__main__:main"
+dataload = "dataload.cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
