@@ -1,0 +1,31 @@
+# Standalone dataload config — mirrors the [database]/[data]/[providers.*] sections
+# of config.toml. Used only by `python -m dataload` / `uv run dataload`; the irp app
+# builds its own IngestContext and ignores this file.
+
+[database]
+path = "/mnt/Databases/investment_research_platform/data/irp.duckdb"
+
+[data]
+root_dir = "/mnt/Databases/investment_research_platform/data"
+
+[providers.stooq]
+raw_dir = "stooq/raw"
+processed_dir = "stooq/processed"
+bulk_url = "http://stooq.com/db/h/"
+bulk_files = ["d_us_txt.zip", "d_world_txt.zip"]
+update_url = "http://stooq.com/db/"
+update_file = "data_d.txt"
+
+[providers.yahoo]
+raw_dir = "yahoo/raw"
+processed_dir = "yahoo/processed"
+prices_batch_size = 75
+batch_sleep = 1.0
+actions_sleep = 0.5
+markets_exclude = ["cryptocurrencies", "money market", "bonds"]
+
+[providers.simfin]
+raw_dir = "simfin/raw"
+processed_dir = "simfin/processed"
+refresh_days_fundamentals = 1
+refresh_days_meta = 1
