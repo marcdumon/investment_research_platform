@@ -152,7 +152,7 @@ class StooqProvider:
 
         processed.mkdir(parents=True, exist_ok=True)
         out = processed / 'prices.parquet'
-        con = duckdb.connect()
+        con = ctx.duck()
         try:
             _normalize_prices(con, src, out)
         finally:

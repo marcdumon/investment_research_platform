@@ -1,5 +1,6 @@
 
 log_level = "DEBUG"   # root logger level: DEBUG, INFO, WARNING, ERROR
+threads = 4           # cap DuckDB threads during ingestion; remove / comment out for one per core
 
 [factors]
 cache_workers       = 10    # threads for parallel cache precompute (ThreadPoolExecutor)

@@ -75,6 +75,7 @@ class Config(BaseModel):
     providers: ProvidersConfig
     factors: FactorsConfig = Field(default_factory=FactorsConfig)
     log_level: str = 'INFO'
+    threads: int | None = None   # cap DuckDB threads during ingestion; None = one per core
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> 'Config':

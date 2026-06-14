@@ -2,6 +2,10 @@
 # of config.toml. Used only by `python -m dataload` / `uv run dataload`; the irp app
 # builds its own IngestContext and ignores this file.
 
+# Cap DuckDB worker threads on every connection (normalize + load/MERGE).
+# Omit / comment out to let DuckDB use one thread per core (the default).
+threads = 4
+
 [database]
 path = "/mnt/Databases/investment_research_platform/data/irp.duckdb"
 

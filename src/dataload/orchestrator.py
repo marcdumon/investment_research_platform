@@ -43,6 +43,7 @@ def run(
         loaded: dict[str, int] = {}
         if produced:
             with ctx.connect() as con:
+                ctx.configure(con)
                 for dataset, parquet in produced.items():
                     loaded[dataset] = load_dataset(con, dataset, parquet)
                     logger.info('%s: loaded %s rows into %s', provider.name, loaded[dataset], dataset)
