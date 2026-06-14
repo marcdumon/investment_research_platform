@@ -57,6 +57,7 @@ def build_ingest_context(yahoo_overrides: dict | None = None) -> IngestContext:
         provider_cfg=provider_cfg,
         connect=config_write_session,
         is_cancelled=cancel.is_cancelled,
+        threads=config.threads,
     )
 
 

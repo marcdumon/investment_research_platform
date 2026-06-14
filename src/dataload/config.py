@@ -56,4 +56,5 @@ def load_context(config_path: str | Path) -> IngestContext:
         data_root=Path(raw['data']['root_dir']),
         provider_cfg=providers,
         connect=connect,
+        threads=raw.get('threads'),
     )

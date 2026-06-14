@@ -231,7 +231,7 @@ class SimFinProvider:
         processed.mkdir(parents=True, exist_ok=True)
         tmp = processed / '_extract_tmp'
         tmp.mkdir(exist_ok=True)
-        conn = duckdb.connect()
+        conn = ctx.duck()
         try:
             _union_fundamentals(conn, download_dir, tmp, processed, _ASREPORTED_FUNDAMENTAL_VARIANTS, '')
             _union_fundamentals(conn, download_dir, tmp, processed, _RESTATED_FUNDAMENTAL_VARIANTS, '_restated')

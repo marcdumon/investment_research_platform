@@ -294,12 +294,12 @@ class YahooProvider:
                               for t, d in _load_last_prices_dates(ctx).items()}
             _fetch_prices(ctx, yf, raw, ticker_map, skip_queried=not incremental, last_dates=last_dates)
 
-        return self._normalize(raw, processed, want_prices, want_div, want_spl)
+        return self._normalize(ctx, raw, processed, want_prices, want_div, want_spl)
 
-    def _normalize(self, raw: Path, processed: Path, want_prices: bool,
+    def _normalize(self, ctx: IngestContext, raw: Path, processed: Path, want_prices: bool,
                    want_div: bool, want_spl: bool) -> dict[str, Path]:
         out: dict[str, Path] = {}
-        con = duckdb.connect()
+        con = ctx.duck()
         try:
             if want_prices and (raw / 'prices.csv').exists():
                 out['prices'] = _normalize_prices(con, raw / 'prices.csv', processed / 'prices.parquet')

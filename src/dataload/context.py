@@ -28,14 +28,28 @@ class IngestContext:
             manager, so the host controls transaction + locking policy.
         is_cancelled: cooperative-cancellation probe for long fetches; defaults
             to never-cancelled. A host (e.g. a UI) injects its own.
+        threads: cap DuckDB worker threads on every connection; None (default)
+            leaves DuckDB's own default (one per core).
     """
     data_root: Path
     provider_cfg: dict[str, dict[str, Any]]
     connect: Callable[[], AbstractContextManager[duckdb.DuckDBPyConnection]]
     is_cancelled: Callable[[], bool] = _never_cancelled
+    threads: int | None = None
 
     def cfg(self, provider: str) -> dict[str, Any]:
         return self.provider_cfg[provider]
+
+    def configure(self, con: duckdb.DuckDBPyConnection) -> None:
+        """Apply context-wide DuckDB settings (currently the optional thread cap)."""
+        if self.threads is not None:
+            con.execute(f'SET threads = {self.threads}')
+
+    def duck(self) -> duckdb.DuckDBPyConnection:
+        """A fresh in-memory DuckDB connection with context settings applied."""
+        con = duckdb.connect()
+        self.configure(con)
+        return con
 
     def raw_dir(self, provider: str) -> Path:
         return self.data_root / self.provider_cfg[provider]['raw_dir']
