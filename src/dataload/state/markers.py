@@ -16,7 +16,7 @@ from pathlib import Path
 from dataload.state.freshness import is_fresh as _is_fresh_func
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MarkerSet:
     """Read/write markers under one directory; freshness checks vs upstream paths."""
     root: Path

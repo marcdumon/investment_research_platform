@@ -43,7 +43,7 @@ def test_normalize_produces_canonical_columns_and_values(tmp_path) -> None:
                         tmp_path / 'b.parquet')
     out = tmp_path / 'out.parquet'
     con = duckdb.connect()
-    _normalize_prices(con, src, 'parquet', out)
+    _normalize_prices(con, src, out)
     df = pd.read_parquet(out)
     assert set(df.columns) == CANONICAL
     row = df.iloc[0]
@@ -59,7 +59,7 @@ def test_normalize_output_loads_into_unified_prices(tmp_path) -> None:
                         tmp_path / 'b.parquet')
     out = tmp_path / 'out.parquet'
     nc = duckdb.connect()
-    _normalize_prices(nc, src, 'parquet', out)
+    _normalize_prices(nc, src, out)
     nc.close()
     con = duckdb.connect(str(tmp_path / 'db.duckdb'))
     assert load_dataset(con, 'prices', out) == 1

@@ -16,6 +16,7 @@ from pathlib import Path
 import duckdb
 import requests
 
+from dataload._sql import copy_to_parquet
 from dataload.context import IngestContext
 from dataload.providers.base import Capability
 
@@ -110,54 +111,57 @@ def _extract(zip_path: Path, dest_dir: Path) -> Path:
         return dest_dir / name
 
 
-def _union_fundamentals(conn, download_dir: Path, tmp: Path, processed: Path,
-                        variants: list[tuple[str, str]], suffix: str) -> None:
-    for statement in _STATEMENTS:
-        parts: list[str] = []
-        for variant_suffix, period in variants:
-            for market in _MARKETS:
-                zp = _zip(download_dir, market, statement, variant_suffix)
-                if not zp.exists():
-                    logger.warning('Missing %s, skipping', zp.name)
-                    continue
-                csv = _extract(zp, tmp)
-                parts.append(f"SELECT *, '{market}' AS Market, '{period}' AS Period "
-                             f"FROM read_csv('{csv}', delim=';', union_by_name=true, null_padding=true)")
-        if not parts:
-            logger.warning('No data for %s%s, skipping', statement, suffix)
-            continue
-        out = processed / f'{statement}{suffix}.parquet'
-        conn.execute(f"""
-            COPY (SELECT Ticker, SimFinId AS SrcId, 'simfin' AS Src, * EXCLUDE (Ticker, SimFinId)
-                  FROM ({' UNION ALL BY NAME '.join(parts)})) TO '{out}' (FORMAT PARQUET)
-        """)
-        logger.info('Wrote %s', out)
+def _zip_select(csv: Path, market: str, period: str) -> str:
+    """A semicolon-delimited SimFin CSV read, tagged with its Market + Period."""
+    return (f"SELECT *, '{market}' AS Market, '{period}' AS Period "
+            f"FROM read_csv('{csv}', delim=';', union_by_name=true, null_padding=true)")
 
 
-def _union_derived(conn, download_dir: Path, tmp: Path, processed: Path,
-                   variants: list[tuple[str, str]], suffix: str) -> None:
-    parts: list[str] = []
-    for variant_suffix, period in variants:
-        for market in _MARKETS:
-            zp = _zip(download_dir, market, 'derived', variant_suffix)
-            if not zp.exists():
-                logger.warning('Missing %s, skipping', zp.name)
-                continue
-            csv = _extract(zp, tmp)
-            parts.append(f"SELECT *, '{market}' AS Market, '{period}' AS Period "
-                         f"FROM read_csv('{csv}', delim=';', union_by_name=true, null_padding=true)")
-    if not parts:
-        logger.warning('No derived%s data, skipping', suffix)
-        return
-    out = processed / f'derived{suffix}.parquet'
-    conn.execute(f"""
-        COPY (SELECT Ticker, SimFinId AS SrcId, 'simfin' AS Src, * EXCLUDE (Ticker, SimFinId)
-              FROM ({' UNION ALL BY NAME '.join(parts)})) TO '{out}' (FORMAT PARQUET)
-    """)
+def _union_to_parquet(conn: duckdb.DuckDBPyConnection, parts: list[str], out: Path) -> None:
+    """Union the per-market/period selects, rename SimFinId -> SrcId, write Parquet."""
+    copy_to_parquet(
+        conn,
+        f"SELECT Ticker, SimFinId AS SrcId, 'simfin' AS Src, * EXCLUDE (Ticker, SimFinId) "
+        f"FROM ({' UNION ALL BY NAME '.join(parts)})",
+        out,
+    )
     logger.info('Wrote %s', out)
 
 
-def _union_companies(conn, download_dir: Path, tmp: Path, processed: Path) -> None:
+def _collect_parts(download_dir: Path, tmp: Path, dataset: str,
+                   variants: list[tuple[str, str]]) -> list[str]:
+    """Extract every present (variant x market) zip for `dataset` into read selects."""
+    parts: list[str] = []
+    for variant_suffix, period in variants:
+        for market in _MARKETS:
+            zp = _zip(download_dir, market, dataset, variant_suffix)
+            if not zp.exists():
+                logger.warning('Missing %s, skipping', zp.name)
+                continue
+            parts.append(_zip_select(_extract(zp, tmp), market, period))
+    return parts
+
+
+def _union_fundamentals(conn: duckdb.DuckDBPyConnection, download_dir: Path, tmp: Path,
+                        processed: Path, variants: list[tuple[str, str]], suffix: str) -> None:
+    for statement in _STATEMENTS:
+        parts = _collect_parts(download_dir, tmp, statement, variants)
+        if not parts:
+            logger.warning('No data for %s%s, skipping', statement, suffix)
+            continue
+        _union_to_parquet(conn, parts, processed / f'{statement}{suffix}.parquet')
+
+
+def _union_derived(conn: duckdb.DuckDBPyConnection, download_dir: Path, tmp: Path,
+                   processed: Path, variants: list[tuple[str, str]], suffix: str) -> None:
+    parts = _collect_parts(download_dir, tmp, 'derived', variants)
+    if not parts:
+        logger.warning('No derived%s data, skipping', suffix)
+        return
+    _union_to_parquet(conn, parts, processed / f'derived{suffix}.parquet')
+
+
+def _union_companies(conn: duckdb.DuckDBPyConnection, download_dir: Path, tmp: Path, processed: Path) -> None:
     industries_zip = _zip(download_dir, None, 'industries')
     if not industries_zip.exists():
         logger.warning('Missing industries.zip, skipping companies')
@@ -173,16 +177,13 @@ def _union_companies(conn, download_dir: Path, tmp: Path, processed: Path) -> No
         parts.append(f"SELECT * FROM read_csv('{csv}', delim=';', union_by_name=true, null_padding=true, parallel=false)")
     if not parts:
         return
-    out = processed / 'companies.parquet'
-    conn.execute(f"""
-        COPY (
-            SELECT c.Ticker, c."Company Name", i.Industry, i.Sector, c."Business Summary",
-                   c."End of financial year (month)", c."Number Employees", c.CIK, c.ISIN,
-                   c."Main Currency", c.IndustryId, c.Market, c.SimFinId AS SrcId
-            FROM ({' UNION ALL BY NAME '.join(parts)}) c
-            LEFT JOIN read_csv('{industries_csv}', delim=';') i ON c.IndustryId = i.IndustryId
-        ) TO '{out}' (FORMAT PARQUET)
-    """)
+    out = copy_to_parquet(conn, f"""
+        SELECT c.Ticker, c."Company Name", i.Industry, i.Sector, c."Business Summary",
+               c."End of financial year (month)", c."Number Employees", c.CIK, c.ISIN,
+               c."Main Currency", c.IndustryId, c.Market, c.SimFinId AS SrcId
+        FROM ({' UNION ALL BY NAME '.join(parts)}) c
+        LEFT JOIN read_csv('{industries_csv}', delim=';') i ON c.IndustryId = i.IndustryId
+    """, processed / 'companies.parquet')
     logger.info('Wrote %s', out)
 
 
