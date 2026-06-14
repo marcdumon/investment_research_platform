@@ -15,6 +15,9 @@ import pandas as pd
 
 from dataload.context import IngestContext
 
+# Markets banned outright — never seeded, never normalized into prices, never stored.
+BANNED_MARKETS = {'cryptocurrencies'}
+
 # Lowest-tier markets: real but never preferred when a ticker collides with equity.
 _LOW_TIER_MARKETS = {'cryptocurrencies', 'currencies', 'money market', 'bonds', 'commodities'}
 
@@ -48,6 +51,7 @@ def seed_from_markets(markets_csv: Path, out_csv: Path) -> int:
     Returns the number of canonical tickers written.
     """
     raw = pd.read_csv(markets_csv, dtype=str).fillna('')
+    raw = raw[~raw['market'].str.lower().isin(BANNED_MARKETS)]
     raw['stooq_ticker'] = raw['ticker'].str.upper()
     raw['Ticker'] = raw['stooq_ticker'].str.split('.').str[0]
     raw['_rank'] = raw['market'].map(_market_rank)

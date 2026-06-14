@@ -25,6 +25,17 @@ def test_dedup_prefers_stock_over_crypto_regardless_of_order(tmp_path) -> None:
     assert row['yahoo_ticker'] == 'T'
 
 
+def test_crypto_market_excluded_entirely(tmp_path) -> None:
+    """Crypto-only tickers are banned outright, not just deduped — absent from universe."""
+    mc = _markets_csv([['btc.v', 'cryptocurrencies'], ['aapl.us', 'nasdaq stocks']], tmp_path / 'markets.csv')
+    out = tmp_path / 'universe.csv'
+    n = seed_from_markets(mc, out)
+    df = pd.read_csv(out)
+    assert n == 1
+    assert 'BTC' not in set(df['Ticker'])
+    assert (df['Market'].str.lower() != 'cryptocurrencies').all()
+
+
 def test_dedup_unknown_market_beats_crypto(tmp_path) -> None:
     """Crypto/fx/bonds sit in the lowest tier, below even unrecognised markets."""
     mc = _markets_csv([['x.v', 'cryptocurrencies'], ['x.zz', 'some exotic market']], tmp_path / 'markets.csv')

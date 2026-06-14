@@ -54,6 +54,36 @@ def test_normalize_produces_canonical_columns_and_values(tmp_path) -> None:
     assert pd.Timestamp(row['Date']).date() == datetime.date(2023, 1, 1)
 
 
+def test_normalize_drops_banned_market_keeps_equity(tmp_path) -> None:
+    """THE prices-level T bug: T.V (crypto) and T.US collide on Ticker='T'. With markets.csv,
+    the crypto row is filtered out so only the equity survives."""
+    src = _bulk_parquet([
+        ['T.US', 'D', 20231229, 0, 16.6, 16.8, 16.6, 16.78, 33285405, 0],
+        ['T.V', 'D', 20231229, 0, 0.026, 0.027, 0.025, 0.026, 22209099, 0],
+    ], tmp_path / 'b.parquet')
+    markets = tmp_path / 'markets.csv'
+    pd.DataFrame([['t.us', 'nyse stocks'], ['t.v', 'cryptocurrencies']],
+                 columns=['ticker', 'market']).to_csv(markets, index=False)
+    out = tmp_path / 'out.parquet'
+    con = duckdb.connect()
+    _normalize_prices(con, src, out, markets)
+    df = pd.read_parquet(out)
+    assert set(df['SrcId']) == {'T.US'}
+    assert df.iloc[0]['Ticker'] == 'T'
+
+
+def test_normalize_without_markets_keeps_all(tmp_path) -> None:
+    """No markets.csv -> no market filter (the purge migration is the backstop)."""
+    src = _bulk_parquet([
+        ['T.US', 'D', 20231229, 0, 16.6, 16.8, 16.6, 16.78, 33285405, 0],
+        ['T.V', 'D', 20231229, 0, 0.026, 0.027, 0.025, 0.026, 22209099, 0],
+    ], tmp_path / 'b.parquet')
+    out = tmp_path / 'out.parquet'
+    con = duckdb.connect()
+    _normalize_prices(con, src, out, tmp_path / 'missing.csv')
+    assert set(pd.read_parquet(out)['SrcId']) == {'T.US', 'T.V'}
+
+
 def test_normalize_output_loads_into_unified_prices(tmp_path) -> None:
     src = _bulk_parquet([['AAPL.US', 'D', 20230101, 0, 150.0, 155.0, 148.0, 152.0, 1_000_000, 0]],
                         tmp_path / 'b.parquet')
