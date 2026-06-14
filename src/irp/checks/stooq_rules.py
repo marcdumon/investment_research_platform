@@ -40,11 +40,11 @@ def _ohlc_inconsistent(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.execute("""
         SELECT
             Ticker,
-            CAST(SUBSTR(CAST(Date AS VARCHAR), 1, 4) AS INTEGER) AS Year,
+            YEAR(Date) AS Year,
             COUNT(*) AS count,
-            LIST(Date ORDER BY Date)[1:5] AS sample_dates
+            LIST(CAST(strftime(Date, '%Y%m%d') AS INTEGER) ORDER BY Date)[1:5] AS sample_dates
         FROM prices
-        WHERE H < L OR C > H OR C < L
+        WHERE Src = 'stooq' AND (High < Low OR Close > High OR Close < Low)
         GROUP BY Ticker, Year
         ORDER BY count DESC
     """).df()
@@ -59,12 +59,13 @@ def _negative_price_non_bond(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.execute("""
         SELECT
             p.Ticker,
-            CAST(SUBSTR(CAST(p.Date AS VARCHAR), 1, 4) AS INTEGER) AS Year,
+            YEAR(p.Date) AS Year,
             COUNT(*) AS count,
-            LIST(p.Date ORDER BY p.Date)[1:5] AS sample_dates
+            LIST(CAST(strftime(p.Date, '%Y%m%d') AS INTEGER) ORDER BY p.Date)[1:5] AS sample_dates
         FROM prices p
         JOIN universe m ON p.Ticker = m.Ticker
-        WHERE (p.O < 0 OR p.H < 0 OR p.L < 0 OR p.C < 0)
+        WHERE p.Src = 'stooq'
+          AND (p.Open < 0 OR p.High < 0 OR p.Low < 0 OR p.Close < 0)
           AND m.Market NOT IN ('bonds', 'money market')
         GROUP BY p.Ticker, Year
         ORDER BY count DESC
@@ -80,15 +81,15 @@ def _zero_volume_trading_day(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.execute("""
         SELECT
             p.Ticker,
-            CAST(SUBSTR(CAST(p.Date AS VARCHAR), 1, 4) AS INTEGER) AS Year,
+            YEAR(p.Date) AS Year,
             COUNT(*) AS count,
-            LIST(p.Date ORDER BY p.Date)[1:5] AS sample_dates
+            LIST(CAST(strftime(p.Date, '%Y%m%d') AS INTEGER) ORDER BY p.Date)[1:5] AS sample_dates
         FROM prices p
         JOIN universe m ON p.Ticker = m.Ticker
-        WHERE p.V = 0
+        WHERE p.Src = 'stooq'
+          AND p.Volume = 0
           AND (m.Market LIKE '%stocks%' OR m.Market LIKE '%etfs%')
-          AND dayname(strptime(CAST(p.Date AS VARCHAR), '%Y%m%d'))
-              NOT IN ('Saturday', 'Sunday')
+          AND dayname(p.Date) NOT IN ('Saturday', 'Sunday')
         GROUP BY p.Ticker, Year
         ORDER BY count DESC
     """).df()
